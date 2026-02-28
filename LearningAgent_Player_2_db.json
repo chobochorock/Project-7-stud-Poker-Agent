@@ -1,0 +1,44 @@
+{
+    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"DA\", \"DJ\"], \"my_public_cards\": [\"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"S9\"]}}, \"pot\": 3}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 2, \"my_chips\": 996, \"my_hidden_cards\": [\"DA\", \"DJ\"], \"my_public_cards\": [\"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 994, \"is_folded\": false, \"public_cards\": [\"S9\"]}}, \"pot\": 10}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"H4\", \"DK\"], \"my_public_cards\": [\"SK\", \"D9\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"HQ\", \"H5\"]}}, \"pot\": 3}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 996, \"my_hidden_cards\": [\"H4\", \"DK\"], \"my_public_cards\": [\"SK\", \"D9\", \"S8\"], \"opponents\": {\"Player_1\": {\"chips\": 995, \"is_folded\": false, \"public_cards\": [\"HQ\", \"H5\", \"H3\"]}}, \"pot\": 9}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 10, \"my_chips\": 990, \"my_hidden_cards\": [\"H4\", \"DK\"], \"my_public_cards\": [\"SK\", \"D9\", \"S8\"], \"opponents\": {\"Player_1\": {\"chips\": 980, \"is_folded\": false, \"public_cards\": [\"HQ\", \"H5\", \"H3\"]}}, \"pot\": 30}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"D3\", \"C5\"], \"my_public_cards\": [\"DA\", \"HQ\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"H8\", \"S8\"]}, \"Player_3\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"C3\", \"D4\"]}, \"Player_4\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"DT\", \"S5\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"H9\", \"CJ\"]}}, \"pot\": 6}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    }
+}

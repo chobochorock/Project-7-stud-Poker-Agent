@@ -1,9 +1,0 @@
-{
-    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"SK\", \"C7\"], \"my_public_cards\": [\"C3\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"H8\", \"S8\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"DA\", \"HQ\"]}, \"Player_4\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"DT\", \"S5\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"H9\", \"CJ\"]}}, \"pot\": 6}": {
-        "FOLD": 0,
-        "CALL": 0,
-        "HALF": 0,
-        "QUARTER": 0,
-        "BBING": 0
-    }
-}

@@ -1,0 +1,183 @@
+{
+    "{\"call_amount\": 0, \"my_chips\": 999, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 5}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"C7\", \"D9\"], \"my_public_cards\": [\"H5\", \"HK\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_3\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 6}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 999, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 6}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 4, \"my_chips\": 999, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 995, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": false, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 10}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 7, \"my_chips\": 999, \"my_hidden_cards\": [\"DJ\", \"S8\"], \"my_public_cards\": [\"SA\", \"H3\"], \"opponents\": {\"Player_1\": {\"chips\": 998, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 995, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 992, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}}, \"pot\": 17}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 6, \"my_chips\": 998, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 995, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 992, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 17}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 14, \"my_chips\": 995, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 981, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 992, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 34}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 12, \"my_chips\": 992, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 981, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 980, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 49}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 2, \"my_chips\": 981, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 980, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 979, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 62}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 2, \"my_chips\": 980, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 978, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 979, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 65}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 17, \"my_chips\": 979, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 978, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 962, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 83}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 41, \"my_chips\": 978, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 962, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 937, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 125}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 108, \"my_chips\": 962, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 854, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 937, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 249}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 172, \"my_chips\": 937, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 854, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 765, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 446}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 90, \"my_chips\": 854, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 765, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 764, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 619}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "HALF": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 355, \"my_chips\": 765, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 410, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 764, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 1063}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "QUARTER": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 708, \"my_chips\": 764, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 410, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 56, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 1772}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 354, \"my_chips\": 410, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 56, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 56, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2480}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 56, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 56, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2835}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 2, \"my_chips\": 56, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": false, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 54, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2837}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 2, \"my_chips\": 55, \"my_hidden_cards\": [\"HQ\", \"S5\"], \"my_public_cards\": [\"DQ\", \"DT\"], \"opponents\": {\"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 54, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\"]}, \"Player_4\": {\"chips\": 53, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2840}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 54, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 53, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2840}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 0, \"my_chips\": 53, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\", \"CA\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 53, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\", \"S4\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2841}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 0, \"my_chips\": 53, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\", \"S4\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 53, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\", \"CA\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2841}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 0, \"my_chips\": 53, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 53, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2841}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 53, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 52, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2842}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 52, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 51, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2844}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 51, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 50, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2846}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 50, \"my_hidden_cards\": [\"DA\", \"HJ\"], \"my_public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_4\": {\"chips\": 49, \"is_folded\": false, \"public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2848}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    },
+    "{\"call_amount\": 1, \"my_chips\": 49, \"my_hidden_cards\": [\"D6\", \"D8\"], \"my_public_cards\": [\"D2\", \"D4\", \"S4\", \"CQ\"], \"opponents\": {\"Player_1\": {\"chips\": 55, \"is_folded\": true, \"public_cards\": [\"DQ\", \"DT\"]}, \"Player_2\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"H5\", \"HK\"]}, \"Player_3\": {\"chips\": 48, \"is_folded\": false, \"public_cards\": [\"D7\", \"H9\", \"CA\", \"C6\"]}, \"Player_5\": {\"chips\": 999, \"is_folded\": true, \"public_cards\": [\"SA\", \"H3\"]}}, \"pot\": 2850}": {
+        "FOLD": 0,
+        "CALL": 0,
+        "BBING": 0
+    }
+}

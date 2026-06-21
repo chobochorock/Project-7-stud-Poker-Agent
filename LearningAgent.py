@@ -1,80 +1,185 @@
+import gzip
 import json
 import os
 import random
-from agent import PokerAgent  # 구조에 따라 알맞게 임포트 유지
+import time
+import uuid
+from typing import Any, Sequence
+
+from agent import PokerAgent
+
+
+DB_VERSION = 2
+
+
+def _fresh_database() -> dict[str, Any]:
+    return {
+        "version": DB_VERSION,
+        "metadata": {
+            "format": "shared anonymous 7-stud trajectory database",
+            "compression": "Use a .json.gz filename to store the same readable JSON through gzip.",
+            "identity_policy": "No player names, human labels, or opponent agent types are stored.",
+        },
+        "q_values": {},
+        "episodes": [],
+    }
+
+
+class SharedTrajectoryDatabase:
+    """Readable JSON store with optional gzip compression."""
+
+    def __init__(self, filename: str):
+        self.filename = filename
+
+    def load(self) -> dict[str, Any]:
+        if not os.path.exists(self.filename):
+            return _fresh_database()
+
+        try:
+            with self._open("rt") as db_file:
+                raw = json.load(db_file)
+        except (OSError, json.JSONDecodeError) as exc:
+            database = _fresh_database()
+            database["metadata"]["load_error"] = str(exc)
+            return database
+
+        if isinstance(raw, dict) and raw.get("version") == DB_VERSION:
+            raw.setdefault("metadata", {})
+            raw.setdefault("q_values", {})
+            raw.setdefault("episodes", [])
+            return raw
+
+        database = _fresh_database()
+        database["metadata"]["legacy_entries_ignored"] = len(raw) if isinstance(raw, dict) else 0
+        database["metadata"]["legacy_reason"] = (
+            "Legacy state keys included player names, so they are not reused under the anonymity policy."
+        )
+        return database
+
+    def save(self, database: dict[str, Any]) -> None:
+        with self._open("wt") as db_file:
+            json.dump(database, db_file, ensure_ascii=False, indent=2, sort_keys=True)
+
+    def _open(self, mode: str):
+        if self.filename.endswith(".gz"):
+            return gzip.open(self.filename, mode, encoding="utf-8")
+        return open(self.filename, mode, encoding="utf-8")
+
 
 class LearningAgent(PokerAgent):
-    # --- [핵심] 클래스 변수로 선언하여 모든 LearningAgent가 하나를 공유합니다 ---
-    shared_memory = None
+    """Tabular Monte Carlo agent backed by a shared anonymous trajectory DB."""
+
     db_filename = "LearningAgent_Shared_db.json"
+    _shared_databases: dict[str, dict[str, Any]] = {}
+    _stores: dict[str, SharedTrajectoryDatabase] = {}
 
-    def __init__(self, name):
+    def __init__(
+        self,
+        name: str,
+        db_filename: str | None = None,
+        exploration_rate: float = 0.30,
+    ):
         super().__init__(name)
-        
-        # 최초의 LearningAgent가 생성될 때 딱 한 번만 DB를 읽어옵니다.
-        if LearningAgent.shared_memory is None:
-            LearningAgent.shared_memory = self._load_db()
-        
-        # 내 개인 메모리 변수가 중앙 공유 메모리를 바라보게 연결합니다.
-        self.memory = LearningAgent.shared_memory
+        self.db_filename = db_filename or type(self).db_filename
+        self.exploration_rate = exploration_rate
+        self.trajectory: list[dict[str, Any]] = []
 
-    def _load_db(self):
-        """단일 공유 DB 파일을 불러옵니다."""
-        if os.path.exists(self.db_filename):
-            with open(self.db_filename, 'r', encoding='utf-8') as f:
-                print(f"[시스템] 중앙 공유 학습 데이터베이스를 성공적으로 불러왔습니다.")
-                return json.load(f)
-        else:
-            print(f"[시스템] 새로운 중앙 공유 학습 데이터베이스를 생성합니다.")
-            return {}
+        if self.db_filename not in type(self)._stores:
+            type(self)._stores[self.db_filename] = SharedTrajectoryDatabase(self.db_filename)
+        if self.db_filename not in type(self)._shared_databases:
+            type(self)._shared_databases[self.db_filename] = type(self)._stores[self.db_filename].load()
 
-    def _save_db(self):
-        """공유 메모리 상태를 단일 파일에 저장합니다."""
-        with open(self.db_filename, 'w', encoding='utf-8') as f:
-            json.dump(LearningAgent.shared_memory, f, ensure_ascii=False, indent=4)
+        self.memory = type(self)._shared_databases[self.db_filename]
+        self.store = type(self)._stores[self.db_filename]
 
-    def _state_to_key(self, state):
-        return json.dumps(state, sort_keys=True)
-
-    def choose_action(self, state, valid_actions):
+    def choose_action(self, state: dict[str, Any], valid_actions: Sequence[str]) -> str | None:
         if not valid_actions:
             return None
-            
+
+        state = self._sanitize_state(state)
         state_key = self._state_to_key(state)
-        
-        # 공유 메모리에 처음 보는 상태라면 0점으로 초기화
-        if state_key not in self.memory:
-            self.memory[state_key] = {action: 0 for action in valid_actions}
-            self._save_db()
+        q_entry = self._ensure_q_entry(state_key, valid_actions)
 
-        exploration_rate = 0.3 
-        
-        if random.random() < exploration_rate:
-            chosen_action = random.choice(valid_actions)
-            print(f"[{self.name}] [탐험] 새로운 시도: '{chosen_action}'")
+        if random.random() < self.exploration_rate:
+            chosen_action = random.choice(list(valid_actions))
+            policy = "explore"
         else:
-            action_scores = self.memory[state_key]
-            valid_scores = {a: action_scores.get(a, 0) for a in valid_actions}
-            
-            max_score = max(valid_scores.values())
-            best_actions = [a for a, score in valid_scores.items() if score == max_score]
+            valid_values = {action: q_entry[action]["value"] for action in valid_actions}
+            best_value = max(valid_values.values())
+            best_actions = [action for action, value in valid_values.items() if value == best_value]
             chosen_action = random.choice(best_actions)
-            
-            print(f"[{self.name}] [활용] 과거 경험(최고점: {max_score}) 기반: '{chosen_action}'")
+            policy = "exploit"
 
+        self.trajectory.append(
+            {
+                "step": len(self.trajectory),
+                "state_key": state_key,
+                "state": state,
+                "valid_actions": list(valid_actions),
+                "action": chosen_action,
+                "policy": policy,
+            }
+        )
+
+        print(f"[{self.name}] {policy} action: {chosen_action}")
         return chosen_action
 
-    def update_memory(self, state, action, reward):
-        """
-        행동에 대한 결과(보상)를 중앙 공유 DB에 업데이트합니다.
-        """
-        state_key = self._state_to_key(state)
-        
-        if state_key not in self.memory:
-            self.memory[state_key] = {}
-        if action not in self.memory[state_key]:
-            self.memory[state_key][action] = 0
-            
-        self.memory[state_key][action] += reward
-        self._save_db()
-        print(f"[{self.name}] 경험치 공유 완료: {action} 액션으로 {reward} 보상 획득")
+    def observe_reward(self, reward: int, final_state: dict[str, Any] | None = None) -> None:
+        if not self.trajectory:
+            return
+
+        sanitized_final_state = self._sanitize_state(final_state or {})
+        for step in self.trajectory:
+            action = step["action"]
+            q_entry = self._ensure_q_entry(step["state_key"], step["valid_actions"])
+            action_value = q_entry[action]
+            action_value["visits"] += 1
+            action_value["value"] += (reward - action_value["value"]) / action_value["visits"]
+
+        self.memory["episodes"].append(
+            {
+                "episode_id": uuid.uuid4().hex,
+                "created_at": int(time.time()),
+                "agent_class": type(self).__name__,
+                "reward": reward,
+                "final_state": sanitized_final_state,
+                "trajectory": self.trajectory,
+            }
+        )
+        self.store.save(self.memory)
+        self.trajectory = []
+
+    def learn_from_database(self, database: dict[str, Any] | None = None) -> dict[str, Any]:
+        database = database or self.memory
+        q_values = database.get("q_values", {})
+        episodes = database.get("episodes", [])
+        return {
+            "agent": type(self).__name__,
+            "trained": True,
+            "method": "tabular Monte Carlo value update",
+            "states": len(q_values),
+            "episodes": len(episodes),
+            "note": "Replace this method with function approximation when the table becomes too sparse.",
+        }
+
+    def _ensure_q_entry(self, state_key: str, valid_actions: Sequence[str]) -> dict[str, Any]:
+        q_values = self.memory.setdefault("q_values", {})
+        q_entry = q_values.setdefault(state_key, {})
+        for action in valid_actions:
+            q_entry.setdefault(action, {"value": 0.0, "visits": 0})
+        return q_entry
+
+    def _state_to_key(self, state: dict[str, Any]) -> str:
+        return json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    def _sanitize_state(self, value: Any) -> Any:
+        identity_keys = {"name", "player_name", "agent_name", "human_name", "opponent_name"}
+        if isinstance(value, dict):
+            return {
+                key: self._sanitize_state(child)
+                for key, child in value.items()
+                if key not in identity_keys
+            }
+        if isinstance(value, list):
+            return [self._sanitize_state(child) for child in value]
+        return value

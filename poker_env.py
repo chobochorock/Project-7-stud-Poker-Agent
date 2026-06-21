@@ -1,92 +1,146 @@
-import sys
-import random
-import pprint
 import argparse
 import itertools
+import math
+import pprint
+import random
+import sys
 from collections import Counter
+from dataclasses import dataclass
+from typing import Any, Sequence
 
-# 에이전트 파일 임포트 (파일 구조에 맞게 유지)
-from agent import PokerAgent
-from LearningAgent import LearningAgent 
+from agent import BasePokerAgent, PokerAgent
+from LearningAgent import LearningAgent
 
-# --- HumanAgent 클래스 (터미널에서 직접 플레이) ---
-class HumanAgent:
-    def __init__(self, name):
-        self.name = name
 
-    def choose_action(self, state, valid_actions):
-        print(f"\n[{self.name}님의 턴]")
-        print(f"내 칩: {state['my_chips']} | 콜 필요 금액: {state['call_amount']}")
-        print(f"내 패: {state['my_hidden_cards']} | 공개 패: {state['my_public_cards']}")
-        print(f"가능한 액션: {valid_actions}")
-        
+RANK_VALUES = {"T": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
+BETTING_ACTIONS = ("CHECK", "BBING", "QUARTER", "HALF", "FULL", "CALL", "FOLD")
+
+
+class HumanAgent(BasePokerAgent):
+    def choose_action(self, state: dict[str, Any], valid_actions: Sequence[str]) -> str | None:
+        print(f"\n[{self.name}]")
+        print(f"chips={state['my_chips']} pot={state['pot']} call={state['call_amount']}")
+        print(f"hidden={state['my_hidden_cards']} public={state['my_public_cards']}")
+        print(f"valid actions={list(valid_actions)}")
+
         while True:
-            action = input("액션을 입력하세요: ").strip().upper()
+            action = input("action: ").strip().upper()
             if action in valid_actions:
                 return action
-            print("잘못된 입력입니다. 가능한 액션 중에서 정확히 입력해 주세요.")
+            print("Please choose one of the valid actions.")
 
-    def choose_discard_and_reveal(self, hidden_cards):
-        """사람 플레이어는 임시로 0번을 버리고 1번을 공개합니다."""
-        return 0, 1
+    def choose_discard_and_reveal(self, hidden_cards: Sequence[Any]) -> tuple[int, int]:
+        print(f"\n[{self.name}] hidden cards:")
+        for index, card in enumerate(hidden_cards):
+            print(f"  {index}: {card}")
 
-# --- 카드 및 덱 ---
+        while True:
+            try:
+                discard_idx = int(input("discard index: "))
+                reveal_idx = int(input("reveal index: "))
+            except ValueError:
+                print("Please enter numeric indices.")
+                continue
+            if discard_idx != reveal_idx and 0 <= discard_idx < len(hidden_cards) and 0 <= reveal_idx < len(hidden_cards):
+                return discard_idx, reveal_idx
+            print("Discard and reveal must be different valid indices.")
+
+    def learn_from_database(self, database: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"agent": type(self).__name__, "trained": False, "reason": "Human agents do not train."}
+
+
+@dataclass(frozen=True)
 class Card:
-    def __init__(self, suit, rank):
-        self.suit = suit # 'S', 'H', 'D', 'C'
-        self.rank = rank # '2'~'9', 'T', 'J', 'Q', 'K', 'A'
-        
-        # 족보 비교를 위한 숫자 값 (2 ~ 14)
-        rank_values = {'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
-        self.value = rank_values.get(rank) or int(rank)
+    suit: str
+    rank: str
 
-    def __repr__(self):
-        return f"{self.suit}{self.rank}"
+    def __post_init__(self) -> None:
+        normalized_suit = self.suit.lower()
+        normalized_rank = "T" if self.rank == "10" else self.rank.upper()
+        if normalized_suit not in {"s", "h", "d", "c"}:
+            raise ValueError(f"Unknown suit: {self.suit}")
+        object.__setattr__(self, "suit", normalized_suit)
+        object.__setattr__(self, "rank", normalized_rank)
+
+    @property
+    def value(self) -> int:
+        if self.rank in RANK_VALUES:
+            return RANK_VALUES[self.rank]
+        return int(self.rank)
+
+    def __repr__(self) -> str:
+        display_rank = "10" if self.rank == "T" else self.rank
+        return f"{self.suit}{display_rank}"
+
 
 class Deck:
     def __init__(self):
-        suits = ['S', 'H', 'D', 'C']
-        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A']
-        self.cards = [Card(s, r) for s in suits for r in ranks]
+        suits = ["s", "h", "d", "c"]
+        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
+        self.cards = [Card(suit, rank) for suit in suits for rank in ranks]
         random.shuffle(self.cards)
-    def draw(self):
+
+    def draw(self) -> Card | None:
         return self.cards.pop() if self.cards else None
 
-# --- 플레이어 구조 ---
+
 class Player:
-    def __init__(self, name):
+    def __init__(self, name: str, chips: int = 1000):
         self.name = name
-        self.chips = 1000
+        self.chips = chips
+        self.hand_start_chips = chips
+        self.hidden_cards: list[Card] = []
+        self.public_cards: list[Card] = []
+        self.is_folded = False
+        self.is_all_in = False
+        self.is_eliminated = chips <= 0
+        self.invested = 0
+        self.current_bet = 0
+        self.hand_score: tuple[int, ...] = (-1,)
+
+    def reset_for_hand(self) -> None:
+        self.hand_start_chips = self.chips
         self.hidden_cards = []
         self.public_cards = []
         self.is_folded = False
-        self.is_all_in = False
-        self.invested = 0 # 이번 팟에 넣은 총 칩 (사이드 팟 계산용)
-        self.current_bet = 0 # 이번 베팅 라운드에 넣은 칩
-        self.hand_score: tuple[int] = (-1,) # 최종 족보 점수
+        self.is_all_in = self.chips <= 0
+        self.is_eliminated = self.chips <= 0
+        self.invested = 0
+        self.current_bet = 0
+        self.hand_score = (-1,)
 
-    def receive_card(self, card, is_public=False):
+    def receive_card(self, card: Card | None, is_public: bool = False) -> None:
+        if card is None:
+            return
         if is_public:
             self.public_cards.append(card)
         else:
             self.hidden_cards.append(card)
 
-    def discard_and_reveal(self, discard_idx, reveal_idx):
+    def discard_and_reveal(self, discard_idx: int, reveal_idx: int) -> bool:
         if len(self.hidden_cards) != 4:
             return False
-        indices = sorted([discard_idx, reveal_idx], reverse=True)
+        if discard_idx == reveal_idx:
+            return False
+        if not (0 <= discard_idx < 4 and 0 <= reveal_idx < 4):
+            return False
+
         revealed_card = self.hidden_cards[reveal_idx]
-        for idx in indices:
-            self.hidden_cards.pop(idx)
+        self.hidden_cards = [
+            card for index, card in enumerate(self.hidden_cards)
+            if index not in {discard_idx, reveal_idx}
+        ]
         self.public_cards.append(revealed_card)
         return True
 
-    def get_all_cards(self):
+    def get_all_cards(self) -> list[Card]:
         return self.hidden_cards + self.public_cards
 
-# --- 족보 판별 모듈 (7장 중 5장 최고 조합 찾기) ---
-def get_best_hand(cards):
-    """주어진 카드 중 5장을 뽑아 가장 높은 족보의 점수 튜플을 반환합니다."""
+    def can_act(self) -> bool:
+        return not self.is_folded and not self.is_all_in and not self.is_eliminated and self.chips > 0
+
+
+def get_best_hand(cards: Sequence[Card]) -> tuple[int, ...]:
     if len(cards) < 5:
         return (0,)
 
@@ -97,354 +151,514 @@ def get_best_hand(cards):
             best_score = score
     return best_score
 
-def evaluate_5_cards(cards):
-    values = sorted([c.value for c in cards], reverse=True)
-    suits = [c.suit for c in cards]
-    
-    is_flush = len(set(suits)) == 1
-    
-    is_straight = False
-    if len(set(values)) == 5 and values[0] - values[-1] == 4:
-        is_straight = True
-    elif values == [14, 5, 4, 3, 2]: # 백스트레이트 예외 처리
-        is_straight = True
-        # values = [5, 4, 3, 2, 1] # in 7stud poker, back is stronger than other straight except for mountain.
 
+def get_public_betting_priority(cards: Sequence[Card]) -> tuple[int, ...]:
+    """Rank only the currently visible cards for betting order.
+
+    With fewer than five public cards, only confirmed made groups can count:
+    four of a kind, trips, two pair, one pair, then high cards. Straight and
+    flush ranks require five cards, so they are only used if five or more
+    public cards are ever visible in a future rule variant.
+    """
+    if not cards:
+        return (-1,)
+    if len(cards) >= 5:
+        return get_best_hand(cards)
+
+    values = sorted([card.value for card in cards], reverse=True)
     counts = Counter(values)
-    freq = sorted([(count, val) for val, count in counts.items()], reverse=True)
-    
-    if is_straight and is_flush: return (8, values[0])
-    if freq[0][0] == 4: return (7, freq[0][1], freq[1][1])
-    if freq[0][0] == 3 and freq[1][0] == 2: return (6, freq[0][1], freq[1][1])
-    if is_flush: return (5, *values)
-    if is_straight: return (4, values[0])
-    if freq[0][0] == 3: return (3, freq[0][1], freq[1][1], freq[2][1])
-    if freq[0][0] == 2 and freq[1][0] == 2: return (2, freq[0][1], freq[1][1], freq[2][1])
-    if freq[0][0] == 2: return (1, freq[0][1], freq[1][1], freq[2][1], freq[3][1])
-    
+    groups = sorted(((count, value) for value, count in counts.items()), reverse=True)
+
+    if groups[0][0] == 4:
+        return (7, groups[0][1])
+    if groups[0][0] == 3:
+        kickers = sorted((value for value in values if value != groups[0][1]), reverse=True)
+        return (3, groups[0][1], *kickers)
+    if groups[0][0] == 2 and len(groups) > 1 and groups[1][0] == 2:
+        high_pair, low_pair = sorted([groups[0][1], groups[1][1]], reverse=True)
+        kickers = sorted((value for value in values if value not in {high_pair, low_pair}), reverse=True)
+        return (2, high_pair, low_pair, *kickers)
+    if groups[0][0] == 2:
+        pair_value = groups[0][1]
+        kickers = sorted((value for value in values if value != pair_value), reverse=True)
+        return (1, pair_value, *kickers)
     return (0, *values)
 
-# --- 포커 게임 핵심 로직 ---
+
+def evaluate_5_cards(cards: Sequence[Card]) -> tuple[int, ...]:
+    values = sorted([card.value for card in cards], reverse=True)
+    suits = [card.suit for card in cards]
+    counts = Counter(values)
+    freq = sorted(((count, value) for value, count in counts.items()), reverse=True)
+
+    is_flush = len(set(suits)) == 1
+    straight_rank = _straight_rank(values)
+
+    if straight_rank is not None and is_flush:
+        return (8, straight_rank)
+    if freq[0][0] == 4:
+        return (7, freq[0][1], freq[1][1])
+    if freq[0][0] == 3 and freq[1][0] == 2:
+        return (6, freq[0][1], freq[1][1])
+    if is_flush:
+        return (5, *values)
+    if straight_rank is not None:
+        return (4, straight_rank)
+    if freq[0][0] == 3:
+        kickers = sorted((value for value in values if value != freq[0][1]), reverse=True)
+        return (3, freq[0][1], *kickers)
+    if freq[0][0] == 2 and freq[1][0] == 2:
+        high_pair, low_pair = sorted([freq[0][1], freq[1][1]], reverse=True)
+        kicker = max(value for value in values if value not in {high_pair, low_pair})
+        return (2, high_pair, low_pair, kicker)
+    if freq[0][0] == 2:
+        pair_value = freq[0][1]
+        kickers = sorted((value for value in values if value != pair_value), reverse=True)
+        return (1, pair_value, *kickers)
+    return (0, *values)
+
+
+def _straight_rank(values: Sequence[int]) -> int | None:
+    unique_values = sorted(set(values), reverse=True)
+    if len(unique_values) != 5:
+        return None
+    if unique_values == [14, 13, 12, 11, 10]:
+        return 15
+    if unique_values == [14, 5, 4, 3, 2]:
+        return 14
+    if unique_values[0] - unique_values[-1] == 4:
+        return unique_values[0]
+    return None
+
+
 class PokerGame:
-    players : list[Player]
+    players: list[Player]
 
-    def __init__(self, player_names, log_file="state_log.txt"):
-        self.players = [Player(name) for name in player_names][:5]
+    def __init__(
+        self,
+        player_names: Sequence[str],
+        log_file: str | None = "state_log.txt",
+        starting_chips: int = 1000,
+        ante: int = 1,
+    ):
+        if len(player_names) < 2:
+            raise ValueError("A hand needs at least two players.")
+
+        self.players = [Player(name, starting_chips) for name in list(player_names)[:5]]
         self.deck = Deck()
-        self.ante = 1
+        self.ante = ante
         self.current_highest_bet = 0
-        self.pot = 0 # 화면 표시용 총 팟 크기 추적
-
+        self.pot = 0
+        self.street = "setup"
+        self.betting_history: list[dict[str, Any]] = []
         self.log_file = log_file
-        with open(self.log_file, 'w', encoding='utf-8') as f:
-            f.write(f"=== 포커 게임 로그 시작 ({len(self.players)}인 플레이) ===\n")
 
-    def log_global_state(self, event_message=""):
-        global_state = {
-            "pot": self.pot,
-            "current_highest_bet": self.current_highest_bet,
-            "players": {}
-        }
-        for p in self.players:
-            global_state["players"][p.name] = {
-                "chips": p.chips,
-                "invested": p.invested,
-                "hidden_cards": [str(c) for c in p.hidden_cards],
-                "public_cards": [str(c) for c in p.public_cards],
-                "is_folded": p.is_folded
-            }
-        
-        with open(self.log_file, 'a', encoding='utf-8') as f:
-            f.write(f"\n--- [상태 업데이트] {event_message} ---\n")
-            pprint.pprint(global_state, stream=f)
+        if self.log_file:
+            with open(self.log_file, "w", encoding="utf-8") as log:
+                log.write(f"=== 7-stud poker log ({len(self.players)} players) ===\n")
 
-    def start_game(self):
-        print(f"=== {len(self.players)}인 게임을 시작합니다 ===")
-        # 1. 앤티 징수 및 투자금(invested) 기록
-        for player in self.players:
-            player.chips -= self.ante
-            player.invested += self.ante
-            self.pot += self.ante
-        
-        # 2. 4장씩 딜링
-        for _ in range(4):
-            for player in self.players:
-                player.receive_card(self.deck.draw())
-                
-        self.log_global_state("초기 4장 딜링 완료")
-
-    def get_valid_actions(self, player):
-        if player.is_folded or player.is_all_in: return []
-        actions = ["FOLD", "CALL"]
-        call_amount = self.current_highest_bet - player.current_bet
-        if player.chips >= call_amount + (self.pot * 0.5): actions.append("HALF")
-        if player.chips >= call_amount + (self.pot * 0.25): actions.append("QUARTER")
-        if player.chips >= call_amount + self.ante: actions.append("BBING")
-        return actions
-
-    def get_ai_state(self, player):
-        state = {
-            "pot": self.pot,
-            "my_chips": player.chips,
-            "my_hidden_cards": [str(c) for c in player.hidden_cards],
-            "my_public_cards": [str(c) for c in player.public_cards],
-            "call_amount": self.current_highest_bet - player.current_bet,
-            "opponents": {}
-        }
-        for p in self.players:
-            if p != player:
-                state["opponents"][p.name] = {
-                    "public_cards": [str(c) for c in p.public_cards],
-                    "is_folded": p.is_folded,
-                    "chips": p.chips
-                }
-        return state
-    
-    def apply_action(self, player, action):
-        """
-        플레이어의 액션을 해석하여 칩을 차감하고 팟에 더합니다.
-        판돈이 올라갔는지(Raise) 여부를 True/False로 반환합니다.
-        """
-        if action == "FOLD":
-            player.is_folded = True
-            print(f"  -> {player.name}님이 FOLD 했습니다.")
-            return False
-
-        # 콜을 하기 위해 내야 하는 기본 금액
-        call_amount = self.current_highest_bet - player.current_bet
-        raise_amount = 0
-
-        # 베팅 종류에 따른 추가 금액 계산 (한국식 룰: 콜 금액을 더한 가상 팟을 기준으로 계산)
-        if action == "HALF":
-            raise_amount = int((self.pot + call_amount) * 0.5)
-        elif action == "QUARTER":
-            raise_amount = int((self.pot + call_amount) * 0.25)
-        elif action == "BBING":
-            raise_amount = self.ante
-
-        total_bet = call_amount + raise_amount
-
-        # 보유 칩이 부족하면 올인(All-in) 처리
-        if player.chips <= total_bet:
-            total_bet = player.chips
-            player.is_all_in = True
-            print(f"  -> {player.name}님이 올인(ALL-IN)! ({total_bet} 칩)")
-        else:
-            print(f"  -> {player.name}님이 {action}! ({total_bet} 칩 베팅)")
-
-        # 칩 이동: 내 칩 감소 -> 투자금 및 현재 베팅금 증가 -> 중앙 팟 증가
-        player.chips -= total_bet
-        player.invested += total_bet
-        player.current_bet += total_bet
-        self.pot += total_bet
-
-        # 누군가 최고액을 갱신했다면(레이즈가 발생했다면) True 반환
-        if player.current_bet > self.current_highest_bet:
-            self.current_highest_bet = player.current_bet
-            return True 
-        
-        return False
-
-    def play_betting_round(self, active_agents):
-        """
-        모든 플레이어가 콜을 맞추거나 폴드할 때까지 턴을 반복하는 루프입니다.
-        """
-        print(f"\n=== 베팅 라운드 시작 (현재 팟: {self.pot}) ===")
-        
-        # 라운드 시작 시 이번 라운드 누적 베팅액 초기화
-        for p in self.players:
-            p.current_bet = 0
-        self.current_highest_bet = 0
-
-        # 폴드하거나 올인하지 않은, 행동 가능한 플레이어들만 추림
-        acting_players = [p for p in self.players if not p.is_folded and not p.is_all_in]
-        
-        if len(acting_players) <= 1:
-            print("  -> 행동 가능한 플레이어가 1명 이하이므로 베팅을 생략합니다.")
+    def log_global_state(self, event_message: str = "") -> None:
+        if not self.log_file:
             return
 
-        # 행동해야 할 사람 수 (누군가 레이즈하면 다시 인원수만큼 늘어남)
-        players_to_act = len(acting_players)
-        current_idx = 0
+        global_state = {
+            "street": self.street,
+            "pot": self.pot,
+            "current_highest_bet": self.current_highest_bet,
+            "betting_history": self.betting_history,
+            "players": {
+                player.name: {
+                    "chips": player.chips,
+                    "invested": player.invested,
+                    "current_bet": player.current_bet,
+                    "hidden_cards": [str(card) for card in player.hidden_cards],
+                    "public_cards": [str(card) for card in player.public_cards],
+                    "is_folded": player.is_folded,
+                    "is_all_in": player.is_all_in,
+                    "is_eliminated": player.is_eliminated,
+                }
+                for player in self.players
+            },
+        }
+        with open(self.log_file, "a", encoding="utf-8") as log:
+            log.write(f"\n--- {event_message} ---\n")
+            pprint.pprint(global_state, stream=log, sort_dicts=True)
 
-        while players_to_act > 0:
-            player = acting_players[current_idx]
-            
-            # 1명 빼고 전부 폴드했는지 체크 (즉시 라운드 종료)
-            survivors = sum(1 for p in self.players if not p.is_folded)
-            if survivors <= 1:
+    def start_game(self) -> None:
+        self.deck = Deck()
+        self.pot = 0
+        self.current_highest_bet = 0
+        self.street = "ante"
+        self.betting_history = []
+
+        for player in self.players:
+            player.reset_for_hand()
+
+        live_players = [player for player in self.players if not player.is_eliminated]
+        if len(live_players) < 2:
+            raise ValueError("At least two players with chips are needed.")
+
+        for player in live_players:
+            self._commit_chips(player, min(self.ante, player.chips), count_for_round=False)
+
+        for _ in range(4):
+            for player in live_players:
+                player.receive_card(self.deck.draw(), is_public=False)
+
+        self.log_global_state("initial ante and four hidden cards")
+
+    def get_valid_actions(self, player: Player) -> list[str]:
+        if not player.can_act():
+            return []
+
+        call_amount = max(0, self.current_highest_bet - player.current_bet)
+        valid = ["FOLD"]
+
+        if call_amount == 0:
+            valid.append("CHECK")
+        else:
+            valid.append("CALL")
+
+        if player.chips > call_amount:
+            valid.append("BBING")
+            if self.pot > 0:
+                valid.extend(["QUARTER", "HALF", "FULL"])
+
+        return [action for action in BETTING_ACTIONS if action in valid]
+
+    def get_ai_state(self, player: Player, valid_actions: Sequence[str] | None = None) -> dict[str, Any]:
+        viewer_index = self.players.index(player)
+        call_amount = max(0, self.current_highest_bet - player.current_bet)
+        opponents = []
+
+        for offset in range(1, len(self.players)):
+            opponent = self.players[(viewer_index + offset) % len(self.players)]
+            opponents.append(
+                {
+                    "seat": f"opponent_{offset}",
+                    "chips": opponent.chips,
+                    "invested": opponent.invested,
+                    "round_bet": opponent.current_bet,
+                    "public_cards": [str(card) for card in opponent.public_cards],
+                    "is_folded": opponent.is_folded,
+                    "is_all_in": opponent.is_all_in,
+                    "is_eliminated": opponent.is_eliminated,
+                }
+            )
+
+        state = {
+            "street": self.street,
+            "seat_count": len(self.players),
+            "ante": self.ante,
+            "pot": self.pot,
+            "current_highest_bet": self.current_highest_bet,
+            "my_chips": player.chips,
+            "my_invested": player.invested,
+            "my_round_bet": player.current_bet,
+            "my_hidden_cards": [str(card) for card in player.hidden_cards],
+            "my_public_cards": [str(card) for card in player.public_cards],
+            "call_amount": call_amount,
+            "opponents": opponents,
+            "betting_history": self._history_from_view(viewer_index),
+        }
+        if valid_actions is not None:
+            state["valid_actions"] = list(valid_actions)
+        return state
+
+    def apply_action(self, player: Player, action: str) -> bool:
+        action = action.upper()
+        valid_actions = self.get_valid_actions(player)
+        if action not in valid_actions:
+            raise ValueError(f"{action} is not valid for {player.name}. Valid actions: {valid_actions}")
+
+        call_amount = max(0, self.current_highest_bet - player.current_bet)
+        old_highest = self.current_highest_bet
+        raise_amount = 0
+
+        if action == "FOLD":
+            player.is_folded = True
+            self._record_bet(player, action, 0, call_amount, 0)
+            print(f"  -> {player.name} folds.")
+            return False
+        if action == "CHECK":
+            self._record_bet(player, action, 0, call_amount, 0)
+            print(f"  -> {player.name} checks.")
+            return False
+        if action == "CALL":
+            total_bet = call_amount
+        else:
+            raise_amount = self._raise_amount(action, call_amount)
+            total_bet = call_amount + raise_amount
+
+        paid = self._commit_chips(player, total_bet, count_for_round=True)
+        if player.current_bet > self.current_highest_bet:
+            self.current_highest_bet = player.current_bet
+
+        self._record_bet(player, action, paid, call_amount, raise_amount)
+        if player.is_all_in:
+            print(f"  -> {player.name} {action}, all-in for {paid}.")
+        else:
+            print(f"  -> {player.name} {action}, pays {paid}.")
+        return self.current_highest_bet > old_highest
+
+    def play_betting_round(self, active_agents: dict[str, BasePokerAgent]) -> None:
+        print(f"\n=== betting round: {self.street}, pot {self.pot} ===")
+        for player in self.players:
+            player.current_bet = 0
+        self.current_highest_bet = 0
+
+        pending = {player for player in self.players if player.can_act()}
+        if len(pending) <= 1:
+            print("  -> betting skipped; fewer than two players can act.")
+            return
+
+        cursor = self._first_bettor_index(pending)
+        while pending:
+            if sum(1 for player in self.players if not player.is_folded and not player.is_eliminated) <= 1:
                 break
 
-            # 이미 폴드했거나 올인한 상태면 턴을 넘김
-            if player.is_folded or player.is_all_in:
-                current_idx = (current_idx + 1) % len(acting_players)
+            player = self.players[cursor % len(self.players)]
+            cursor += 1
+            if player not in pending:
+                continue
+            if not player.can_act():
+                pending.discard(player)
                 continue
 
-            # 가능한 액션 가져오기
             valid_actions = self.get_valid_actions(player)
             if not valid_actions:
-                players_to_act -= 1
-                current_idx = (current_idx + 1) % len(acting_players)
+                pending.discard(player)
                 continue
 
-            # 에이전트에게 상태를 주고 액션을 받아옴
-            state = self.get_ai_state(player)
             agent = active_agents[player.name]
+            state = self.get_ai_state(player, valid_actions)
             action = agent.choose_action(state, valid_actions)
-            
-            self.log_global_state(f"{player.name}의 선택: {action}")
-            
-            # 액션 적용 및 레이즈 여부 확인
+            if action not in valid_actions:
+                action = "CHECK" if "CHECK" in valid_actions else "CALL" if "CALL" in valid_actions else "FOLD"
+
+            self.log_global_state(f"{player.name} chooses {action}")
             is_raise = self.apply_action(player, action)
-            
+
             if is_raise:
-                # 판돈이 올랐으므로, 방금 베팅한 본인을 제외한 나머지 모두가 다시 턴을 가져야 함
-                players_to_act = sum(1 for p in acting_players if not p.is_folded and not p.is_all_in) - 1
+                pending = {other for other in self.players if other.can_act() and other is not player}
             else:
-                # 콜이나 폴드라면 한 명이 숙제를 마친 것으로 카운트다운
-                players_to_act -= 1
+                pending.discard(player)
 
-            # 다음 사람으로 순서 넘김
-            current_idx = (current_idx + 1) % len(acting_players)
-            
-        print(f"=== 베팅 라운드 종료 (현재 팟: {self.pot}) ===")
+        print(f"=== betting round complete: pot {self.pot} ===")
 
-    def resolve_showdown(self):
-        """사이드 팟을 고려하여 승자들에게 칩을 분배합니다."""
-        print("\n=== 쇼다운 및 팟 분배 ===")
-        for p in self.players:
-            if not p.is_folded:
-                p.hand_score = get_best_hand(p.get_all_cards())
-        
-        active_investors = [p for p in self.players if p.invested > 0]
-        pot_number = 1
-        
-        while any(p.invested > 0 for p in active_investors):
-            current_min_invest = min(p.invested for p in active_investors if p.invested > 0)
-            current_pot = 0
-            eligible_players = []
-            
-            for p in active_investors:
-                if p.invested > 0:
-                    deduction = min(p.invested, current_min_invest)
-                    p.invested -= deduction
-                    current_pot += deduction
-                    
-                    if not p.is_folded and deduction == current_min_invest:
-                        eligible_players.append(p)
-            
-            if current_pot == 0: break
-            if not eligible_players: continue
-                
-            best_score = max(p.hand_score for p in eligible_players)
-            winners = [p for p in eligible_players if p.hand_score == best_score]
-            
-            split_amount = current_pot // len(winners)
-            winner_names = ", ".join([w.name for w in winners])
-            print(f"[팟 {pot_number}] 크기: {current_pot} | 승자: {winner_names} (각 {split_amount} 칩 획득)")
-            
-            for w in winners:
-                w.chips += split_amount
-                
-            pot_number += 1
+    def _first_bettor_index(self, candidates: set[Player]) -> int:
+        if not candidates:
+            return 0
+        best_player = max(
+            candidates,
+            key=lambda player: (
+                get_public_betting_priority(player.public_cards),
+                -self.players.index(player),
+            ),
+        )
+        return self.players.index(best_player)
 
-    def deal_cards_to_active(self, is_public=True):
-        """폴드하지 않고 살아있는 플레이어들에게만 카드를 1장씩 분배합니다."""
-        for p in self.players:
-            if not p.is_folded:
-                card = self.deck.draw()
-                if card:
-                    p.receive_card(card, is_public=is_public)
+    def resolve_showdown(self) -> dict[str, Any]:
+        print("\n=== showdown and payout ===")
+        for player in self.players:
+            if not player.is_folded and not player.is_eliminated:
+                player.hand_score = get_best_hand(player.get_all_cards())
 
-    def play_hand(self, active_agents):
-        """한 판의 전체 7포커 게임 흐름을 제어합니다."""
-        # 1. 앤티 징수 및 4장 딜링
+        contributions = {player: player.invested for player in self.players if player.invested > 0}
+        levels = sorted(set(contributions.values()))
+        previous_level = 0
+        payouts: list[dict[str, Any]] = []
+
+        for level in levels:
+            pot_amount = sum(max(0, min(amount, level) - previous_level) for amount in contributions.values())
+            previous_level = level
+            if pot_amount <= 0:
+                continue
+
+            eligible = [
+                player for player, amount in contributions.items()
+                if amount >= level and not player.is_folded and not player.is_eliminated
+            ]
+            if not eligible:
+                continue
+
+            best_score = max(player.hand_score for player in eligible)
+            winners = [player for player in eligible if player.hand_score == best_score]
+            base_share, remainder = divmod(pot_amount, len(winners))
+
+            awards = {}
+            for index, winner in enumerate(winners):
+                award = base_share + (1 if index < remainder else 0)
+                winner.chips += award
+                awards[winner.name] = award
+
+            payout = {
+                "level": level,
+                "pot": pot_amount,
+                "winners": [winner.name for winner in winners],
+                "awards": awards,
+                "score": best_score,
+            }
+            payouts.append(payout)
+            print(f"  side pot up to {level}: {pot_amount}, winners={payout['winners']}, awards={awards}")
+
+        self.pot = 0
+        for player in self.players:
+            player.is_eliminated = player.chips <= 0
+
+        return {"payouts": payouts, "final_chips": {player.name: player.chips for player in self.players}}
+
+    def deal_cards_to_active(self, is_public: bool = True) -> None:
+        for player in self.players:
+            if not player.is_folded and not player.is_eliminated:
+                player.receive_card(self.deck.draw(), is_public=is_public)
+
+    def play_hand(self, active_agents: dict[str, BasePokerAgent]) -> dict[str, Any]:
+        missing_agents = [player.name for player in self.players if player.name not in active_agents]
+        if missing_agents:
+            raise ValueError(f"Missing agents for players: {missing_agents}")
+
         self.start_game()
-        
-        # 2. 1장 버리고 1장 공개 (3구 완성)
-        for p in self.players:
-            agent = active_agents[p.name]
-            discard_idx, reveal_idx = agent.choose_discard_and_reveal(p.hidden_cards)
-            p.discard_and_reveal(discard_idx, reveal_idx)
-            
-        self.log_global_state("1장 버리고 1장 공개 완료 (3구 세팅)")
 
-        # 3. 각 스트리트(Street)별 분배 및 베팅 페이즈 정의
-        # 형태: (페이즈 이름, 공개 여부)
+        self.street = "discard_reveal"
+        for player in self.players:
+            if player.is_eliminated:
+                continue
+            agent = active_agents[player.name]
+            discard_idx, reveal_idx = agent.choose_discard_and_reveal(player.hidden_cards)
+            if not player.discard_and_reveal(discard_idx, reveal_idx):
+                player.discard_and_reveal(0, 1)
+        self.log_global_state("discard one card and reveal one card")
+
         streets = [
-            ("4구", True),
-            ("5구", True),
-            ("6구", True),
-            ("7구(히든)", False)
+            ("4th", True),
+            ("5th", True),
+            ("6th", True),
+            ("7th_hidden", False),
         ]
 
         for street_name, is_public in streets:
-            # 이번 턴에 살아있는 사람(폴드하지 않은 사람) 수 확인
-            survivors = [p for p in self.players if not p.is_folded]
-            
-            # 나 빼고 다 죽었으면 묻고 더블로 갈 필요 없이 바로 조기 승리!
-            if len(survivors) == 1:
-                print(f"\n[{street_name} 페이즈] {survivors[0].name}님을 제외한 모두가 기권했습니다. 조기 승리!")
-                break # 카드 딜링을 멈추고 바로 쇼다운(결산)으로 이동
-                
-            # 카드 딜링
-            print(f"\n--- {street_name} 분배 ---")
-            self.deal_cards_to_active(is_public=is_public)
-            self.log_global_state(f"{street_name} 딜링 완료")
+            survivors = [player for player in self.players if not player.is_folded and not player.is_eliminated]
+            if len(survivors) <= 1:
+                print(f"\n[{street_name}] hand ends early; only one player remains.")
+                break
 
-            # 베팅할 수 있는 사람(폴드X, 올인X)이 2명 이상인지 확인
-            bettors = [p for p in survivors if not p.is_all_in]
-            
-            if len(bettors) >= 2:
+            self.street = street_name
+            print(f"\n--- deal {street_name} ---")
+            self.deal_cards_to_active(is_public=is_public)
+            self.log_global_state(f"deal {street_name}")
+
+            if len([player for player in survivors if player.can_act()]) >= 2:
                 self.play_betting_round(active_agents)
             else:
-                print(f"  -> 베팅 가능한 플레이어가 부족하여 {street_name} 베팅을 생략하고 턴을 넘깁니다. (올인 발생)")
+                print("  -> betting skipped because too few players can act.")
 
-        # 4. 최종 쇼다운 및 결산
-        self.resolve_showdown()
-        
-        # 결과 출력
-        print("\n=== 최종 결과 ===")
-        for p in self.players:
-            status = "FOLD" if p.is_folded else "ALL-IN" if p.is_all_in else "SURVIVED"
-            print(f"{p.name}: {p.chips} 칩 (이번 판 투자금: {p.invested}) | 상태: {status}")
+        result = self.resolve_showdown()
+        self._notify_agents(active_agents)
+        self.log_global_state("hand complete")
+
+        print("\n=== final stacks ===")
+        for player in self.players:
+            status = "ELIMINATED" if player.is_eliminated else "FOLDED" if player.is_folded else "ACTIVE"
+            print(f"{player.name}: {player.chips} chips, invested {player.invested}, status={status}")
+        return result
+
+    def _commit_chips(self, player: Player, requested_amount: int, count_for_round: bool) -> int:
+        amount = max(0, min(player.chips, int(math.ceil(requested_amount))))
+        player.chips -= amount
+        player.invested += amount
+        if count_for_round:
+            player.current_bet += amount
+        self.pot += amount
+        if player.chips == 0:
+            player.is_all_in = True
+        return amount
+
+    def _raise_amount(self, action: str, call_amount: int) -> int:
+        pot_after_call = self.pot + call_amount
+        if action == "BBING":
+            return self.ante
+        if action == "QUARTER":
+            return max(1, math.ceil(pot_after_call / 4))
+        if action == "HALF":
+            return max(1, math.ceil(pot_after_call / 2))
+        if action == "FULL":
+            return max(1, pot_after_call)
+        raise ValueError(f"{action} is not a raise action.")
+
+    def _record_bet(self, player: Player, action: str, paid: int, call_amount: int, raise_amount: int) -> None:
+        self.betting_history.append(
+            {
+                "street": self.street,
+                "actor_index": self.players.index(player),
+                "action": action,
+                "paid": paid,
+                "call_amount": call_amount,
+                "raise_amount": raise_amount,
+                "pot_after": self.pot,
+                "round_bet_after": player.current_bet,
+                "all_in": player.is_all_in,
+            }
+        )
+
+    def _history_from_view(self, viewer_index: int) -> list[dict[str, Any]]:
+        public_history = []
+        for event in self.betting_history:
+            actor_index = event["actor_index"]
+            if actor_index == viewer_index:
+                actor = "self"
+            else:
+                actor = f"opponent_{(actor_index - viewer_index) % len(self.players)}"
+            public_event = {key: value for key, value in event.items() if key != "actor_index"}
+            public_event["actor"] = actor
+            public_history.append(public_event)
+        return public_history
+
+    def _notify_agents(self, active_agents: dict[str, BasePokerAgent]) -> None:
+        for player in self.players:
+            agent = active_agents[player.name]
+            reward = player.chips - player.hand_start_chips
+            final_state = self.get_ai_state(player, self.get_valid_actions(player))
+            agent.observe_reward(reward, final_state)
 
 
-
-# --- 실행 메인 블록 ---
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="7 Poker AI Simulation Environment")
-    parser.add_argument('-p1', type=str, default='Human', help='Player 1 Type')
-    parser.add_argument('-p2', type=str, default='Human', help='Player 2 Type')
-    parser.add_argument('-p3', type=str, default='Empty', help='Player 3 Type')
-    parser.add_argument('-p4', type=str, default='Empty', help='Player 4 Type')
-    parser.add_argument('-p5', type=str, default='Empty', help='Player 5 Type')
-    
-    args = parser.parse_args()
-    
-    def create_agent(agent_type, name):
-        agent_type = agent_type.lower()
-        if agent_type == 'learning': return LearningAgent(name)
-        elif agent_type == 'random': return PokerAgent(name)
-        elif agent_type == 'human': return HumanAgent(name)
+def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent | None:
+    normalized_type = agent_type.lower()
+    if normalized_type == "learning":
+        return LearningAgent(name, db_filename=db_filename)
+    if normalized_type == "random":
+        return PokerAgent(name)
+    if normalized_type == "human":
+        return HumanAgent(name)
+    if normalized_type == "empty":
         return None
+    raise ValueError(f"Unknown player type: {agent_type}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="7-stud poker AI simulation environment")
+    parser.add_argument("-p1", type=str, default="Human", help="Player 1 type")
+    parser.add_argument("-p2", type=str, default="Human", help="Player 2 type")
+    parser.add_argument("-p3", type=str, default="Empty", help="Player 3 type")
+    parser.add_argument("-p4", type=str, default="Empty", help="Player 4 type")
+    parser.add_argument("-p5", type=str, default="Empty", help="Player 5 type")
+    parser.add_argument("--db", type=str, default="LearningAgent_Shared_db.json", help="Learning DB path")
+    args = parser.parse_args()
 
     agent_names = ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"]
     agent_types = [args.p1, args.p2, args.p3, args.p4, args.p5]
-    
-    active_agents = {}
-    for name, a_type in zip(agent_names, agent_types):
-        agent = create_agent(a_type, name)
+    active_agents: dict[str, BasePokerAgent] = {}
+
+    for player_name, agent_type in zip(agent_names, agent_types):
+        agent = create_agent(agent_type, player_name, args.db)
         if agent is not None:
-            active_agents[name] = agent
-            print(f"[{name}] 참전! (타입: {a_type})")
+            active_agents[player_name] = agent
+            print(f"[{player_name}] joined as {agent_type}")
 
     if len(active_agents) < 2:
-        print("\n[오류] 게임을 시작하려면 최소 2명의 플레이어가 필요합니다.")
-        sys.exit()
-    
+        print("At least two active players are required.")
+        sys.exit(1)
 
     game = PokerGame(list(active_agents.keys()), log_file="state_log.txt")
     game.play_hand(active_agents)
-
-    print("\ngame complete successfully. You can check the whole processing in state_log.txt.")
+    print("\nGame complete. Full hand log written to state_log.txt.")

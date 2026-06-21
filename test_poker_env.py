@@ -2,6 +2,7 @@ import unittest
 import json
 
 from poker_env import Card, PokerGame, evaluate_5_cards, get_public_betting_priority
+from main import build_active_agents
 
 
 def cards(labels):
@@ -93,6 +94,12 @@ class PokerRuleTests(unittest.TestCase):
         self.assertIn("opponent_1", dumped)
         self.assertNotIn("Alice", dumped)
         self.assertNotIn("Bob", dumped)
+
+    def test_main_builds_five_random_players(self):
+        agents = build_active_agents(["random", "random", "random", "random", "random"], "unused.json")
+
+        self.assertEqual(list(agents), ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"])
+        self.assertTrue(all(type(agent).__name__ == "PokerAgent" for agent in agents.values()))
 
 
 if __name__ == "__main__":

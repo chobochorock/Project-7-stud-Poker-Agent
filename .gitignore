@@ -2,3 +2,5 @@ __pycache__/
 *.py[cod]
 *.pyc.*
 test_learning_db.json
+web_state_log.txt
+web_server.pid

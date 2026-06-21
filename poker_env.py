@@ -1,52 +1,16 @@
-import argparse
 import itertools
 import math
 import pprint
 import random
-import sys
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from agent import BasePokerAgent, PokerAgent
-from LearningAgent import LearningAgent
+from agent import BasePokerAgent
 
 
 RANK_VALUES = {"T": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
 BETTING_ACTIONS = ("CHECK", "BBING", "QUARTER", "HALF", "FULL", "CALL", "FOLD")
-
-
-class HumanAgent(BasePokerAgent):
-    def choose_action(self, state: dict[str, Any], valid_actions: Sequence[str]) -> str | None:
-        print(f"\n[{self.name}]")
-        print(f"chips={state['my_chips']} pot={state['pot']} call={state['call_amount']}")
-        print(f"hidden={state['my_hidden_cards']} public={state['my_public_cards']}")
-        print(f"valid actions={list(valid_actions)}")
-
-        while True:
-            action = input("action: ").strip().upper()
-            if action in valid_actions:
-                return action
-            print("Please choose one of the valid actions.")
-
-    def choose_discard_and_reveal(self, hidden_cards: Sequence[Any]) -> tuple[int, int]:
-        print(f"\n[{self.name}] hidden cards:")
-        for index, card in enumerate(hidden_cards):
-            print(f"  {index}: {card}")
-
-        while True:
-            try:
-                discard_idx = int(input("discard index: "))
-                reveal_idx = int(input("reveal index: "))
-            except ValueError:
-                print("Please enter numeric indices.")
-                continue
-            if discard_idx != reveal_idx and 0 <= discard_idx < len(hidden_cards) and 0 <= reveal_idx < len(hidden_cards):
-                return discard_idx, reveal_idx
-            print("Discard and reveal must be different valid indices.")
-
-    def learn_from_database(self, database: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"agent": type(self).__name__, "trained": False, "reason": "Human agents do not train."}
 
 
 @dataclass(frozen=True)
@@ -620,45 +584,3 @@ class PokerGame:
             reward = player.chips - player.hand_start_chips
             final_state = self.get_ai_state(player, self.get_valid_actions(player))
             agent.observe_reward(reward, final_state)
-
-
-def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent | None:
-    normalized_type = agent_type.lower()
-    if normalized_type == "learning":
-        return LearningAgent(name, db_filename=db_filename)
-    if normalized_type == "random":
-        return PokerAgent(name)
-    if normalized_type == "human":
-        return HumanAgent(name)
-    if normalized_type == "empty":
-        return None
-    raise ValueError(f"Unknown player type: {agent_type}")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="7-stud poker AI simulation environment")
-    parser.add_argument("-p1", type=str, default="Human", help="Player 1 type")
-    parser.add_argument("-p2", type=str, default="Human", help="Player 2 type")
-    parser.add_argument("-p3", type=str, default="Empty", help="Player 3 type")
-    parser.add_argument("-p4", type=str, default="Empty", help="Player 4 type")
-    parser.add_argument("-p5", type=str, default="Empty", help="Player 5 type")
-    parser.add_argument("--db", type=str, default="LearningAgent_Shared_db.json", help="Learning DB path")
-    args = parser.parse_args()
-
-    agent_names = ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"]
-    agent_types = [args.p1, args.p2, args.p3, args.p4, args.p5]
-    active_agents: dict[str, BasePokerAgent] = {}
-
-    for player_name, agent_type in zip(agent_names, agent_types):
-        agent = create_agent(agent_type, player_name, args.db)
-        if agent is not None:
-            active_agents[player_name] = agent
-            print(f"[{player_name}] joined as {agent_type}")
-
-    if len(active_agents) < 2:
-        print("At least two active players are required.")
-        sys.exit(1)
-
-    game = PokerGame(list(active_agents.keys()), log_file="state_log.txt")
-    game.play_hand(active_agents)
-    print("\nGame complete. Full hand log written to state_log.txt.")

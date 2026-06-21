@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>7-Stud Poker Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">7-Stud Poker Agent</p>
+          <h1>Game Table</h1>
+        </div>
+        <div class="summary-strip">
+          <span id="phaseBadge">idle</span>
+          <span id="streetBadge">-</span>
+          <span id="potBadge">Pot 0</span>
+        </div>
+      </header>
+
+      <section class="control-band">
+        <form id="setupForm" class="setup-grid">
+          <label>Player 1<select name="p1"><option value="human">human</option><option value="random" selected>random</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 2<select name="p2"><option value="human">human</option><option value="random" selected>random</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 3<select name="p3"><option value="human">human</option><option value="random" selected>random</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 4<select name="p4"><option value="human">human</option><option value="random" selected>random</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 5<select name="p5"><option value="human">human</option><option value="random" selected>random</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <button type="submit">Start</button>
+        </form>
+      </section>
+
+      <section class="table-layout">
+        <div id="players" class="players-grid"></div>
+        <aside class="side-panel">
+          <section id="actionPanel" class="panel-block"></section>
+          <section class="panel-block">
+            <h2>Betting Log</h2>
+            <div id="bettingLog" class="log-list"></div>
+          </section>
+          <section class="panel-block">
+            <h2>Events</h2>
+            <div id="eventLog" class="log-list"></div>
+          </section>
+        </aside>
+      </section>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

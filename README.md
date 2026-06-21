@@ -18,7 +18,11 @@
 
 ## 파일 구조
 
-- `poker_env.py`: 7포커 게임 환경, 카드/덱/플레이어, 베팅, 쇼다운, CLI 실행부
+- `poker_env.py`: 7포커 게임 환경, 카드/덱/플레이어, 베팅, 쇼다운 규칙
+- `main.py`: 터미널에서 플레이어 구성을 선택하고 게임을 실행하는 진입점
+- `web_app.py`: 로컬 웹 GUI 서버
+- `web_controller.py`: 웹에서 한 단계씩 진행하기 위한 게임 컨트롤러
+- `web/static/`: 웹 화면, 동작, 스타일 파일
 - `agent.py`: 모든 에이전트가 따라야 하는 기본 인터페이스와 무작위 에이전트
 - `LearningAgent.py`: 공유 데이터베이스를 사용하는 학습 에이전트 예시
 - `exp.py`: 사이드팟 정산 확인용 간단한 데모
@@ -37,31 +41,37 @@ cd D:\Experiment\Project-7-stud-Poker-Agent
 무작위 에이전트 2명으로 실행합니다.
 
 ```powershell
-python -B poker_env.py -p1 random -p2 random
+python -B main.py -p1 random -p2 random
 ```
 
 사람 1명과 무작위 에이전트 1명으로 실행합니다.
 
 ```powershell
-python -B poker_env.py -p1 human -p2 random
+python -B main.py -p1 human -p2 random
 ```
 
 학습 에이전트 2명으로 실행합니다.
 
 ```powershell
-python -B poker_env.py -p1 learning -p2 learning --db LearningAgent_Shared_db.json
+python -B main.py -p1 learning -p2 learning --db LearningAgent_Shared_db.json
 ```
 
 압축 데이터베이스를 쓰고 싶으면 `.json.gz` 파일명을 사용합니다.
 
 ```powershell
-python -B poker_env.py -p1 learning -p2 learning --db LearningAgent_Shared_db.json.gz
+python -B main.py -p1 learning -p2 learning --db LearningAgent_Shared_db.json.gz
 ```
 
 최대 5명까지 지정할 수 있으며, 빈 자리는 `empty`로 둡니다.
 
 ```powershell
-python -B poker_env.py -p1 random -p2 learning -p3 human -p4 random -p5 empty
+python -B main.py -p1 random -p2 learning -p3 human -p4 random -p5 empty
+```
+
+터미널에서 질문을 보며 플레이어 구성을 고르려면 `--interactive`를 붙입니다.
+
+```powershell
+python -B main.py --interactive
 ```
 
 규칙 테스트를 실행합니다.
@@ -75,6 +85,24 @@ python -B -m unittest -v test_poker_env.py
 ```powershell
 python -B exp.py
 ```
+
+## 로컬 웹 GUI
+
+MVP 웹 GUI는 표준 라이브러리 기반 로컬 서버로 실행합니다.
+
+```powershell
+python -B web_app.py --port 8765
+```
+
+브라우저에서 아래 주소를 엽니다.
+
+```text
+http://127.0.0.1:8765
+```
+
+웹 화면에서는 1번부터 5번까지의 플레이어 타입을 `human`, `random`, `learning`, `empty` 중에서 고른 뒤 `Start`를 누릅니다. 모든 플레이어를 `random`으로 두면 한 판이 자동으로 끝까지 진행됩니다. `human`이 포함되면 카드 버리기/공개하기와 베팅 행동을 화면 버튼으로 선택합니다.
+
+나중에 UI를 다듬을 때는 주로 `web/static/styles.css`와 `web/static/app.js`를 수정하면 됩니다. 서버/API 흐름은 `web_app.py`, 게임 진행 흐름은 `web_controller.py`에 분리되어 있습니다.
 
 ## 새 에이전트 작성 규칙
 
@@ -97,7 +125,7 @@ class MyAgent(PokerAgent):
         return {"agent": type(self).__name__, "trained": False}
 ```
 
-새 파일을 만든 뒤에는 `poker_env.py`의 `create_agent()`에 새 에이전트 타입을 등록해야 CLI에서 사용할 수 있습니다.
+새 파일을 만든 뒤에는 `main.py`의 `create_agent()`에 새 에이전트 타입을 등록해야 CLI에서 사용할 수 있습니다.
 
 에이전트가 게임 중 받는 `state`에는 자신의 비공개/공개 카드, 상대의 공개 카드, 칩 수, 팟, 콜 금액, 가능한 행동, 베팅 기록이 포함됩니다. 상대 플레이어 이름이나 에이전트 종류는 학습 데이터에 저장하지 않는 것을 원칙으로 합니다.
 
@@ -109,20 +137,16 @@ class MyAgent(PokerAgent):
 
 가독성이 중요하면 `.json`을 사용하고, 파일 크기가 커지면 `.json.gz`를 사용합니다.
 
-## 변경 후 Git 작업
+## 커밋 메시지 추천
 
-모든 변경 내용이 발생할 때마다 작업 내용을 확인하고 커밋합니다.
+커밋을 만들 때는 변경 목적이 드러나도록 짧게 작성하는 것을 권장합니다. 상황별 예시는 다음과 같습니다.
 
-```powershell
-git status
-git add .
-git commit -m "변경 내용을 짧게 설명"
-```
+- `feat: add main entrypoint for poker game`
+- `feat: support terminal player type selection`
+- `feat: add public-card betting order rule`
+- `refactor: keep poker environment separate from CLI`
+- `docs: update run instructions`
+- `test: cover five random player game`
+- `fix: correct side pot settlement`
 
-원격 저장소가 설정되어 있고 공유가 필요한 경우에만 push를 진행합니다.
-
-```powershell
-git push
-```
-
-`__pycache__`, `.pyc`, 임시 테스트 DB 같은 실행 부산물은 커밋하지 않습니다.
+`__pycache__`, `.pyc`, 임시 테스트 DB 같은 실행 부산물은 커밋 대상에서 제외하는 것을 권장합니다.

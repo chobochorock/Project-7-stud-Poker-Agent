@@ -3,11 +3,12 @@ import sys
 from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
+from heuristic_agent import HeuristicPokerAgent
 from LearningAgent import LearningAgent
 from poker_env import PokerGame
 
 
-PLAYER_TYPES = ("human", "random", "learning", "empty")
+PLAYER_TYPES = ("human", "random", "heuristic", "learning", "empty")
 
 
 class HumanAgent(BasePokerAgent):
@@ -49,6 +50,8 @@ def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent
         return HumanAgent(name)
     if normalized_type == "random":
         return PokerAgent(name)
+    if normalized_type == "heuristic":
+        return HeuristicPokerAgent(name)
     if normalized_type == "learning":
         return LearningAgent(name, db_filename=db_filename)
     if normalized_type == "empty":
@@ -62,7 +65,7 @@ def collect_player_types(args: argparse.Namespace) -> list[str]:
         return [player_type.lower() for player_type in player_types]
 
     selected_types = []
-    print("Choose player types: human, random, learning, empty")
+    print(f"Choose player types: {', '.join(PLAYER_TYPES)}")
     for index, default_type in enumerate(player_types, start=1):
         while True:
             raw_value = input(f"Player_{index} [{default_type}]: ").strip().lower()

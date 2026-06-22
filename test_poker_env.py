@@ -1,6 +1,7 @@
 import unittest
 import json
 
+from heuristic_agent import HeuristicPokerAgent
 from poker_env import Card, PokerGame, evaluate_5_cards, get_public_betting_priority
 from main import build_active_agents
 
@@ -100,6 +101,54 @@ class PokerRuleTests(unittest.TestCase):
 
         self.assertEqual(list(agents), ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"])
         self.assertTrue(all(type(agent).__name__ == "PokerAgent" for agent in agents.values()))
+
+    def test_main_builds_heuristic_player(self):
+        agents = build_active_agents(["heuristic", "random"], "unused.json")
+
+        self.assertEqual(type(agents["Player_1"]).__name__, "HeuristicPokerAgent")
+
+    def test_heuristic_agent_raises_strong_free_action(self):
+        agent = HeuristicPokerAgent("Heuristic")
+        state = {
+            "ante": 1,
+            "pot": 40,
+            "my_chips": 1000,
+            "call_amount": 0,
+            "my_hidden_cards": ["sA", "hA"],
+            "my_public_cards": ["dA", "cA", "sK"],
+            "opponents": [{"public_cards": ["h2"], "is_folded": False, "is_eliminated": False}],
+            "betting_history": [],
+        }
+
+        action = agent.choose_action(state, ["CHECK", "BBING", "QUARTER", "HALF", "FULL"])
+
+        self.assertEqual(action, "FULL")
+
+    def test_heuristic_agent_folds_weak_expensive_call(self):
+        agent = HeuristicPokerAgent("Heuristic")
+        state = {
+            "ante": 1,
+            "pot": 10,
+            "my_chips": 100,
+            "call_amount": 80,
+            "my_hidden_cards": ["s2", "h7"],
+            "my_public_cards": ["d9"],
+            "opponents": [{"public_cards": ["sA", "hK"], "is_folded": False, "is_eliminated": False}],
+            "betting_history": [{"actor": "opponent_1", "action": "FULL"}],
+        }
+
+        action = agent.choose_action(state, ["CALL", "FOLD"])
+
+        self.assertEqual(action, "FOLD")
+
+    def test_heuristic_discard_and_reveal_returns_distinct_valid_indices(self):
+        agent = HeuristicPokerAgent("Heuristic")
+
+        discard_idx, reveal_idx = agent.choose_discard_and_reveal(cards(["s2", "hA", "dA", "c9"]))
+
+        self.assertIn(discard_idx, range(4))
+        self.assertIn(reveal_idx, range(4))
+        self.assertNotEqual(discard_idx, reveal_idx)
 
 
 if __name__ == "__main__":

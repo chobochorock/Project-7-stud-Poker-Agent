@@ -4,11 +4,12 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
+from heuristic_agent import HeuristicPokerAgent
 from LearningAgent import LearningAgent
 from poker_env import PokerGame, Player
 
 
-PLAYER_TYPES = ("human", "random", "learning", "empty")
+PLAYER_TYPES = ("human", "random", "heuristic", "learning", "empty")
 STREETS = (("4th", True), ("5th", True), ("6th", True), ("7th_hidden", False))
 
 
@@ -328,6 +329,8 @@ class WebPokerController:
             return WebHumanAgent(name)
         if agent_type == "random":
             return PokerAgent(name)
+        if agent_type == "heuristic":
+            return HeuristicPokerAgent(name)
         if agent_type == "learning":
             return LearningAgent(name, db_filename=db_filename)
         if agent_type == "empty":

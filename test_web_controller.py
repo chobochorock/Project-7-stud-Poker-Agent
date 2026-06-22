@@ -15,6 +15,16 @@ class WebControllerTests(unittest.TestCase):
         self.assertEqual(len(state["players"]), 5)
         self.assertIsNotNone(state["result"])
 
+    def test_heuristic_players_complete_without_human_input(self):
+        random.seed(13)
+        controller = WebPokerController()
+
+        state = controller.start(["heuristic", "heuristic", "random"], log_file=None)
+
+        self.assertEqual(state["phase"], "complete")
+        self.assertEqual(len(state["players"]), 3)
+        self.assertIsNotNone(state["result"])
+
     def test_human_player_waits_for_discard_choice(self):
         random.seed(7)
         controller = WebPokerController()

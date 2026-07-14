@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Sequence
 
-from agent import PokerAgent
+from agent.base import PokerAgent
 from poker_env import Card, get_best_hand, get_public_betting_priority
 
 

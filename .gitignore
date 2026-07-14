@@ -4,3 +4,4 @@ __pycache__/
 test_learning_db.json
 web_state_log.txt
 web_server.pid
+replays/

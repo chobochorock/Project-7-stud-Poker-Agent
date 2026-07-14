@@ -14,6 +14,8 @@
           <h1>Game Table</h1>
         </div>
         <div class="summary-strip">
+          <span id="roundBadge">Round 0</span>
+          <span id="modeBadge">cash</span>
           <span id="phaseBadge">idle</span>
           <span id="streetBadge">-</span>
           <span id="potBadge">Pot 0</span>
@@ -22,11 +24,14 @@
 
       <section class="control-band">
         <form id="setupForm" class="setup-grid">
-          <label>Player 1<select name="p1"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 2<select name="p2"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 3<select name="p3"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 4<select name="p4"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 5<select name="p5"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Mode<select name="game_mode"><option value="cash" selected>cash</option><option value="tournament">tournament</option></select></label>
+          <label>Player 1<select name="p1"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 2<select name="p2"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 3<select name="p3"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 4<select name="p4"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Player 5<select name="p5"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label class="toggle-label">Auto Next<input id="autoRounds" name="auto_rounds" type="checkbox"></label>
+          <label>Delay sec<input id="autoInterval" name="auto_interval" type="number" min="0.5" step="0.5" value="2"></label>
           <button type="submit">Start</button>
         </form>
       </section>

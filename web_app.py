@@ -39,7 +39,13 @@ class PokerWebHandler(BaseHTTPRequestHandler):
                     log_file=data.get("log", "web_state_log.txt"),
                     starting_chips=int(data.get("starting_chips", 1000)),
                     ante=int(data.get("ante", 1)),
+                    replay_dir=data.get("replay_dir", "replays"),
+                    game_mode=data.get("game_mode", "cash"),
                 )
+                self._send_json(state)
+                return
+            if parsed.path in {"/api/next_round", "/api/next_hand"}:
+                state = controller.start_next_round()
                 self._send_json(state)
                 return
             if parsed.path == "/api/discard":

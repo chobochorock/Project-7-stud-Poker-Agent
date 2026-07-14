@@ -6,11 +6,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from agent import BasePokerAgent
+from agent.base import BasePokerAgent
 
 
 RANK_VALUES = {"T": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
 BETTING_ACTIONS = ("CHECK", "BBING", "QUARTER", "HALF", "FULL", "CALL", "FOLD")
+GAME_MODES = ("cash", "tournament")
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class Player:
         self.hand_start_chips = chips
         self.hidden_cards: list[Card] = []
         self.public_cards: list[Card] = []
+        self.discarded_card: Card | None = None
         self.is_folded = False
         self.is_all_in = False
         self.is_eliminated = chips <= 0
@@ -66,6 +68,7 @@ class Player:
         self.hand_start_chips = self.chips
         self.hidden_cards = []
         self.public_cards = []
+        self.discarded_card = None
         self.is_folded = False
         self.is_all_in = self.chips <= 0
         self.is_eliminated = self.chips <= 0
@@ -89,6 +92,7 @@ class Player:
         if not (0 <= discard_idx < 4 and 0 <= reveal_idx < 4):
             return False
 
+        self.discarded_card = self.hidden_cards[discard_idx]
         revealed_card = self.hidden_cards[reveal_idx]
         self.hidden_cards = [
             card for index, card in enumerate(self.hidden_cards)
@@ -204,13 +208,24 @@ class PokerGame:
         log_file: str | None = "state_log.txt",
         starting_chips: int = 1000,
         ante: int = 1,
+        game_mode: str = "cash",
     ):
         if len(player_names) < 2:
             raise ValueError("A hand needs at least two players.")
+        if starting_chips <= 0:
+            raise ValueError("starting_chips must be positive.")
+        if ante <= 0:
+            raise ValueError("ante must be positive.")
+
+        game_mode = game_mode.lower()
+        if game_mode not in GAME_MODES:
+            raise ValueError(f"Unknown game mode: {game_mode}")
 
         self.players = [Player(name, starting_chips) for name in list(player_names)[:5]]
         self.deck = Deck()
+        self.starting_chips = starting_chips
         self.ante = ante
+        self.game_mode = game_mode
         self.current_highest_bet = 0
         self.pot = 0
         self.street = "setup"
@@ -237,6 +252,7 @@ class PokerGame:
                     "current_bet": player.current_bet,
                     "hidden_cards": [str(card) for card in player.hidden_cards],
                     "public_cards": [str(card) for card in player.public_cards],
+                    "discarded_card": str(player.discarded_card) if player.discarded_card else None,
                     "is_folded": player.is_folded,
                     "is_all_in": player.is_all_in,
                     "is_eliminated": player.is_eliminated,
@@ -256,6 +272,8 @@ class PokerGame:
         self.betting_history = []
 
         for player in self.players:
+            if self.game_mode == "cash":
+                player.chips = self.starting_chips
             player.reset_for_hand()
 
         live_players = [player for player in self.players if not player.is_eliminated]
@@ -283,8 +301,9 @@ class PokerGame:
         else:
             valid.append("CALL")
 
-        if player.chips > call_amount:
+        if player.chips > call_amount and self.current_highest_bet == 0:
             valid.append("BBING")
+        if player.chips > call_amount:
             if self.pot > 0:
                 valid.extend(["QUARTER", "HALF", "FULL"])
 
@@ -311,6 +330,7 @@ class PokerGame:
             )
 
         state = {
+            "game_mode": self.game_mode,
             "street": self.street,
             "seat_count": len(self.players),
             "ante": self.ante,
@@ -321,6 +341,7 @@ class PokerGame:
             "my_round_bet": player.current_bet,
             "my_hidden_cards": [str(card) for card in player.hidden_cards],
             "my_public_cards": [str(card) for card in player.public_cards],
+            "my_discarded_card": str(player.discarded_card) if player.discarded_card else None,
             "call_amount": call_amount,
             "opponents": opponents,
             "betting_history": self._history_from_view(viewer_index),

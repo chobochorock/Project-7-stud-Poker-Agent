@@ -1,47 +1,16 @@
 import argparse
 import sys
-from typing import Any, Sequence
+from typing import Sequence
 
 from agent import BasePokerAgent, PokerAgent
-from heuristic_agent import HeuristicPokerAgent
-from LearningAgent import LearningAgent
-from poker_env import PokerGame
+from agent.HA1 import HA1PokerAgent
+from agent.heuristic_agent import HeuristicPokerAgent
+from agent.human_agent import HumanAgent
+from agent.learning_agent import LearningAgent
+from poker_env import GAME_MODES, PokerGame
 
 
-PLAYER_TYPES = ("human", "random", "heuristic", "learning", "empty")
-
-
-class HumanAgent(BasePokerAgent):
-    def choose_action(self, state: dict[str, Any], valid_actions: Sequence[str]) -> str | None:
-        print(f"\n[{self.name}]")
-        print(f"chips={state['my_chips']} pot={state['pot']} call={state['call_amount']}")
-        print(f"hidden={state['my_hidden_cards']} public={state['my_public_cards']}")
-        print(f"valid actions={list(valid_actions)}")
-
-        while True:
-            action = input("action: ").strip().upper()
-            if action in valid_actions:
-                return action
-            print("Please choose one of the valid actions.")
-
-    def choose_discard_and_reveal(self, hidden_cards: Sequence[Any]) -> tuple[int, int]:
-        print(f"\n[{self.name}] hidden cards:")
-        for index, card in enumerate(hidden_cards):
-            print(f"  {index}: {card}")
-
-        while True:
-            try:
-                discard_idx = int(input("discard index: "))
-                reveal_idx = int(input("reveal index: "))
-            except ValueError:
-                print("Please enter numeric indices.")
-                continue
-            if discard_idx != reveal_idx and 0 <= discard_idx < len(hidden_cards) and 0 <= reveal_idx < len(hidden_cards):
-                return discard_idx, reveal_idx
-            print("Discard and reveal must be different valid indices.")
-
-    def learn_from_database(self, database: dict[str, Any] | None = None) -> dict[str, Any]:
-        return {"agent": type(self).__name__, "trained": False, "reason": "Human agents do not train."}
+PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "learning", "empty")
 
 
 def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent | None:
@@ -52,6 +21,8 @@ def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent
         return PokerAgent(name)
     if normalized_type == "heuristic":
         return HeuristicPokerAgent(name)
+    if normalized_type == "ha1":
+        return HA1PokerAgent(name)
     if normalized_type == "learning":
         return LearningAgent(name, db_filename=db_filename)
     if normalized_type == "empty":
@@ -100,6 +71,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log", type=str, default="state_log.txt", help="Game log path")
     parser.add_argument("--starting-chips", type=int, default=1000, help="Starting chips per player")
     parser.add_argument("--ante", type=int, default=1, help="Ante per hand")
+    parser.add_argument("--mode", choices=GAME_MODES, default="cash", help="Cash resets stacks each round")
+    parser.add_argument("--rounds", type=int, default=1, help="Maximum rounds to play")
     return parser.parse_args()
 
 
@@ -121,9 +94,23 @@ def main() -> int:
         log_file=args.log,
         starting_chips=args.starting_chips,
         ante=args.ante,
+        game_mode=args.mode,
     )
-    game.play_hand(active_agents)
-    print(f"\nGame complete. Full hand log written to {args.log}.")
+    cumulative_profit = {name: 0 for name in active_agents}
+    rounds_played = 0
+    for _ in range(max(1, args.rounds)):
+        if args.mode == "tournament" and sum(player.chips > 0 for player in game.players) < 2:
+            break
+        game.play_hand(active_agents)
+        rounds_played += 1
+        for player in game.players:
+            cumulative_profit[player.name] += player.chips - player.hand_start_chips
+
+    print(f"\n{args.mode} session complete after {rounds_played} round(s).")
+    for name, profit in cumulative_profit.items():
+        print(f"{name}: {profit:+d} chips")
+    if args.log:
+        print(f"Full hand log written to {args.log}.")
     return 0
 
 

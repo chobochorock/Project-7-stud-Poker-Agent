@@ -1,7 +1,8 @@
 import unittest
 import json
 
-from heuristic_agent import HeuristicPokerAgent
+from agent.HA1 import HA1PokerAgent
+from agent.heuristic_agent import HeuristicPokerAgent
 from poker_env import Card, PokerGame, evaluate_5_cards, get_public_betting_priority
 from main import build_active_agents
 
@@ -51,6 +52,34 @@ class PokerRuleTests(unittest.TestCase):
         self.assertIn("FULL", game.get_valid_actions(player))
         self.assertNotIn("CALL", game.get_valid_actions(player))
 
+    def test_bbing_is_only_available_before_any_round_bet(self):
+        game = PokerGame(["A", "B"], log_file=None)
+        player_a, player_b = game.players
+        game.pot = 10
+
+        self.assertIn("BBING", game.get_valid_actions(player_a))
+
+        game.apply_action(player_a, "BBING")
+
+        self.assertNotIn("BBING", game.get_valid_actions(player_b))
+        self.assertIn("CALL", game.get_valid_actions(player_b))
+        self.assertIn("QUARTER", game.get_valid_actions(player_b))
+
+    def test_raise_amount_uses_pot_after_call_for_pot_odds_pressure(self):
+        game = PokerGame(["A", "B"], log_file=None)
+        player_a, player_b = game.players
+        game.pot = 80
+
+        game.apply_action(player_a, "QUARTER")
+        self.assertEqual(player_a.current_bet, 20)
+        self.assertEqual(game.pot, 100)
+        self.assertEqual(game.current_highest_bet, 20)
+
+        game.apply_action(player_b, "HALF")
+        self.assertEqual(player_b.current_bet, 80)
+        self.assertEqual(game.pot, 180)
+        self.assertEqual(game.current_highest_bet, 80)
+
     def test_public_trips_take_betting_priority_over_weaker_public_hands(self):
         trips = get_public_betting_priority(cards(["s7", "h7", "d7", "c2"]))
         two_pair = get_public_betting_priority(cards(["sA", "hA", "dK", "cK"]))
@@ -96,6 +125,37 @@ class PokerRuleTests(unittest.TestCase):
         self.assertNotIn("Alice", dumped)
         self.assertNotIn("Bob", dumped)
 
+    def test_cash_mode_restores_fixed_stacks_each_round(self):
+        game = PokerGame(["A", "B"], log_file=None, starting_chips=100, game_mode="cash")
+        game.players[0].chips = 25
+        game.players[1].chips = 175
+
+        game.start_game()
+
+        self.assertEqual([player.hand_start_chips for player in game.players], [100, 100])
+        self.assertEqual([player.chips for player in game.players], [99, 99])
+
+    def test_tournament_mode_keeps_current_stacks(self):
+        game = PokerGame(["A", "B"], log_file=None, starting_chips=100, game_mode="tournament")
+        game.players[0].chips = 50
+        game.players[1].chips = 150
+
+        game.start_game()
+
+        self.assertEqual([player.hand_start_chips for player in game.players], [50, 150])
+        self.assertEqual([player.chips for player in game.players], [49, 149])
+
+    def test_agent_observes_own_discarded_card(self):
+        game = PokerGame(["A", "B"], log_file=None)
+        game.start_game()
+        discarded = str(game.players[0].hidden_cards[0])
+        game.players[0].discard_and_reveal(0, 1)
+
+        state = game.get_ai_state(game.players[0])
+
+        self.assertEqual(state["my_discarded_card"], discarded)
+        self.assertEqual(state["game_mode"], "cash")
+
     def test_main_builds_five_random_players(self):
         agents = build_active_agents(["random", "random", "random", "random", "random"], "unused.json")
 
@@ -106,6 +166,11 @@ class PokerRuleTests(unittest.TestCase):
         agents = build_active_agents(["heuristic", "random"], "unused.json")
 
         self.assertEqual(type(agents["Player_1"]).__name__, "HeuristicPokerAgent")
+
+    def test_main_builds_ha1_player(self):
+        agents = build_active_agents(["ha1", "random"], "unused.json")
+
+        self.assertEqual(type(agents["Player_1"]).__name__, "HA1PokerAgent")
 
     def test_heuristic_agent_raises_strong_free_action(self):
         agent = HeuristicPokerAgent("Heuristic")
@@ -149,6 +214,34 @@ class PokerRuleTests(unittest.TestCase):
         self.assertIn(discard_idx, range(4))
         self.assertIn(reveal_idx, range(4))
         self.assertNotEqual(discard_idx, reveal_idx)
+
+    def test_ha1_estimates_equity_and_returns_valid_action(self):
+        agent = HA1PokerAgent("HA1", simulations=32, seed=7)
+        state = {
+            "street": "7th_hidden",
+            "pot": 100,
+            "my_chips": 900,
+            "call_amount": 20,
+            "my_hidden_cards": ["sA", "hA", "dA"],
+            "my_public_cards": ["cA", "sK", "hQ", "dJ"],
+            "my_discarded_card": "c2",
+            "opponents": [
+                {
+                    "seat": "opponent_1",
+                    "public_cards": ["s2", "h3", "d4", "c6"],
+                    "is_folded": False,
+                    "is_eliminated": False,
+                }
+            ],
+            "betting_history": [],
+        }
+
+        equity = agent.estimate_equity(state)
+        action = agent.choose_action(state, ["QUARTER", "HALF", "FULL", "CALL", "FOLD"])
+
+        self.assertGreaterEqual(equity, 0.0)
+        self.assertLessEqual(equity, 1.0)
+        self.assertIn(action, ["QUARTER", "HALF", "FULL", "CALL", "FOLD"])
 
 
 if __name__ == "__main__":

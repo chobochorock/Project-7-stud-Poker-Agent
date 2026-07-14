@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any, Sequence
 
-from agent import PokerAgent
+from agent.base import PokerAgent
 
 
 DB_VERSION = 2

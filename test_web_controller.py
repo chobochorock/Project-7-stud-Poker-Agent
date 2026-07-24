@@ -88,6 +88,24 @@ class WebControllerTests(unittest.TestCase):
         self.assertEqual(state["acting_player"], state["waiting"]["player"])
         self.assertIn(state["priority_player"], state["turn_order"])
 
+    def test_hand_range_api_uses_current_heads_up_observer_state(self):
+        random.seed(11)
+        controller = WebPokerController()
+        controller.start(["human", "human"], log_file=None, replay_dir=None)
+        controller.submit_discard("Player_1", 0, 1)
+        controller.submit_discard("Player_2", 0, 1)
+
+        result = controller.calculate_hand_range("Player_1", samples_per_hand=1, seed=7)
+
+        self.assertEqual(result["observer"], "Player_1")
+        self.assertEqual(result["opponent"], "Player_2")
+        self.assertEqual(result["possible_hands"], 990)
+        self.assertEqual(result["total_samples"], 990)
+        self.assertAlmostEqual(
+            result["win_probability"] + result["tie_probability"] + result["loss_probability"],
+            1.0,
+        )
+
     def test_next_round_reuses_episode_stacks(self):
         random.seed(13)
         controller = WebPokerController()
@@ -161,6 +179,15 @@ class WebControllerTests(unittest.TestCase):
 
             self.assertEqual(sum(state["session"]["final_chips"].values()), 2000)
             self.assertEqual(sum(state["session"]["cumulative_profit"].values()), 0)
+
+    def test_ev_mode_finishes_zero_sum_and_can_start_next_round(self):
+        random.seed(22)
+        controller = WebPokerController()
+
+        state = controller.start(["random", "random"], log_file=None, replay_dir=None, game_mode="ev", ante=1000)
+
+        self.assertEqual(sum(state["session"]["final_chips"].values()), 0)
+        self.assertTrue(state["next_round_available"])
 
     def test_describe_hand_score_uses_readable_names(self):
         self.assertEqual(describe_hand_score((4, 14)), "백스트레이트")

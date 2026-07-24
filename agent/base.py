@@ -6,7 +6,9 @@ from typing import Any, Sequence
 class BasePokerAgent(ABC):
     """Common interface for every player controller."""
 
-    ACTIONS = ("CHECK", "BBING", "QUARTER", "HALF", "FULL", "CALL", "FOLD")
+    ACTIONS = (
+        "CHECK", "BBING", "DDADANG", "QUARTER", "HALF", "FULL", "CALL", "FOLD"
+    )
 
     def __init__(self, name: str):
         self.name = name

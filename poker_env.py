@@ -10,8 +10,13 @@ from agent.base import BasePokerAgent
 
 
 RANK_VALUES = {"T": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
-BETTING_ACTIONS = ("CHECK", "BBING", "QUARTER", "HALF", "FULL", "CALL", "FOLD")
-GAME_MODES = ("cash", "tournament")
+BETTING_ACTIONS = (
+    "CHECK", "BBING", "DDADANG", "QUARTER", "HALF", "FULL", "CALL", "FOLD"
+)
+GAME_MODES = ("cash", "tournament", "ev")
+EV_RAISE_CAP = 6
+DEFAULT_EV_STACK_ANTE = 1000
+BETTING_RULES_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -38,11 +43,16 @@ class Card:
         return f"{self.suit}{display_rank}"
 
 
+ALL_CARDS = tuple(
+    Card(suit, rank)
+    for suit in ("s", "h", "d", "c")
+    for rank in ("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
+)
+
+
 class Deck:
     def __init__(self):
-        suits = ["s", "h", "d", "c"]
-        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"]
-        self.cards = [Card(suit, rank) for suit in suits for rank in ranks]
+        self.cards = list(ALL_CARDS)
         random.shuffle(self.cards)
 
     def draw(self) -> Card | None:
@@ -53,6 +63,7 @@ class Player:
     def __init__(self, name: str, chips: int = 1000):
         self.name = name
         self.chips = chips
+        self.stackless = False
         self.hand_start_chips = chips
         self.hidden_cards: list[Card] = []
         self.public_cards: list[Card] = []
@@ -70,8 +81,8 @@ class Player:
         self.public_cards = []
         self.discarded_card = None
         self.is_folded = False
-        self.is_all_in = self.chips <= 0
-        self.is_eliminated = self.chips <= 0
+        self.is_all_in = False if self.stackless else self.chips <= 0
+        self.is_eliminated = False if self.stackless else self.chips <= 0
         self.invested = 0
         self.current_bet = 0
         self.hand_score = (-1,)
@@ -105,7 +116,12 @@ class Player:
         return self.hidden_cards + self.public_cards
 
     def can_act(self) -> bool:
-        return not self.is_folded and not self.is_all_in and not self.is_eliminated and self.chips > 0
+        return (
+            not self.is_folded
+            and not self.is_all_in
+            and not self.is_eliminated
+            and (self.stackless or self.chips > 0)
+        )
 
 
 def get_best_hand(cards: Sequence[Card]) -> tuple[int, ...]:
@@ -209,6 +225,7 @@ class PokerGame:
         starting_chips: int = 1000,
         ante: int = 1,
         game_mode: str = "cash",
+        ev_stack_ante: int = DEFAULT_EV_STACK_ANTE,
     ):
         if len(player_names) < 2:
             raise ValueError("A hand needs at least two players.")
@@ -216,20 +233,33 @@ class PokerGame:
             raise ValueError("starting_chips must be positive.")
         if ante <= 0:
             raise ValueError("ante must be positive.")
+        if ev_stack_ante <= 0:
+            raise ValueError("ev_stack_ante must be positive.")
 
         game_mode = game_mode.lower()
         if game_mode not in GAME_MODES:
             raise ValueError(f"Unknown game mode: {game_mode}")
+        if game_mode == "ev" and len(player_names) != 2:
+            raise ValueError("EV mode currently supports exactly two players.")
 
         self.players = [Player(name, starting_chips) for name in list(player_names)[:5]]
+        for player in self.players:
+            player.stackless = game_mode == "ev"
+            if player.stackless:
+                player.chips = 0
+                player.hand_start_chips = 0
+                player.is_eliminated = False
         self.deck = Deck()
         self.starting_chips = starting_chips
         self.ante = ante
         self.game_mode = game_mode
+        self.ev_stack_ante = ev_stack_ante
+        self.ev_stack = ante * ev_stack_ante
         self.current_highest_bet = 0
         self.pot = 0
         self.street = "setup"
         self.betting_history: list[dict[str, Any]] = []
+        self.raise_count = 0
         self.log_file = log_file
 
         if self.log_file:
@@ -270,10 +300,13 @@ class PokerGame:
         self.current_highest_bet = 0
         self.street = "ante"
         self.betting_history = []
+        self.raise_count = 0
 
         for player in self.players:
             if self.game_mode == "cash":
                 player.chips = self.starting_chips
+            elif self.game_mode == "ev":
+                player.chips = 0
             player.reset_for_hand()
 
         live_players = [player for player in self.players if not player.is_eliminated]
@@ -281,7 +314,8 @@ class PokerGame:
             raise ValueError("At least two players with chips are needed.")
 
         for player in live_players:
-            self._commit_chips(player, min(self.ante, player.chips), count_for_round=False)
+            ante = self.ante if self.game_mode == "ev" else min(self.ante, player.chips)
+            self._commit_chips(player, ante, count_for_round=False)
 
         for _ in range(4):
             for player in live_players:
@@ -301,10 +335,26 @@ class PokerGame:
         else:
             valid.append("CALL")
 
-        if player.chips > call_amount and self.current_highest_bet == 0:
-            valid.append("BBING")
-        if player.chips > call_amount:
-            if self.pot > 0:
+        can_raise = not self._checked_this_street(player)
+        if self.game_mode == "ev":
+            remaining = self.ev_stack - player.invested
+            if self.current_highest_bet == 0 and remaining > 0:
+                valid.append("BBING")
+            if (
+                can_raise
+                and self.pot > 0
+                and self.raise_count < EV_RAISE_CAP
+                and remaining > call_amount
+            ):
+                if self.current_highest_bet > 0:
+                    valid.append("DDADANG")
+                valid.extend(["QUARTER", "HALF"])
+        else:
+            if player.chips > call_amount and self.current_highest_bet == 0:
+                valid.append("BBING")
+            if can_raise and player.chips > call_amount and self.pot > 0:
+                if self.current_highest_bet > 0:
+                    valid.append("DDADANG")
                 valid.extend(["QUARTER", "HALF", "FULL"])
 
         return [action for action in BETTING_ACTIONS if action in valid]
@@ -319,7 +369,12 @@ class PokerGame:
             opponents.append(
                 {
                     "seat": f"opponent_{offset}",
-                    "chips": opponent.chips,
+                    "seat_index": self.players.index(opponent),
+                    "chips": (
+                        self.ev_stack - opponent.invested
+                        if self.game_mode == "ev"
+                        else opponent.chips
+                    ),
                     "invested": opponent.invested,
                     "round_bet": opponent.current_bet,
                     "public_cards": [str(card) for card in opponent.public_cards],
@@ -333,16 +388,26 @@ class PokerGame:
             "game_mode": self.game_mode,
             "street": self.street,
             "seat_count": len(self.players),
+            "seat_index": viewer_index,
             "ante": self.ante,
             "pot": self.pot,
             "current_highest_bet": self.current_highest_bet,
-            "my_chips": player.chips,
+            "my_chips": (
+                self.ev_stack - player.invested
+                if self.game_mode == "ev"
+                else player.chips
+            ),
             "my_invested": player.invested,
+            "my_is_all_in": player.is_all_in,
             "my_round_bet": player.current_bet,
             "my_hidden_cards": [str(card) for card in player.hidden_cards],
             "my_public_cards": [str(card) for card in player.public_cards],
             "my_discarded_card": str(player.discarded_card) if player.discarded_card else None,
             "call_amount": call_amount,
+            "raise_count": self.raise_count,
+            "raise_cap": EV_RAISE_CAP if self.game_mode == "ev" else None,
+            "effective_stack_ante": self.ev_stack_ante if self.game_mode == "ev" else None,
+            "effective_stack": self.ev_stack if self.game_mode == "ev" else None,
             "opponents": opponents,
             "betting_history": self._history_from_view(viewer_index),
         }
@@ -378,6 +443,8 @@ class PokerGame:
         paid = self._commit_chips(player, total_bet, count_for_round=True)
         if player.current_bet > self.current_highest_bet:
             self.current_highest_bet = player.current_bet
+        if self.game_mode == "ev" and action in {"DDADANG", "QUARTER", "HALF"}:
+            self.raise_count += 1
 
         self._record_bet(player, action, paid, call_amount, raise_amount)
         if player.is_all_in:
@@ -391,6 +458,7 @@ class PokerGame:
         for player in self.players:
             player.current_bet = 0
         self.current_highest_bet = 0
+        self.raise_count = 0
 
         pending = {player for player in self.players if player.can_act()}
         if len(pending) <= 1:
@@ -489,7 +557,7 @@ class PokerGame:
 
         self.pot = 0
         for player in self.players:
-            player.is_eliminated = player.chips <= 0
+            player.is_eliminated = False if self.game_mode == "ev" else player.chips <= 0
 
         return {"payouts": payouts, "final_chips": {player.name: player.chips for player in self.players}}
 
@@ -549,13 +617,19 @@ class PokerGame:
         return result
 
     def _commit_chips(self, player: Player, requested_amount: int, count_for_round: bool) -> int:
-        amount = max(0, min(player.chips, int(math.ceil(requested_amount))))
+        amount = max(0, int(math.ceil(requested_amount)))
+        if self.game_mode == "ev":
+            amount = min(amount, max(0, self.ev_stack - player.invested))
+        else:
+            amount = min(player.chips, amount)
         player.chips -= amount
         player.invested += amount
         if count_for_round:
             player.current_bet += amount
         self.pot += amount
-        if player.chips == 0:
+        if self.game_mode == "ev" and player.invested >= self.ev_stack:
+            player.is_all_in = True
+        elif self.game_mode != "ev" and player.chips == 0:
             player.is_all_in = True
         return amount
 
@@ -563,6 +637,8 @@ class PokerGame:
         pot_after_call = self.pot + call_amount
         if action == "BBING":
             return self.ante
+        if action == "DDADANG":
+            return max(1, self.current_highest_bet)
         if action == "QUARTER":
             return max(1, math.ceil(pot_after_call / 4))
         if action == "HALF":
@@ -570,6 +646,15 @@ class PokerGame:
         if action == "FULL":
             return max(1, pot_after_call)
         raise ValueError(f"{action} is not a raise action.")
+
+    def _checked_this_street(self, player: Player) -> bool:
+        player_index = self.players.index(player)
+        return any(
+            event["street"] == self.street
+            and event["actor_index"] == player_index
+            and event["action"] == "CHECK"
+            for event in self.betting_history
+        )
 
     def _record_bet(self, player: Player, action: str, paid: int, call_amount: int, raise_amount: int) -> None:
         self.betting_history.append(

@@ -4,15 +4,11 @@ import random
 from typing import Any, Sequence
 
 from agent.base import PokerAgent
-from poker_env import Card, get_best_hand
+from agent.hand_range import estimate_uniform_hand_range
+from poker_env import ALL_CARDS, Card, get_best_hand
 
 
-RAISE_ACTIONS = ("BBING", "QUARTER", "HALF", "FULL")
-ALL_CARDS = tuple(
-    Card(suit, rank)
-    for suit in ("s", "h", "d", "c")
-    for rank in ("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
-)
+RAISE_ACTIONS = ("BBING", "DDADANG", "QUARTER", "HALF", "FULL")
 
 
 class HA1PokerAgent(PokerAgent):
@@ -67,11 +63,11 @@ class HA1PokerAgent(PokerAgent):
             if edge < 0:
                 action = "FOLD" if "FOLD" in valid else "CALL"
             elif edge >= 0.38:
-                action = self._first_valid(valid, ("FULL", "HALF", "QUARTER", "CALL"))
+                action = self._first_valid(valid, ("FULL", "HALF", "QUARTER", "DDADANG", "CALL"))
             elif edge >= 0.24:
-                action = self._first_valid(valid, ("HALF", "QUARTER", "CALL"))
+                action = self._first_valid(valid, ("HALF", "QUARTER", "DDADANG", "CALL"))
             elif edge >= 0.12:
-                action = self._first_valid(valid, ("QUARTER", "CALL"))
+                action = self._first_valid(valid, ("QUARTER", "DDADANG", "CALL"))
             else:
                 action = "CALL"
         else:
@@ -153,6 +149,14 @@ class HA1PokerAgent(PokerAgent):
                 equity_total += 1.0 / (tied_opponents + 1)
 
         return equity_total / self.simulations
+
+    def estimate_hand_range(
+        self,
+        state: dict[str, Any],
+        samples_per_hand: int = 16,
+        seed: int | None = None,
+    ) -> dict[str, Any]:
+        return estimate_uniform_hand_range(state, samples_per_hand=samples_per_hand, seed=seed)
 
     def learn_from_database(self, database: dict[str, Any] | None = None) -> dict[str, Any]:
         return {

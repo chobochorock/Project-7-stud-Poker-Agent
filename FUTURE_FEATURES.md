@@ -76,7 +76,9 @@
   - 베팅 기록과 팟/스택은 카드 equity 표와 분리합니다. 카드 표를 작게 유지하고 정책 모델이 베팅 문맥을 별도로 처리하게 합니다.
 
 - belief state는 `공개 상태 + 각 플레이어의 가능한 비공개 패 확률분포(range)`로 정의합니다.
-  - 1단계는 보이지 않은 카드가 균등하다고 가정한 card-only range이며, `agent/HA1.py`에 구현했습니다.
+  - 1단계는 보이지 않은 카드가 균등하다고 가정한 card-only range이며, `agent/hand_range.py`에 구현했습니다.
+  - 상대 초반 히든 2장 조합은 전수 열거하고 상대 discard, 마지막 히든과 미래 공개 카드는 조합별 Monte Carlo로 적분합니다(구현됨).
+  - 전체 승·무·패, split equity, 상대 최종 족보 분포와 조합별 조건부 equity를 반환합니다(구현됨).
   - 2단계는 베팅과 최초 discard/reveal 선택을 likelihood로 사용해 posterior를 갱신합니다.
   - 상대의 이름이나 에이전트 종류는 사용하지 않고, 좌석과 익명 행동 기록만 사용합니다.
   - `my_discarded_card`를 관측에 추가하여 자신이 아는 dead card를 range에서 제외합니다(구현됨).
@@ -90,20 +92,26 @@
   - 다인전에서는 플레이어별 range가 남은 덱을 공유하므로 가능한 공동 배분 수가 크게 늘어납니다.
   - 대신 공개 카드가 최대 4장이고 discard/reveal 및 베팅 이력이 있어 posterior를 좁힐 단서는 더 많습니다.
 
-### 핸드 range UI(차후 구현)
+### 핸드 range UI(1차 구현 완료)
 
-- 관측자 시점 선택과 range 계산기가 먼저 필요하므로 현재 UI에는 추정 숫자를 임시로 붙이지 않습니다.
-- 1차 화면은 상대별 족보 범위 확률, 예상 showdown equity, 유효 조합/샘플 수를 표시합니다.
-- `card-only`와 `action-conditioned`를 명확히 표시하여 단순 조합 확률을 학습된 belief로 오해하지 않게 합니다.
-- 정확 열거가 작은 구간에서는 전수 계산하고, 공동 배분이 커지는 다인전에서는 seed를 고정한 Monte Carlo 표본을 사용합니다.
+- 헤즈업 4구 이후에 관측자와 조합당 표본 수를 선택하고 명시적으로 계산할 수 있습니다.
+- 상대 히든 2장을 실제 카드 기준 52×52 삼각 격자로 표시합니다. 색은 조합별 내 equity이며 known/dead card가 포함된 조합은 비활성화됩니다.
+- 전체 승·무·패, split equity, 95% 근사 구간, 유효 조합/샘플 수와 상대 최종 족보 분포를 표시합니다.
+- 격자 칸을 선택하면 해당 조합의 승·무·패, equity와 균등 prior를 확인할 수 있습니다.
+- 현재 화면은 `Uniform card-only belief`임을 명시합니다. 베팅과 discard/reveal likelihood를 반영한 `action-conditioned` posterior는 차후 구현합니다.
+- 다인전 공동 range와 학습된 posterior 비교 화면은 실제 분석 요구가 생길 때 추가합니다.
 
 ### MCTS와 GRPO 후보
 
+- `agent/uct_agent.py`와 `uct_rollout.py`에 헤즈업 EV root-sampling UCT 기준선을 구현했습니다.
+  - sampled 상대 히든은 node key에 넣지 않으며, 매 의사결정에서 현재 observation부터 fold/showdown까지 직접 rollout합니다.
+  - 첫 상대 simulation 정책은 균등 무작위이며 search 결과는 별도 `uct_nodes` 테이블에 저장합니다.
+  - 상대도 탐색하는 adversarial ISMCTS, action-conditioned belief와 subtree 재사용은 아직 구현하지 않았습니다.
 - MCTS는 완전정보 게임처럼 실제 hidden card 하나를 정답으로 고정해 탐색하면 strategy fusion 문제가 생길 수 있습니다.
   - 첫 구현은 정보집합 Monte Carlo 탐색 또는 public belief state 탐색으로 제한합니다.
   - ReBeL의 이론적 보장은 2인 제로섬 조건이므로 최대 5인인 현재 게임에 그대로 적용된다고 가정하지 않습니다.
   - 탐색 트리 자체는 매 행동 뒤 버려도 되지만, 학습에 사용할 경우 root visit policy, root value, belief 요약은 trajectory에 저장합니다.
-  - HA1의 chance rollout을 기준선으로 삼고, 게임 복제 인터페이스가 준비되면 실제 베팅 행동을 포함한 ISMCTS로 확장합니다.
+  - 현재 random-opponent UCT의 처리량과 policy 안정성을 기준선으로 삼고 이후 adversarial ISMCTS로 확장합니다.
 
 - GRPO는 같은 정보 상태에서 여러 rollout을 만들고 그룹 내부 보상으로 advantage를 정규화하는 실험 후보입니다.
   - rollout 원문을 영구 저장할 의무는 없지만, 업데이트 중에는 같은 상태에서 나온 그룹과 보상이 필요합니다.

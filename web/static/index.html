@@ -50,6 +50,35 @@
           </section>
         </aside>
       </section>
+
+      <section class="range-band">
+        <div class="range-toolbar">
+          <div>
+            <p class="eyebrow">Uniform card-only belief</p>
+            <h2>Opponent Hand Range</h2>
+          </div>
+          <div class="range-controls">
+            <label>Observer<select id="rangeObserver"></select></label>
+            <label>Samples / hand<select id="rangeSamples"><option value="4">4 · fast</option><option value="16" selected>16 · balanced</option><option value="64">64 · precise</option></select></label>
+            <button id="calculateRange" type="button">Calculate</button>
+          </div>
+        </div>
+        <div id="rangeStatus" class="range-status">Unavailable</div>
+        <div id="rangeSummary" class="range-summary is-hidden"></div>
+        <div id="rangeWorkspace" class="range-workspace is-hidden">
+          <div class="range-table-area">
+            <div class="range-legend" aria-label="Hero equity color scale">
+              <span><i class="legend-low"></i>0%</span>
+              <span><i class="legend-mid"></i>50%</span>
+              <span><i class="legend-high"></i>100% Hero equity</span>
+            </div>
+            <div class="range-grid-shell">
+              <div id="rangeGrid" class="range-grid" role="grid" aria-label="Opponent hidden card combinations"></div>
+            </div>
+          </div>
+          <aside id="rangeDetail" class="range-detail"></aside>
+        </div>
+      </section>
     </main>
     <script src="/static/app.js"></script>
   </body>

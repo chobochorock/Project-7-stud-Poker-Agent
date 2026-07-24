@@ -5,10 +5,12 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections import Counter
+from time import perf_counter
 from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
+from agent.hand_range import estimate_uniform_hand_range
 from agent.heuristic_agent import HeuristicPokerAgent
 from agent.human_agent import WebHumanAgent
 from agent.learning_agent import LearningAgent
@@ -166,6 +168,42 @@ class WebPokerController:
         self._advance_until_wait()
         return self.public_state()
 
+    def calculate_hand_range(
+        self,
+        player_name: str,
+        samples_per_hand: int = 16,
+        seed: int = 7,
+    ) -> dict[str, Any]:
+        game = self._require_game()
+        if len(game.players) != 2:
+            raise ValueError("Hand range analysis currently supports heads-up games only.")
+        if game.street not in {street for street, _ in STREETS}:
+            raise ValueError("Hand range analysis is available after the first four-card deal.")
+        if not 1 <= samples_per_hand <= 128:
+            raise ValueError("samples_per_hand must be between 1 and 128.")
+
+        player = self._player_by_name(player_name)
+        if player.is_folded or player.is_eliminated:
+            raise ValueError("Choose an active observer.")
+        opponents = [
+            opponent
+            for opponent in game.players
+            if opponent is not player and not opponent.is_folded and not opponent.is_eliminated
+        ]
+        if len(opponents) != 1:
+            raise ValueError("Exactly one active opponent is required.")
+
+        started = perf_counter()
+        result = estimate_uniform_hand_range(
+            game.get_ai_state(player),
+            samples_per_hand=samples_per_hand,
+            seed=seed,
+        )
+        result["observer"] = player.name
+        result["opponent"] = opponents[0].name
+        result["elapsed_seconds"] = perf_counter() - started
+        return result
+
     def public_state(self) -> dict[str, Any]:
         if self.game is None:
             return {
@@ -302,6 +340,7 @@ class WebPokerController:
         for player in game.players:
             player.current_bet = 0
         game.current_highest_bet = 0
+        game.raise_count = 0
 
         pending = {player for player in game.players if player.can_act()}
         self.betting = BettingRoundState(
@@ -459,18 +498,18 @@ class WebPokerController:
             requested = 0
             if action == "CALL":
                 requested = call_amount
-                paid = min(player.chips, requested)
+                paid = requested if game.game_mode == "ev" else min(player.chips, requested)
             elif action not in {"CHECK", "FOLD"}:
                 raise_amount = game._raise_amount(action, call_amount)
                 requested = call_amount + raise_amount
-                paid = min(player.chips, requested)
+                paid = requested if game.game_mode == "ev" else min(player.chips, requested)
 
             costs[action] = {
                 "paid": paid,
                 "requested": requested,
                 "call_amount": call_amount if action not in {"CHECK", "FOLD"} else 0,
                 "raise_amount": raise_amount,
-                "all_in": paid > 0 and paid >= player.chips,
+                "all_in": game.game_mode != "ev" and paid > 0 and paid >= player.chips,
             }
 
         return costs
@@ -497,10 +536,12 @@ class WebPokerController:
     def _live_player_count(self) -> int:
         if self.game is None:
             return 0
+        if self.game_mode == "ev":
+            return len(self.game.players)
         return sum(1 for player in self.game.players if player.chips > 0)
 
     def _can_start_next_round(self) -> bool:
-        return self.game_mode == "cash" or self._live_player_count() >= 2
+        return self.game_mode in {"cash", "ev"} or self._live_player_count() >= 2
 
     def _winner_name(self) -> str | None:
         if self.game is None:
@@ -638,7 +679,7 @@ class WebPokerController:
         path = Path(self.replay_file)
         payload = {
             "replay_version": 2,
-            "replay_scope": "cash_session" if self.game_mode == "cash" else "episode",
+            "replay_scope": f"{self.game_mode}_session" if self.game_mode in {"cash", "ev"} else "episode",
             "game_mode": self.game_mode,
             "created_at": self.episode_started_at,
             "updated_at": datetime.now().isoformat(timespec="seconds"),

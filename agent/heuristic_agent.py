@@ -7,7 +7,7 @@ from agent.base import PokerAgent
 from poker_env import Card, get_best_hand, get_public_betting_priority
 
 
-RAISE_ACTIONS = ("BBING", "QUARTER", "HALF", "FULL")
+RAISE_ACTIONS = ("BBING", "DDADANG", "QUARTER", "HALF", "FULL")
 
 
 class HeuristicPokerAgent(PokerAgent):
@@ -84,9 +84,9 @@ class HeuristicPokerAgent(PokerAgent):
         valid_actions: Sequence[str],
     ) -> str:
         if strength >= 0.90:
-            return self._first_valid(valid_actions, ("HALF", "QUARTER", "BBING", "CALL", "FOLD"))
+            return self._first_valid(valid_actions, ("HALF", "QUARTER", "DDADANG", "CALL", "FOLD"))
         if strength >= 0.76 and self._call_pressure(state) < 0.55:
-            return self._first_valid(valid_actions, ("QUARTER", "BBING", "CALL", "FOLD"))
+            return self._first_valid(valid_actions, ("QUARTER", "DDADANG", "CALL", "FOLD"))
         if self._should_call(strength, state):
             return "CALL"
         return "FOLD" if "FOLD" in valid_actions else "CALL"

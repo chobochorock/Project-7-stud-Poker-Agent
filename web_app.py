@@ -60,6 +60,14 @@ class PokerWebHandler(BaseHTTPRequestHandler):
                 state = controller.submit_action(data["player"], data["action"])
                 self._send_json(state)
                 return
+            if parsed.path == "/api/hand_range":
+                result = controller.calculate_hand_range(
+                    data["player"],
+                    samples_per_hand=int(data.get("samples_per_hand", 16)),
+                    seed=int(data.get("seed", 7)),
+                )
+                self._send_json(result)
+                return
             self._send_json({"error": "Not found"}, status=404)
         except Exception as exc:
             self._send_json({"error": str(exc), "state": controller.public_state()}, status=400)

@@ -63,9 +63,16 @@ class WebControllerTests(unittest.TestCase):
 
         state = controller.submit_discard("Player_1", 0, 1)
         self.assertEqual(state["waiting"]["player"], "Player_2")
+        player_1 = next(player for player in state["players"] if player["name"] == "Player_1")
+        self.assertEqual(player_1["hidden_count"], 4)
+        self.assertEqual(player_1["public_cards"], [])
 
         state = controller.submit_discard("Player_2", 0, 1)
         self.assertEqual(state["waiting"]["type"], "bet")
+        self.assertTrue(all(player["hidden_count"] == 2 for player in state["players"]))
+        self.assertTrue(all(len(player["public_cards"]) == 3 for player in state["players"]))
+        player_1 = next(player for player in state["players"] if player["name"] == "Player_1")
+        self.assertNotEqual(player_1["hand_name"], "-")
 
         acting_player = state["waiting"]["player"]
         valid_actions = state["waiting"]["valid_actions"]
@@ -99,8 +106,8 @@ class WebControllerTests(unittest.TestCase):
 
         self.assertEqual(result["observer"], "Player_1")
         self.assertEqual(result["opponent"], "Player_2")
-        self.assertEqual(result["possible_hands"], 990)
-        self.assertEqual(result["total_samples"], 990)
+        self.assertEqual(result["possible_hands"], 903)
+        self.assertEqual(result["total_samples"], 903)
         self.assertAlmostEqual(
             result["win_probability"] + result["tie_probability"] + result["loss_probability"],
             1.0,
@@ -186,6 +193,8 @@ class WebControllerTests(unittest.TestCase):
 
         state = controller.start(["random", "random"], log_file=None, replay_dir=None, game_mode="ev", ante=1000)
 
+        self.assertEqual(state["ante"], 1000)
+        self.assertEqual(state["effective_stack"], 1_000_000)
         self.assertEqual(sum(state["session"]["final_chips"].values()), 0)
         self.assertTrue(state["next_round_available"])
 

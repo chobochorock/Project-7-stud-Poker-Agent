@@ -10,7 +10,7 @@ from agent.uct_agent import UCTSearchRecord
 from cluster_q_learning import run_cluster_q_learning
 from clustering_analyze import analyze_model_dir
 from clustering_train import run_training
-from ev_rollout import ACTIONS
+from ev_rollout import ACTIONS, SCHEMA_VERSION
 from evaluate_cluster_agent import run_league
 from poker_env import PokerGame
 from uct_rollout import UCTNodeTable
@@ -31,7 +31,7 @@ class ClusteringTrainingTests(unittest.TestCase):
                 visits = base_visits[index % len(base_visits) :] + base_visits[: index % len(base_visits)]
                 state = json.dumps(
                     [
-                        2,
+                        SCHEMA_VERSION,
                         street,
                         [[0, 4], [8, 12], 16, [20, 24]],
                         1000,
@@ -51,7 +51,7 @@ class ClusteringTrainingTests(unittest.TestCase):
                     UCTSearchRecord(
                         state_json=state,
                         seat_index=index % 2,
-                        search_version="uct-v2",
+                        search_version="uct-v3",
                         opponent_policy="random",
                         simulation_budget=sum(visits),
                         legal_mask=(1 << len(action_names)) - 1,
@@ -66,7 +66,7 @@ class ClusteringTrainingTests(unittest.TestCase):
                 )
 
             table.flush(records)
-            table.finish({"schema_version": 2})
+            table.finish({"schema_version": SCHEMA_VERSION})
             output = root / "model"
             metrics = run_training(
                 [database, database],

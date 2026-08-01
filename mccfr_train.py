@@ -32,6 +32,7 @@ def train(
     initialize_from: Path | None,
     freeze_seventh: bool,
     cluster_template: Path | None,
+    regret_plus: bool = False,
 ) -> dict[str, object]:
     if hands <= 0 or iterations <= 0 or checkpoint_hands <= 0 or ante <= 0:
         raise ValueError("hands, iterations, checkpoint_hands, and ante must be positive")
@@ -51,6 +52,8 @@ def train(
         start_street != "7th_hidden" or initialize_from is not None or freeze_seventh
     ):
         raise ValueError("--cluster-template currently supports only standalone 7th training")
+    if regret_plus and cluster_template is not None:
+        raise ValueError("--cfr-plus cannot initialize from a clustered table")
 
     if cluster_template is None:
         agent: MCCFRPokerAgent = MCCFRPokerAgent(
@@ -60,6 +63,7 @@ def train(
             seed=seed,
             start_street=start_street,
             freeze_seventh=freeze_seventh,
+            regret_plus=regret_plus,
         )
     else:
         agent = MCCFRKMeansAgent(
@@ -135,7 +139,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--hands", type=int, default=100_000)
     parser.add_argument("--iterations", type=int, default=16)
-    parser.add_argument("--raise-cap", type=int, default=2)
+    parser.add_argument("--raise-cap", type=int, default=3)
     parser.add_argument("--ante", type=int, default=1000)
     parser.add_argument("--checkpoint-hands", type=int, default=1000)
     parser.add_argument("--progress-seconds", type=float, default=30.0)
@@ -148,6 +152,7 @@ def main() -> None:
     parser.add_argument("--cluster-template", type=Path)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--reset-average-strategy", action="store_true")
+    parser.add_argument("--cfr-plus", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
@@ -166,6 +171,7 @@ def main() -> None:
                 initialize_from=args.initialize_from,
                 freeze_seventh=args.freeze_seventh,
                 cluster_template=args.cluster_template,
+                regret_plus=args.cfr_plus,
             ),
             indent=2,
         )

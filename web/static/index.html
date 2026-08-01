@@ -19,17 +19,27 @@
           <span id="phaseBadge">idle</span>
           <span id="streetBadge">-</span>
           <span id="potBadge">Pot 0</span>
+          <span id="anteBadge">Ante 1</span>
+          <span id="stackBadge">Stack 1,000</span>
         </div>
       </header>
 
       <section class="control-band">
         <form id="setupForm" class="setup-grid">
-          <label>Mode<select name="game_mode"><option value="cash" selected>cash</option><option value="tournament">tournament</option></select></label>
-          <label>Player 1<select name="p1"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 2<select name="p2"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 3<select name="p3"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 4<select name="p4"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
-          <label>Player 5<select name="p5"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="empty">empty</option></select></label>
+          <label>Mode<select id="gameMode" name="game_mode"><option value="cash" selected>cash</option><option value="tournament">tournament</option><option value="ev">ev</option></select></label>
+          <label>Ante (chips)<input id="anteInput" name="ante" type="number" min="1" step="1" value="1" required></label>
+          <label>Player 1<select name="p1"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="cpp-mccfr">cpp-mccfr</option><option value="empty">empty</option></select></label>
+          <label>Player 2<select name="p2"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="cpp-mccfr">cpp-mccfr</option><option value="empty">empty</option></select></label>
+          <label>Player 3<select name="p3"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="cpp-mccfr">cpp-mccfr</option><option value="empty">empty</option></select></label>
+          <label>Player 4<select name="p4"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="cpp-mccfr">cpp-mccfr</option><option value="empty">empty</option></select></label>
+          <label>Player 5<select name="p5"><option value="human">human</option><option value="random" selected>random</option><option value="heuristic">heuristic</option><option value="ha1">ha1</option><option value="learning">learning</option><option value="cpp-mccfr">cpp-mccfr</option><option value="empty">empty</option></select></label>
+          <fieldset class="unit-control">
+            <legend>Display</legend>
+            <div>
+              <label><input type="radio" name="display_unit" value="chips" checked><span>Chip</span></label>
+              <label><input type="radio" name="display_unit" value="ante"><span>Ante</span></label>
+            </div>
+          </fieldset>
           <label class="toggle-label">Auto Next<input id="autoRounds" name="auto_rounds" type="checkbox"></label>
           <label>Delay sec<input id="autoInterval" name="auto_interval" type="number" min="0.5" step="0.5" value="2"></label>
           <button type="submit">Start</button>
@@ -37,9 +47,18 @@
       </section>
 
       <section class="table-layout">
-        <div id="players" class="players-grid"></div>
-        <aside class="side-panel">
+        <div class="game-column">
+          <div class="poker-table">
+            <div id="players" class="players-grid"></div>
+            <div id="tablePot" class="table-pot" aria-live="polite">
+              <span>Pot</span>
+              <strong>0</strong>
+              <small>Waiting for action</small>
+            </div>
+          </div>
           <section id="actionPanel" class="panel-block"></section>
+        </div>
+        <aside class="side-panel">
           <section class="panel-block">
             <h2>Betting Log</h2>
             <div id="bettingLog" class="log-list"></div>

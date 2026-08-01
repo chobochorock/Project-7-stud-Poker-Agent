@@ -10,7 +10,7 @@ from agent import PokerAgent
 from agent.HA1 import HA1PokerAgent
 from agent.hand_range import estimate_uniform_hand_range
 from agent.heuristic_agent import HeuristicPokerAgent
-from ev_rollout import decode_state, inspect_table, run_rollouts
+from ev_rollout import SCHEMA_VERSION, decode_state, inspect_table, run_rollouts
 from poker_env import Card, PokerGame, evaluate_5_cards, get_public_betting_priority
 from main import build_active_agents
 
@@ -55,6 +55,7 @@ class PokerRuleTests(unittest.TestCase):
         game = PokerGame(["A", "B"], log_file=None)
         player = game.players[0]
         game.pot = 5
+        game.street = "5th"
 
         self.assertIn("CHECK", game.get_valid_actions(player))
         self.assertIn("FULL", game.get_valid_actions(player))
@@ -64,6 +65,7 @@ class PokerRuleTests(unittest.TestCase):
         game = PokerGame(["A", "B"], log_file=None)
         player_a, player_b = game.players
         game.pot = 10
+        game.street = "5th"
 
         self.assertIn("BBING", game.get_valid_actions(player_a))
 
@@ -83,6 +85,7 @@ class PokerRuleTests(unittest.TestCase):
         game = PokerGame(["A", "B"], log_file=None)
         player_a, player_b = game.players
         game.pot = 10
+        game.street = "5th"
 
         game.apply_action(player_a, "CHECK")
         game.apply_action(player_b, "BBING")
@@ -94,6 +97,7 @@ class PokerRuleTests(unittest.TestCase):
         game = PokerGame(["A", "B"], log_file=None)
         player_a, player_b = game.players
         game.pot = 80
+        game.street = "5th"
 
         game.apply_action(player_a, "QUARTER")
         self.assertEqual(player_a.current_bet, 20)
@@ -170,27 +174,34 @@ class PokerRuleTests(unittest.TestCase):
         self.assertEqual([player.hand_start_chips for player in game.players], [50, 150])
         self.assertEqual([player.chips for player in game.players], [49, 149])
 
-    def test_ev_mode_is_stackless_and_caps_sized_raises_after_bbing(self):
+    def test_street_caps_aggressive_actions_per_player(self):
         game = PokerGame(["A", "B"], log_file=None, ante=1000, game_mode="ev")
         game.start_game()
         player_a, player_b = game.players
+        game.street = "7th_hidden"
 
         self.assertEqual([player.chips for player in game.players], [-1000, -1000])
-        game.apply_action(player_a, "BBING")
-        self.assertEqual(game.raise_count, 0)
+        for street, cap in (("5th", 1), ("6th", 2), ("7th_hidden", 3)):
+            game.street = street
+            game.current_highest_bet = 0
+            game.raise_count = 0
+            for player in game.players:
+                player.current_bet = 0
+            game.apply_action(player_a, "BBING")
+            for index in range(cap * 2 - 1):
+                player = player_b if index % 2 == 0 else player_a
+                self.assertIn("DDADANG", game.get_valid_actions(player))
+                game.apply_action(player, "DDADANG")
+            self.assertNotIn("DDADANG", game.get_valid_actions(player_a))
+            self.assertNotIn("QUARTER", game.get_valid_actions(player_a))
+            self.assertNotIn("HALF", game.get_valid_actions(player_a))
 
-        for index in range(6):
-            player = player_b if index % 2 == 0 else player_a
-            self.assertIn("HALF", game.get_valid_actions(player))
-            game.apply_action(player, "HALF")
+    def test_fourth_street_does_not_allow_betting(self):
+        game = PokerGame(["A", "B"], log_file=None, ante=1000, game_mode="ev")
+        game.start_game()
+        game.street = "4th"
 
-        valid_actions = game.get_valid_actions(player_b)
-        self.assertEqual(game.raise_count, 6)
-        self.assertIn("CALL", valid_actions)
-        self.assertNotIn("QUARTER", valid_actions)
-        self.assertNotIn("HALF", valid_actions)
-        self.assertNotIn("FULL", valid_actions)
-        self.assertTrue(all(player.can_act() for player in game.players))
+        self.assertEqual(game.get_valid_actions(game.players[0]), ["CHECK", "FOLD"])
 
     def test_ev_hand_reward_is_zero_sum(self):
         game = PokerGame(["A", "B"], log_file=None, ante=1000, game_mode="ev")
@@ -202,11 +213,42 @@ class PokerRuleTests(unittest.TestCase):
         self.assertEqual(sum(result["final_chips"].values()), 0)
         self.assertTrue(all(not player.is_all_in for player in game.players))
 
+    def test_five_player_ev_hand_is_zero_sum(self):
+        names = ["A", "B", "C", "D", "E"]
+        game = PokerGame(names, log_file=None, ante=1000, game_mode="ev")
+        agents = {name: PokerAgent(name) for name in names}
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = game.play_hand(agents)
+
+        self.assertEqual(len(result["final_chips"]), 5)
+        self.assertEqual(sum(result["final_chips"].values()), 0)
+        self.assertTrue(all(player.hand_start_chips == 0 for player in game.players))
+
+    def test_five_player_ev_supports_individual_stack_caps(self):
+        names = ["A", "B", "C", "D", "E"]
+        game = PokerGame(
+            names,
+            log_file=None,
+            ante=10,
+            game_mode="ev",
+            ev_stack_antes=[50, 100, 200, 500, 1000],
+        )
+        game.start_game()
+
+        state = game.get_ai_state(game.players[0])
+        self.assertEqual(state["effective_stack"], 500)
+        self.assertEqual(
+            [opponent["effective_stack"] for opponent in state["opponents"]],
+            [1000, 2000, 5000, 10000],
+        )
+
     def test_ev_effective_stack_caps_bets_and_marks_all_in(self):
         game = PokerGame(
             ["A", "B"], log_file=None, ante=10, game_mode="ev", ev_stack_ante=4
         )
         game.start_game()
+        game.street = "7th_hidden"
         player_a, player_b = game.players
 
         state = game.get_ai_state(player_a)
@@ -239,8 +281,8 @@ class PokerRuleTests(unittest.TestCase):
 
             decoded = decode_state(state_json)
             inspected = inspect_table(output, limit=1)
-            self.assertEqual(decoded["schema_version"], 2)
-            self.assertEqual(schema_version, "2")
+            self.assertEqual(decoded["schema_version"], SCHEMA_VERSION)
+            self.assertEqual(schema_version, str(SCHEMA_VERSION))
             self.assertIn(decoded["street"], {"4th", "5th", "6th", "7th_hidden"})
             self.assertEqual(len(inspected["rows"]), 1)
 

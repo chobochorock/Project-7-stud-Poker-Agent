@@ -4,13 +4,14 @@ from typing import Sequence
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
+from agent.claude_belief_br import ClaudeBeliefBRAgent
 from agent.heuristic_agent import HeuristicPokerAgent
 from agent.human_agent import HumanAgent
 from agent.learning_agent import LearningAgent
 from poker_env import GAME_MODES, PokerGame
 
 
-PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "learning", "empty")
+PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "claude", "learning", "empty")
 
 
 def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent | None:
@@ -23,6 +24,8 @@ def create_agent(agent_type: str, name: str, db_filename: str) -> BasePokerAgent
         return HeuristicPokerAgent(name)
     if normalized_type == "ha1":
         return HA1PokerAgent(name)
+    if normalized_type == "claude":
+        return ClaudeBeliefBRAgent(name)
     if normalized_type == "learning":
         return LearningAgent(name, db_filename=db_filename)
     if normalized_type == "empty":

@@ -1,0 +1,156 @@
+{
+  "game": "fixed_7th_one_bet_oracle",
+  "scope": "3 private types/player; check-bet-call-fold; no future chance",
+  "matrix_shape": [
+    64,
+    64
+  ],
+  "pot": 4.0,
+  "bet": 1.0,
+  "exact": {
+    "value_for_p0": -0.8,
+    "nash_conv": 4.440892098500626e-16,
+    "p0_behavior": [
+      {
+        "first_aggressive": 0.1666666666666663,
+        "call_facing_bet": 0.0
+      },
+      {
+        "first_aggressive": 0.30000000000000066,
+        "call_facing_bet": 0.4666666666666664
+      },
+      {
+        "first_aggressive": 0.5333333333333331,
+        "call_facing_bet": 0.46666666666666695
+      }
+    ],
+    "p1_behavior": [
+      {
+        "first_aggressive": 0.3999999999999999,
+        "call_facing_bet": 0.3999999999999999
+      },
+      {
+        "first_aggressive": 1.0,
+        "call_facing_bet": 1.0
+      },
+      {
+        "first_aggressive": 1.0,
+        "call_facing_bet": 1.0
+      }
+    ]
+  },
+  "cfr_plus": {
+    "updates": 100000,
+    "nash_conv": 0.00031906726697383814,
+    "elapsed_seconds": 1.2221445999894058,
+    "curve": [
+      {
+        "updates": 1000,
+        "nash_conv": 0.003183789676295623
+      },
+      {
+        "updates": 3332,
+        "nash_conv": 0.0018213097887602725
+      },
+      {
+        "updates": 10000,
+        "nash_conv": 0.0009884735498902897
+      },
+      {
+        "updates": 33332,
+        "nash_conv": 0.0005942595424660579
+      },
+      {
+        "updates": 100000,
+        "nash_conv": 0.00031906726697383814
+      }
+    ],
+    "p0_behavior": [
+      {
+        "first_aggressive": 0.23579880408128953,
+        "call_facing_bet": 0.11789940301374936
+      },
+      {
+        "first_aggressive": 0.2625460989956135,
+        "call_facing_bet": 0.7046738737625827
+      },
+      {
+        "first_aggressive": 0.9168403422450784,
+        "call_facing_bet": 0.5415798286434232
+      }
+    ],
+    "p1_behavior": [
+      {
+        "first_aggressive": 0.3997751522883018,
+        "call_facing_bet": 0.40044063445542677
+      },
+      {
+        "first_aggressive": 0.9975468781079339,
+        "call_facing_bet": 0.9999060843402078
+      },
+      {
+        "first_aggressive": 0.9999996309113158,
+        "call_facing_bet": 0.999999999580496
+      }
+    ]
+  },
+  "asymp_l2": {
+    "updates": 100000,
+    "nash_conv": 0.22362538174571167,
+    "elapsed_seconds": 1.8371878000034485,
+    "spectral_norm": 39.23852788335992,
+    "paper_step_bound": 0.010311074441604602,
+    "learning_rate": 0.009279966997444142,
+    "mu": 20.0,
+    "curve": [
+      {
+        "updates": 1000,
+        "nash_conv": 0.2591450983148965
+      },
+      {
+        "updates": 3332,
+        "nash_conv": 0.24046049109844703
+      },
+      {
+        "updates": 10000,
+        "nash_conv": 0.23279417323596352
+      },
+      {
+        "updates": 33332,
+        "nash_conv": 0.22429714287771385
+      },
+      {
+        "updates": 100000,
+        "nash_conv": 0.22362538174571167
+      }
+    ],
+    "p0_behavior": [
+      {
+        "first_aggressive": 0.3989830273794377,
+        "call_facing_bet": 0.4010169726205627
+      },
+      {
+        "first_aggressive": 0.5969490821383125,
+        "call_facing_bet": 0.5949151368971874
+      },
+      {
+        "first_aggressive": 0.6684746179921115,
+        "call_facing_bet": 0.6657626910039446
+      }
+    ],
+    "p1_behavior": [
+      {
+        "first_aggressive": 0.4728180026698876,
+        "call_facing_bet": 0.5776873688894599
+      },
+      {
+        "first_aggressive": 0.47951179200305677,
+        "call_facing_bet": 0.8265039306676756
+      },
+      {
+        "first_aggressive": 0.527181997330112,
+        "call_facing_bet": 0.9958087004428648
+      }
+    ]
+  }
+}

@@ -17,8 +17,9 @@ class UCTRolloutTests(unittest.TestCase):
         game.start_game()
         for player in game.players:
             self.assertTrue(player.discard_and_reveal(0, 1))
-        game.street = "4th"
-        game.deal_cards_to_active(is_public=True)
+        for street in ("4th", "5th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
         actor_index = game._first_bettor_index(set(game.players))
         actor = game.players[actor_index]
         valid_actions = game.get_valid_actions(actor)
@@ -38,8 +39,9 @@ class UCTRolloutTests(unittest.TestCase):
         game.start_game()
         for player in game.players:
             self.assertTrue(player.discard_and_reveal(0, 1))
-        game.street = "4th"
-        game.deal_cards_to_active(is_public=True)
+        for street in ("4th", "5th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
         actor_index = game._first_bettor_index(set(game.players))
         actor = game.players[actor_index]
         valid_actions = game.get_valid_actions(actor)
@@ -59,16 +61,17 @@ class UCTRolloutTests(unittest.TestCase):
         self.assertEqual(sum(root.action_visits.values()), 24)
         self.assertTrue(all(record.opponent_policy == "uct" for record in records))
         self.assertIn(1 - actor_index, {record.seat_index for record in records})
-        self.assertIn("uct-v2-stack1000", {record.search_version for record in records})
-        self.assertIn("uct-v2-stack1000-tree", {record.search_version for record in records})
+        self.assertIn("uct-v3-stack1000", {record.search_version for record in records})
+        self.assertIn("uct-v3-stack1000-tree", {record.search_version for record in records})
 
     def test_uct_can_stop_after_root_ev_confidence_converges(self):
         game = PokerGame(["A", "B"], log_file=None, ante=1000, game_mode="ev")
         game.start_game()
         for player in game.players:
             self.assertTrue(player.discard_and_reveal(0, 1))
-        game.street = "4th"
-        game.deal_cards_to_active(is_public=True)
+        for street in ("4th", "5th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
         actor_index = game._first_bettor_index(set(game.players))
         actor = game.players[actor_index]
         valid_actions = game.get_valid_actions(actor)
@@ -88,15 +91,16 @@ class UCTRolloutTests(unittest.TestCase):
         self.assertEqual(agent.converged_searches, 1)
         self.assertEqual(agent.simulations_run, 32)
         self.assertEqual(sum(record.action_visits.values()), 32)
-        self.assertEqual(record.search_version, "uct-v2-stack1000-ci95")
+        self.assertEqual(record.search_version, "uct-v3-stack1000-ci95")
 
     def test_uct_simulation_supports_ddadang_and_check_lock(self):
         game = PokerGame(["A", "B"], log_file=None, ante=10, game_mode="ev")
         game.start_game()
         for player in game.players:
             self.assertTrue(player.discard_and_reveal(0, 1))
-        game.street = "4th"
-        game.deal_cards_to_active(is_public=True)
+        for street in ("4th", "5th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
         actor = game.players[game._first_bettor_index(set(game.players))]
         state = game.get_ai_state(actor, game.get_valid_actions(actor))
 
@@ -118,8 +122,9 @@ class UCTRolloutTests(unittest.TestCase):
         game.start_game()
         for player in game.players:
             self.assertTrue(player.discard_and_reveal(0, 1))
-        game.street = "4th"
-        game.deal_cards_to_active(is_public=True)
+        for street in ("4th", "5th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
         actor = game.players[game._first_bettor_index(set(game.players))]
         state = game.get_ai_state(actor, game.get_valid_actions(actor))
         simulation = _EVSimulation(state, random.Random(11))

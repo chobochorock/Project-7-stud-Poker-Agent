@@ -7,16 +7,19 @@ import random
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
+from agent.claude_belief_br import ClaudeBeliefBRAgent
 from agent.heuristic_agent import HeuristicPokerAgent
 from poker_env import PokerGame
 
 
-AGENT_TYPES = ("ha1", "heuristic", "random")
+AGENT_TYPES = ("ha1", "claude", "heuristic", "random")
 
 
 def create_agent(agent_type: str, name: str, simulations: int, seed: int) -> BasePokerAgent:
     if agent_type == "ha1":
         return HA1PokerAgent(name, simulations=simulations, seed=seed)
+    if agent_type == "claude":
+        return ClaudeBeliefBRAgent(name, belief_particles=simulations, seed=seed)
     if agent_type == "heuristic":
         return HeuristicPokerAgent(name)
     if agent_type == "random":
@@ -32,9 +35,14 @@ def evaluate_heads_up(
     seed: int = 2026,
     starting_chips: int = 1000,
     ante: int = 1,
+    mode: str = "cash",
 ) -> dict[str, float | int | str]:
     if hands <= 0:
         raise ValueError("hands must be positive.")
+
+    # In EV mode every hand starts from a zero baseline (stackless net chips),
+    # so profit is just the final net; in cash mode it is final minus the stack.
+    baseline = 0 if mode == "ev" else starting_chips
 
     wins = ties = losses = total_profit = 0
     for hand_index in range(hands):
@@ -51,12 +59,12 @@ def evaluate_heads_up(
             log_file=None,
             starting_chips=starting_chips,
             ante=ante,
-            game_mode="cash",
+            game_mode=mode,
         )
         with contextlib.redirect_stdout(io.StringIO()):
             result = game.play_hand(agents)
 
-        profit = int(result["final_chips"][a_seat]) - starting_chips
+        profit = int(result["final_chips"][a_seat]) - baseline
         total_profit += profit
         if profit > 0:
             wins += 1
@@ -89,6 +97,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--starting-chips", type=int, default=1000)
     parser.add_argument("--ante", type=int, default=1)
+    parser.add_argument("--mode", choices=("cash", "ev"), default="cash",
+                        help="ev = stackless zero-sum net chips (use --ante 1000 for precision)")
     return parser.parse_args()
 
 
@@ -102,6 +112,7 @@ def main() -> None:
         seed=args.seed,
         starting_chips=args.starting_chips,
         ante=args.ante,
+        mode=args.mode,
     )
     print(f"{result['agent_a']} vs {result['agent_b']} ({result['hands']} hands)")
     print(f"W/T/L: {result['wins']}/{result['ties']}/{result['losses']}")

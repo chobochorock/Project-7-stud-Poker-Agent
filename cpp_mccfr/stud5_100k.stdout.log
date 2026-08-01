@@ -1,0 +1,23 @@
+{
+  "solver": "five-player-external-sampling-mccfr-plus",
+  "trained_street": "7th",
+  "pre_seventh_policy": "heuristic",
+  "root_iterations": 90000,
+  "training_traversals": 450000,
+  "training_node_visits": 30806838,
+  "buckets": 209911,
+  "power_clusters": 64,
+  "stack_clusters": 16,
+  "power_mc_samples": 16,
+  "power_cache_entries": 3425992,
+  "stack_sampling": {"distribution":"log-uniform","min":50,"max":1000},
+  "evaluation": {
+    "base_deals": 1000,
+    "hands": 5000,
+    "target_average_profit_ante": {"mean":6.77680000,"standard_error":1.26211851,"ci95":[4.30304773,9.25055227]},
+    "by_target_stack": {"50-100":{"base_deal_samples":729,"mean":7.51680384,"standard_error":2.39940950,"ci95":[2.81396122,12.21964646]},"100-200":{"base_deal_samples":718,"mean":1.49628598,"standard_error":3.33029865,"ci95":[-5.03109937,8.02367133]},"200-500":{"base_deal_samples":851,"mean":7.12054446,"standard_error":4.72554650,"ci95":[-2.14152668,16.38261560]},"500-1000":{"base_deal_samples":749,"mean":5.68914108,"standard_error":5.92591849,"ci95":[-5.92565915,17.30394131]}},
+    "policy_misses": 24,
+    "action_counts": {"CHECK":270,"BBING":147,"DDADANG":388,"QUARTER":623,"HALF":650,"CALL":752,"FOLD":3017}
+  },
+  "training_elapsed_seconds": 1116.26568340
+}

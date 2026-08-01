@@ -10,14 +10,15 @@ from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
+from agent.cpp_mccfr_agent import CppMCCFRAgent
 from agent.hand_range import estimate_uniform_hand_range
 from agent.heuristic_agent import HeuristicPokerAgent
 from agent.human_agent import WebHumanAgent
 from agent.learning_agent import LearningAgent
-from poker_env import GAME_MODES, PokerGame, Player
+from poker_env import GAME_MODES, PokerGame, Player, get_best_hand
 
 
-PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "learning", "empty")
+PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "learning", "cpp-mccfr", "empty")
 STREETS = (("4th", True), ("5th", True), ("6th", True), ("7th_hidden", False))
 RANK_LABELS = {
     14: "A",
@@ -51,6 +52,7 @@ class WebPokerController:
         self.phase = "idle"
         self.waiting: dict[str, Any] | None = None
         self.discard_cursor = 0
+        self.pending_discard_choices: dict[str, tuple[int, int]] = {}
         self.street_index = 0
         self.betting: BettingRoundState | None = None
         self.result: dict[str, Any] | None = None
@@ -88,7 +90,13 @@ class WebPokerController:
         game_mode = game_mode.lower()
         if game_mode not in GAME_MODES:
             raise ValueError(f"Unknown game mode: {game_mode}")
+        if "cpp-mccfr" in normalized_types and game_mode != "ev":
+            raise ValueError("C++ MCCFR requires EV mode.")
 
+        for agent in self.agents.values():
+            close = getattr(agent, "close", None)
+            if close is not None:
+                close()
         self.__init__()
         self.db_filename = db_filename
         self.log_file = log_file
@@ -140,10 +148,11 @@ class WebPokerController:
             raise ValueError("No discard/reveal choice is currently expected for that player.")
 
         player = self._player_by_name(player_name)
-        if not player.discard_and_reveal(discard_index, reveal_index):
+        if not player.can_discard_and_reveal(discard_index, reveal_index):
             raise ValueError("Choose two different valid card indices.")
 
-        self._event(f"{player.name} discarded one card and revealed {player.public_cards[-1]}.")
+        self.pending_discard_choices[player.name] = (discard_index, reveal_index)
+        self._event(f"{player.name} locked in a discard/reveal choice.")
         self.discard_cursor += 1
         self.waiting = None
         self._advance_until_wait()
@@ -213,6 +222,8 @@ class WebPokerController:
                 "events": self.events[-80:],
                 "result": self.result,
                 "pot": 0,
+                "ante": self.ante,
+                "effective_stack": self.starting_chips,
                 "street": "idle",
                 "game_mode": self.game_mode,
                 "current_highest_bet": 0,
@@ -232,6 +243,10 @@ class WebPokerController:
             "street": self.game.street,
             "game_mode": self.game_mode,
             "pot": self.game.pot,
+            "ante": self.ante,
+            "effective_stack": (
+                self.game.ev_stack if self.game_mode == "ev" else self.starting_chips
+            ),
             "current_highest_bet": self.game.current_highest_bet,
             "players": [self._player_state(player) for player in self.game.players],
             "betting_history": self.game.betting_history[-80:],
@@ -275,6 +290,7 @@ class WebPokerController:
         game = self._require_game()
         self.waiting = None
         self.discard_cursor = 0
+        self.pending_discard_choices = {}
         self.street_index = 0
         self.betting = None
         self.result = None
@@ -303,12 +319,20 @@ class WebPokerController:
                 self._event(f"{player.name} must discard one card and reveal one card.")
                 return True
 
-            discard_idx, reveal_idx = self.agents[player.name].choose_discard_and_reveal(player.hidden_cards)
-            if not player.discard_and_reveal(discard_idx, reveal_idx):
-                player.discard_and_reveal(0, 1)
-            self._event(f"{player.name} discarded one card and revealed {player.public_cards[-1]}.")
+            choice = self.agents[player.name].choose_discard_and_reveal(player.hidden_cards)
+            self.pending_discard_choices[player.name] = (
+                choice if player.can_discard_and_reveal(*choice) else (0, 1)
+            )
             self.discard_cursor += 1
 
+        for player in game.players:
+            if not player.is_eliminated:
+                player.discard_and_reveal(*self.pending_discard_choices[player.name])
+        for player in game.players:
+            if not player.is_eliminated:
+                self._event(
+                    f"{player.name} discarded one card and revealed {player.public_cards[-1]}."
+                )
         game.log_global_state("discard one card and reveal one card")
         self.phase = "street_start"
         self.street_index = 0
@@ -326,6 +350,11 @@ class WebPokerController:
         game.deal_cards_to_active(is_public=is_public)
         game.log_global_state(f"deal {street_name}")
         self._event(f"Dealt {street_name}.")
+
+        if street_name == "4th":
+            self._event("Betting starts on fifth street.")
+            self.street_index += 1
+            return
 
         bettors = [player for player in survivors if player.can_act()]
         if len(bettors) >= 2:
@@ -463,7 +492,7 @@ class WebPokerController:
             "is_eliminated": player.is_eliminated,
             "status": status,
             "hand_score": list(player.hand_score),
-            "hand_name": self._player_hand_name(player),
+            "hand_name": self._player_hand_name(player) if reveal_hidden else "-",
             "is_acting": self.waiting is not None and self.waiting.get("player") == player.name,
             "has_priority": self._priority_player_name() == player.name,
             "round_delta": player.chips - round_start_chips,
@@ -617,9 +646,10 @@ class WebPokerController:
                 if len(active_players) == 1 and active_players[0] is player:
                     return "상대 폴드 승리"
             return "-"
-        if player.hand_score == (-1,):
-            return "-"
-        return describe_hand_score(player.hand_score)
+        score = player.hand_score
+        if score == (-1,):
+            score = get_best_hand(player.get_all_cards())
+        return describe_hand_score(score)
 
     def _capture_frame(self, message: str) -> None:
         if self.game is None:
@@ -721,6 +751,8 @@ class WebPokerController:
             return HA1PokerAgent(name)
         if agent_type == "learning":
             return LearningAgent(name, db_filename=db_filename)
+        if agent_type == "cpp-mccfr":
+            return CppMCCFRAgent(name)
         if agent_type == "empty":
             return None
         raise ValueError(f"Unknown player type: {agent_type}")

@@ -1,0 +1,16 @@
+{
+  "atlas": "power128_selfplay100m_v1.bin",
+  "atlas_sha256": "02431B6B26C511705F661A17F1056AACED9C29C1D14BE70C3793B9BEF8A4AEED",
+  "source_model": "root_mccfr_ante1000_100m.bin",
+  "source_model_sha256": "044FC4B913705C4909968ED2A50E54FF4685AEBD8114D5BEAAB34EB7F4D231BA",
+  "source_atlas": "power64_v1.bin",
+  "source_atlas_sha256": "A31F11916AE26354F4A1BA18994FBF748AFF89AC505907A009450A0A4879E169",
+  "sampling_policy": "source-model self-play",
+  "fit_hands": 100000,
+  "sample_cap_per_street": 50000,
+  "samples_per_street": [50000, 50000, 50000],
+  "clusters_per_street": 128,
+  "power_completion_sample_limit": 128,
+  "seed": 37101,
+  "intended_bucket_mode": "power-recall"
+}

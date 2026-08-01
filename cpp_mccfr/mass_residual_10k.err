@@ -1,0 +1,2 @@
+{"soft_adapt_root":10000,"mode":"residual","adaptation":0,"considered_street":0,"growth_threshold":1,"maximum_average_regret":158.875,"cluster_added":true,"street":7,"parent_cluster":7,"new_cluster":8,"initialized_nodes":103,"initial_strategy":[0,0,1,0,0,0,0,0]}
+{"root_iteration":10000,"traversals":20000,"training_node_visits":9597251,"requested_node_budget":0,"buckets":1271,"elapsed_seconds":207.914}

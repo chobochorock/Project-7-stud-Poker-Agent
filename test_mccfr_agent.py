@@ -155,6 +155,32 @@ class MCCFRPokerAgentTests(unittest.TestCase):
 
         self.assertAlmostEqual(sum(agent.nodes[key].strategy_sum.values()), 1.0)
 
+    def test_cfr_plus_clips_cumulative_regret(self):
+        random.seed(13)
+        game = PokerGame(["A", "B"], log_file=None, ante=1000, game_mode="ev")
+        game.start_game()
+        for player in game.players:
+            self.assertTrue(player.discard_and_reveal(0, 1))
+        for street in ("4th", "5th", "6th"):
+            game.street = street
+            game.deal_cards_to_active(is_public=True)
+        game.street = "7th_hidden"
+        game.deal_cards_to_active(is_public=False)
+        actor = game.players[game._first_bettor_index(set(game.players))]
+        actions = game.get_valid_actions(actor)
+        state = game.get_ai_state(actor, actions)
+        agent = MCCFRPokerAgent("A", iterations=1, seed=13, regret_plus=True)
+
+        agent.choose_action(state, actions)
+
+        self.assertTrue(
+            all(
+                regret >= 0.0
+                for node in agent.nodes.values()
+                for regret in node.regrets.values()
+            )
+        )
+
     def test_table_round_trip_preserves_regrets(self):
         agent = MCCFRPokerAgent("A", iterations=4, seed=11)
         agent.nodes["bucket"] = _RegretNode(

@@ -8,17 +8,18 @@ from typing import Any, Sequence
 from agent.base import PokerAgent
 from ev_rollout import ACTIONS, canonical_state
 from poker_env import (
+    AGGRESSIVE_ACTIONS,
     ALL_CARDS,
     BETTING_ACTIONS,
     DEFAULT_EV_STACK_ANTE,
-    EV_RAISE_CAP,
+    STREET_BET_CAPS,
     Card,
     get_best_hand,
     get_public_betting_priority,
 )
 
 
-STREETS = ("4th", "5th", "6th", "7th_hidden")
+STREETS = ("5th", "6th", "7th_hidden")
 
 
 @dataclass(frozen=True)
@@ -100,7 +101,7 @@ class _EVSimulation:
         self,
         state: dict[str, Any],
         rng: random.Random,
-        raise_cap: int = EV_RAISE_CAP,
+        raise_cap: int = max(STREET_BET_CAPS.values()),
     ):
         if state.get("game_mode") != "ev" or state.get("seat_count") != 2:
             raise ValueError("UCT simulation currently supports heads-up EV states only.")
@@ -180,12 +181,15 @@ class _EVSimulation:
         call_amount = max(0, self.current_highest_bet - player.current_bet)
         valid = {"FOLD", "CHECK" if call_amount == 0 else "CALL"}
         remaining = self.effective_stack - player.invested
-        if self.current_highest_bet == 0 and remaining > 0:
+        can_bet = (
+            not self._actor_checked_this_street()
+            and self._actor_bets_this_street() < self._actor_bet_cap()
+        )
+        if can_bet and self.current_highest_bet == 0 and remaining > 0:
             valid.add("BBING")
         if (
-            not self._actor_checked_this_street()
+            can_bet
             and self.pot > 0
-            and self.raise_count < self.raise_cap
             and remaining > call_amount
         ):
             if self.current_highest_bet > 0:
@@ -221,7 +225,7 @@ class _EVSimulation:
             player.all_in = player.invested >= self.effective_stack
             self.pot += paid
             self.current_highest_bet = max(self.current_highest_bet, player.current_bet)
-            if action in {"DDADANG", "QUARTER", "HALF"}:
+            if action in AGGRESSIVE_ACTIONS:
                 self.raise_count += 1
             self._record(action)
 
@@ -256,7 +260,7 @@ class _EVSimulation:
             "my_discarded_card": str(viewer.discarded) if viewer.discarded else None,
             "call_amount": call_amount,
             "raise_count": self.raise_count,
-            "raise_cap": self.raise_cap,
+            "raise_cap": self._actor_bet_cap(),
             "opponents": [
                 {
                     "seat": "opponent_1",
@@ -356,6 +360,17 @@ class _EVSimulation:
             for event in self.history
         )
 
+    def _actor_bets_this_street(self) -> int:
+        return sum(
+            event["street"] == self.street
+            and event["actor"] == self.actor
+            and event["action"] in AGGRESSIVE_ACTIONS
+            for event in self.history
+        )
+
+    def _actor_bet_cap(self) -> int:
+        return min(self.raise_cap, STREET_BET_CAPS[self.street])
+
     def _record(self, action: str) -> None:
         self.history.append({"street": self.street, "actor": self.actor, "action": action})
 
@@ -374,7 +389,7 @@ class _EVSimulation:
 class UCTPokerAgent(PokerAgent):
     """Heads-up EV agent using information-set root sampling and UCT."""
 
-    SEARCH_VERSION = "uct-v2"
+    SEARCH_VERSION = "uct-v3"
 
     def __init__(
         self,

@@ -1,5 +1,35 @@
 # 7-Stud Poker Agent
 
+최근 CFR/MCCFR 구현 구조, 수렴 검증, 7포커 fixed-root 실험 결과는
+[CFR_MCCFR_VALIDATION.md](CFR_MCCFR_VALIDATION.md)에 정리되어 있습니다.
+현재 C++ power-bucket MCCFR 모델의 정확한 동작은
+[CPP_MCCFR_MECHANISM_KO.md](CPP_MCCFR_MECHANISM_KO.md)에 정리되어 있습니다.
+
+## Current betting rules (v3)
+
+- Fourth street is dealt without a betting round.
+- Betting starts on fifth street.
+- Each player may make at most 1 aggressive action on fifth street, 2 on
+  sixth street, and 3 on seventh street.
+- `BBING`, `DDADANG`, `QUARTER`, `HALF`, and `FULL` count as aggressive
+  actions.
+- Checking still removes the player's right to bet or raise for the rest of
+  that street.
+- Rules v1/v2 MCCFR tables and UCT datasets are incompatible with v3.
+
+The live seventh-street external-sampling variants can be compared with:
+
+```powershell
+python -B evaluate_cluster_agent.py --model-dir models\mccfr_plus_v3_live_eval --agent-a mccfr-plus --agent-b heuristic --hands 200 --mccfr-iterations 16 --ante 1000
+```
+
+Train and evaluate a reusable v3 MCCFR+ table:
+
+```powershell
+python -B mccfr_train.py --output models\mccfr_7th_plus.json --hands 100000 --iterations 16 --cfr-plus
+python -B evaluate_cluster_agent.py --model-dir models --agent-a mccfr-plus-table --agent-b heuristic --hands 10000 --ante 1000
+```
+
 이 프로젝트는 최대 5명의 사람 또는 AI가 참여할 수 있는 7포커 캐시게임 환경과 에이전트 인터페이스를 제공합니다. 기본 칩은 플레이어당 1000칩이고, 각 라운드의 기본금은 1칩입니다. 캐시 모드가 기본이며 기존 탈락식 진행은 선택적인 토너먼트 모드로 남아 있습니다. 별도의 헤즈업 EV 모드는 스택과 올인을 제거한 rollout 실험에 사용합니다.
 
 ## 주요 규칙
@@ -34,6 +64,7 @@
 - `agent/hand_range.py`: 상대의 가능한 초반 히든 2장 조합과 조건부 equity를 계산하는 균등 range 계산기
 - `agent/uct_agent.py`: 상대 히든과 미래 deal을 직접 표본화하는 헤즈업 EV UCT 에이전트
 - `agent/cluster_agent.py`: 저장된 k-means/GMM responsibility로 component policy 또는 Q를 혼합하는 EV 에이전트
+- `agent/claude_belief_br.py`: 상대의 공개 베팅으로 상대 히든 카드 belief를 Bayesian 갱신한 뒤 net-chip EV를 비교해 최선응답하는 particle-belief best response. HA1의 균등 belief를 action-conditioned posterior로 교체한 것이다. 자세한 내용은 `CLAUDE_BELIEF_BR.md` 참고.
 - `agent/learning_agent.py`: 공유 데이터베이스를 사용하는 학습 에이전트 예시
 - `evaluate_heads_up.py`: 좌석을 교대하는 캐시게임 헤즈업 평가기
 - `ev_rollout.py`: stackless EV 균등 rollout과 진단용 Monte Carlo SQLite 테이블 생성기
@@ -268,6 +299,12 @@ python -B exp.py
 
 ```powershell
 python -B evaluate_heads_up.py --agent-a ha1 --agent-b heuristic --hands 400 --simulations 128
+```
+
+`--mode ev`로 스택 없는 제로섬 net-chip 기준으로 평가합니다. `claude` belief best response가 고정 휴리스틱을 얼마나 착취하는지 이 모드에서 측정합니다. 정수 정밀도를 위해 `--ante 1000`을 사용합니다.
+
+```powershell
+python -B evaluate_heads_up.py --agent-a claude --agent-b heuristic --mode ev --ante 1000 --hands 800 --simulations 120
 ```
 
 코드에서 현재 관측 상태의 균등 상대 핸드 테이블과 대략적인 showdown 승률을 계산할 수 있습니다. 상대 초반 히든 2장 조합은 전수 열거하고, 상대 discard와 아직 배분되지 않은 카드는 조합마다 Monte Carlo 표본화합니다.

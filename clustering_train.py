@@ -852,7 +852,7 @@ def run_training(
     input_path: Path | Sequence[Path],
     output_dir: Path,
     *,
-    search_version: str = "uct-v2",
+    search_version: str = "uct-v3",
     opponent_policy: str = "random",
     simulation_budget: int = 512,
     max_rows: int = 0,
@@ -992,7 +992,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--input", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, default=Path("models/clustering_v1"))
-    parser.add_argument("--search-version", default="uct-v2")
+    parser.add_argument("--search-version", default="uct-v3")
     parser.add_argument("--opponent-policy", default="random")
     parser.add_argument("--simulation-budget", type=int, default=512)
     parser.add_argument("--max-rows", type=int, default=0, help="0 uses every matching row.")

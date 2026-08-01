@@ -13,8 +13,10 @@ import numpy as np
 from agent.heuristic_agent import HeuristicPokerAgent
 from agent.uct_agent import _EVSimulation
 from poker_env import (
+    AGGRESSIVE_ACTIONS,
     BETTING_RULES_VERSION,
     Card,
+    STREET_BET_CAPS,
     get_best_hand,
     get_public_betting_priority,
 )
@@ -54,10 +56,11 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
         name: str,
         iterations: int = 16,
         seed: int | None = None,
-        raise_cap: int = 2,
+        raise_cap: int = 3,
         start_street: str = "7th_hidden",
         freeze_seventh: bool = False,
         decision_strategy: str = "average",
+        regret_plus: bool = False,
     ):
         super().__init__(name)
         if iterations < 0:
@@ -75,6 +78,7 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
         self.start_street = start_street
         self.freeze_seventh = freeze_seventh
         self.decision_strategy = decision_strategy
+        self.regret_plus = regret_plus
         self.rng = random.Random(seed)
         self.nodes: dict[str, _RegretNode] = {}
         self.decisions = 0
@@ -134,9 +138,19 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
         return self._sample(self.last_strategy)
 
     def raise_count_allows(self, state: dict[str, Any], action: str) -> bool:
+        used = sum(
+            event.get("street") == state.get("street")
+            and event.get("actor") == "self"
+            and event.get("action") in AGGRESSIVE_ACTIONS
+            for event in state.get("betting_history", [])
+        )
+        cap = min(
+            self.raise_cap,
+            STREET_BET_CAPS.get(str(state.get("street")), 0),
+        )
         return not (
-            action in {"DDADANG", "QUARTER", "HALF"}
-            and int(state.get("raise_count", 0)) >= self.raise_cap
+            action in AGGRESSIVE_ACTIONS
+            and used >= cap
         )
 
     def _traverse(
@@ -185,7 +199,8 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
 
         node_value = sum(strategy[action] * action_values[action] for action in actions)
         for action in actions:
-            node.regrets[action] += action_values[action] - node_value
+            updated = node.regrets[action] + action_values[action] - node_value
+            node.regrets[action] = max(0.0, updated) if self.regret_plus else updated
         return node_value
 
     def _sample(self, probabilities: dict[str, float]) -> str:
@@ -225,7 +240,15 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
             self._public_features(opponent_public),
             self._ratio_bucket(call / max(1.0, pot + call), (0.1, 0.2, 0.33, 0.5)),
             self._ratio_bucket(chips / pot, (0.5, 1.0, 2.0)),
-            min(self.raise_cap, int(state.get("raise_count", 0))),
+            min(
+                self.raise_cap,
+                sum(
+                    event.get("street") == state.get("street")
+                    and event.get("actor") == "self"
+                    and event.get("action") in AGGRESSIVE_ACTIONS
+                    for event in state.get("betting_history", [])
+                ),
+            ),
             history,
             tuple(state.get("valid_actions", ())),
         )
@@ -286,6 +309,7 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
             "start_street": self.start_street,
             "freeze_seventh": self.freeze_seventh,
             "decision_strategy": self.decision_strategy,
+            "regret_plus": self.regret_plus,
             "decisions": self.decisions,
             "heuristic_decisions": self.heuristic_decisions,
             "traversals": self.traversals,
@@ -303,6 +327,7 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
                 "raise_cap": self.raise_cap,
                 "start_street": self.start_street,
                 "freeze_seventh": self.freeze_seventh,
+                "regret_plus": self.regret_plus,
                 "average_strategy_update": "traverser-reach",
                 "betting_rules_version": BETTING_RULES_VERSION,
             },
@@ -351,6 +376,13 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
             raise ValueError(
                 "Table frozen-seventh setting does not match the requested agent"
             )
+        saved_regret_plus = bool(
+            payload.get("config", {}).get("regret_plus", False)
+        )
+        if saved_regret_plus != self.regret_plus:
+            raise ValueError(
+                "Table CFR+ setting does not match the requested agent"
+            )
         self.nodes = {
             key: _RegretNode(
                 regrets={action: float(value) for action, value in values["regrets"].items()},
@@ -371,6 +403,7 @@ class MCCFRPokerAgent(HeuristicPokerAgent):
             iterations=self.iterations,
             raise_cap=self.raise_cap,
             start_street="7th_hidden",
+            regret_plus=self.regret_plus,
         )
         source.load(path)
         self.nodes = {
@@ -411,7 +444,7 @@ class MCCFRKMeansAgent(MCCFRPokerAgent):
         name: str,
         iterations: int = 0,
         seed: int | None = None,
-        raise_cap: int = 2,
+        raise_cap: int = 3,
     ):
         super().__init__(
             name, iterations=iterations, seed=seed, raise_cap=raise_cap

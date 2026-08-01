@@ -37,6 +37,8 @@ AGENT_TYPES = (
     "random",
     "uct",
     "mccfr",
+    "mccfr-plus",
+    "mccfr-plus-table",
     "mccfr-table",
     "mccfr-7th-kmeans",
     "mccfr-6plus-table",
@@ -94,6 +96,16 @@ def _create_agent(
         return UCTPokerAgent(name, simulations=uct_simulations, seed=seed)
     if agent_type == "mccfr":
         return MCCFRPokerAgent(name, iterations=mccfr_iterations, seed=seed)
+    if agent_type == "mccfr-plus":
+        return MCCFRPokerAgent(
+            name, iterations=mccfr_iterations, seed=seed, regret_plus=True
+        )
+    if agent_type == "mccfr-plus-table":
+        agent = MCCFRPokerAgent(
+            name, iterations=0, seed=seed, regret_plus=True
+        )
+        agent.load(model_dir / "mccfr_7th_plus.json")
+        return agent
     if agent_type == "mccfr-table":
         agent = MCCFRPokerAgent(name, iterations=0, seed=seed)
         agent.load(model_dir / "mccfr_7th.json")

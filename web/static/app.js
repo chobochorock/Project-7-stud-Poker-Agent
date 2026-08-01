@@ -2,6 +2,7 @@ const setupForm = document.querySelector("#setupForm");
 const autoRoundsEl = document.querySelector("#autoRounds");
 const autoIntervalEl = document.querySelector("#autoInterval");
 const playersEl = document.querySelector("#players");
+const tablePot = document.querySelector("#tablePot");
 const actionPanel = document.querySelector("#actionPanel");
 const bettingLog = document.querySelector("#bettingLog");
 const eventLog = document.querySelector("#eventLog");
@@ -10,6 +11,11 @@ const phaseBadge = document.querySelector("#phaseBadge");
 const modeBadge = document.querySelector("#modeBadge");
 const streetBadge = document.querySelector("#streetBadge");
 const potBadge = document.querySelector("#potBadge");
+const anteBadge = document.querySelector("#anteBadge");
+const stackBadge = document.querySelector("#stackBadge");
+const gameModeEl = document.querySelector("#gameMode");
+const anteInputEl = document.querySelector("#anteInput");
+const displayUnitEls = [...document.querySelectorAll('input[name="display_unit"]')];
 const rangeObserver = document.querySelector("#rangeObserver");
 const rangeSamples = document.querySelector("#rangeSamples");
 const calculateRangeButton = document.querySelector("#calculateRange");
@@ -42,6 +48,15 @@ let currentRange = null;
 let currentRangeKey = null;
 let selectedRangeCell = null;
 let rangeLoading = false;
+let displayUnit = "chips";
+let discardSelection = { key: null, discard: null, reveal: null };
+let discardSubmitting = false;
+let lastBetEffectKey = null;
+
+playersEl.addEventListener("click", (event) => {
+  const card = event.target.closest("[data-discard-index]");
+  if (card) selectDiscardCard(Number(card.dataset.discardIndex));
+});
 
 setupForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -50,8 +65,20 @@ setupForm.addEventListener("submit", async (event) => {
   await postJson("/api/start", {
     player_types: ["p1", "p2", "p3", "p4", "p5"].map((key) => form.get(key)),
     game_mode: form.get("game_mode"),
+    ante: Number(form.get("ante")),
   });
 });
+
+gameModeEl.addEventListener("change", () => {
+  anteInputEl.value = gameModeEl.value === "ev" ? "1000" : "1";
+});
+
+for (const input of displayUnitEls) {
+  input.addEventListener("change", () => {
+    displayUnit = input.value;
+    if (currentState) render(currentState);
+  });
+}
 
 autoRoundsEl.addEventListener("change", () => {
   syncAutoRoundSettings();
@@ -93,12 +120,18 @@ async function loadState() {
 
 function render(state) {
   currentState = state;
+  syncDiscardSelection(state);
+  gameModeEl.value = state.game_mode || "cash";
+  anteInputEl.value = state.ante || 1;
   roundBadge.textContent = `Round ${state.round_number || state.hand_number || 0}`;
   modeBadge.textContent = state.game_mode || "cash";
   phaseBadge.textContent = state.phase || "idle";
   streetBadge.textContent = state.street || "-";
-  potBadge.textContent = `Pot ${state.pot || 0}`;
+  potBadge.textContent = `Pot ${formatAmount(state.pot || 0)}`;
+  anteBadge.textContent = `Ante ${formatAmount(state.ante ?? anteInputEl.value)}`;
+  stackBadge.textContent = `Stack ${formatAmount(state.effective_stack || 0)}`;
   renderPlayers(state.players || [], state);
+  renderTablePot(state);
   renderActionPanel(state);
   renderLogs(state);
   renderRangeControls(state);
@@ -277,7 +310,7 @@ function rangeHandKey(cards) {
 
 function rangeAxisLabel(card, position) {
   const label = document.createElement("span");
-  label.className = `range-axis ${position} ${card[0] === "h" || card[0] === "d" ? "red" : "black"}`;
+  label.className = `range-axis ${position} ${cardSuitClass(card)}`;
   label.textContent = card;
   return label;
 }
@@ -297,44 +330,124 @@ function equityColor(equity) {
 
 function renderPlayers(players, state) {
   playersEl.innerHTML = "";
-  for (const player of players) {
+  const latestActions = new Map();
+  for (const event of state.betting_history || []) {
+    if (event.street === state.street) {
+      latestActions.set(players[event.actor_index]?.name, event);
+    }
+  }
+  const latestEvent = (state.betting_history || []).at(-1);
+  const latestEventKey = latestEvent
+    ? `${state.round_number}:${state.betting_history.length}:${latestEvent.actor_index}:${latestEvent.action}:${latestEvent.pot_after}`
+    : null;
+  const animateLatest = latestEventKey !== lastBetEffectKey;
+  const humanIndex = players.findIndex((player) => player.type === "human");
+  const seatedPlayers = humanIndex < 0
+    ? players
+    : players.map((_, index) => players[(humanIndex + index) % players.length]);
+  const seats = seatPositions(seatedPlayers.length);
+  seatedPlayers.forEach((player, index) => {
     const card = document.createElement("article");
-    const classes = ["player-card", player.status.toLowerCase()];
+    const classes = ["player-card", player.status.toLowerCase(), `seat-${index}`];
+    if (player.type === "human") classes.push("hero");
+    if (state.waiting?.type === "discard" && state.waiting.player === player.name) classes.push("selecting");
     if (player.is_acting) classes.push("acting");
     if (player.has_priority) classes.push("priority");
     card.className = classes.join(" ");
+    card.style.setProperty("--seat-x", `${seats[index][0]}%`);
+    card.style.setProperty("--seat-y", `${seats[index][1]}%`);
 
     const badges = [
       player.has_priority ? `<span class="player-badge dealer">Dealer</span>` : "",
       player.is_acting ? `<span class="player-badge turn">Turn</span>` : "",
     ].join("");
-
+    const playerAction = latestActions.get(player.name);
+    const actionText = playerAction ? formatPlayerAction(playerAction) : "";
+    const actionEffect = animateLatest && playerAction === latestEvent ? " action-effect" : "";
     card.innerHTML = `
       <div class="player-head">
         <div>
           <h2>${escapeHtml(player.name)}</h2>
           <p>${escapeHtml(player.type)} · ${escapeHtml(player.status)}</p>
         </div>
-        <strong>${player.chips}</strong>
+        <strong>${formatAmount(player.chips)}</strong>
       </div>
       <div class="badge-row">${badges}</div>
       <div class="metric-row">
-        <span>Invested ${player.invested}</span>
-        <span>Bet ${player.current_bet}</span>
-        <span>Net ${formatSigned(player.net || 0)}</span>
+        <span>Invested ${formatAmount(player.invested)}</span>
+        <span>Bet ${formatAmount(player.current_bet)}</span>
+        <span>Net ${formatSignedAmount(player.net || 0)}</span>
       </div>
-      <div class="hand-name">${escapeHtml(player.hand_name || "-")}</div>
+      <div class="hand-name">Current hand · ${escapeHtml(player.hand_name || "-")}</div>
       <div class="card-group">
         <span>Public</span>
         <div class="cards">${renderCards(player.public_cards, false)}</div>
       </div>
       <div class="card-group">
         <span>Hidden</span>
-        <div class="cards">${renderCards(player.hidden_cards, player.hidden_count > 0 && player.hidden_cards.length === 0, player.hidden_count)}</div>
+        <div class="cards">${renderCards(
+          player.hidden_cards,
+          player.hidden_count > 0 && player.hidden_cards.length === 0,
+          player.hidden_count,
+          state.waiting?.type === "discard" && state.waiting.player === player.name,
+        )}</div>
       </div>
     `;
+    card.querySelector(".hand-name").textContent =
+      `${player.type === "human" ? "확정 족보 · " : ""}${player.hand_name || "-"}`;
+    const cardGroups = card.querySelectorAll(".card-group");
+    cardGroups[0].classList.add("public-cards");
+    cardGroups[1].classList.add("private-cards");
+    const actionNode = document.createElement("div");
+    actionNode.className = `player-action${playerAction ? ` action-${playerAction.action.toLowerCase()}` : ""}${actionEffect}`;
+    actionNode.textContent = actionText;
+    card.appendChild(actionNode);
     playersEl.appendChild(card);
+  });
+  lastBetEffectKey = latestEventKey;
+}
+
+function seatPositions(count) {
+  const layouts = {
+    1: [[50, 68]],
+    2: [[50, 68], [50, 3]],
+    3: [[50, 68], [22, 3], [78, 3]],
+    4: [[50, 68], [22, 36], [50, 3], [78, 36]],
+    5: [[50, 68], [22, 37], [22, 3], [78, 3], [78, 37]],
+  };
+  return layouts[count] || layouts[5];
+}
+
+function renderTablePot(state) {
+  const history = state.betting_history || [];
+  const latest = history.at(-1);
+  tablePot.className = "table-pot";
+  tablePot.querySelector("strong").textContent = formatAmount(state.pot || 0);
+
+  if (!latest) {
+    tablePot.querySelector("small").textContent = "Waiting for action";
+    return;
   }
+
+  const actor = state.players?.[latest.actor_index]?.name || `P${Number(latest.actor_index) + 1}`;
+  const potBefore = Math.max(0, Number(latest.pot_after) - Number(latest.paid));
+  const growth = latest.paid && potBefore > 0 ? ` · Pot +${((latest.paid / potBefore) * 100).toFixed(1)}%` : "";
+  const paid = latest.paid ? ` · +${formatAmount(latest.paid)}` : "";
+  tablePot.querySelector("small").textContent = `${actor} · ${latest.action}${paid}${growth}`;
+  tablePot.classList.add(`action-${latest.action.toLowerCase()}`);
+
+  const effectKey = `${state.round_number}:${history.length}:${latest.actor_index}:${latest.action}:${latest.pot_after}`;
+  if (effectKey !== lastBetEffectKey) {
+    lastBetEffectKey = effectKey;
+    tablePot.classList.add("pot-effect");
+  }
+}
+
+function formatPlayerAction(event) {
+  const potBefore = Math.max(0, Number(event.pot_after) - Number(event.paid));
+  const growth = event.paid && potBefore > 0 ? ` · Pot +${((event.paid / potBefore) * 100).toFixed(1)}%` : "";
+  const paid = event.paid ? ` · +${formatAmount(event.paid)}` : "";
+  return `${event.action}${paid}${growth}`;
 }
 
 function renderActionPanel(state) {
@@ -366,30 +479,23 @@ function renderActionPanel(state) {
 }
 
 function renderDiscardControl(waiting) {
-  const form = document.createElement("form");
-  form.className = "action-form";
-  const options = waiting.cards.map((card, index) => `<option value="${index}">${index}: ${escapeHtml(card)}</option>`).join("");
-  form.innerHTML = `
-    <label>Discard<select name="discard">${options}</select></label>
-    <label>Reveal<select name="reveal">${options}</select></label>
-    <button type="submit">Apply</button>
+  const controls = document.createElement("div");
+  controls.className = "discard-control";
+  const discardCard = discardSelection.discard === null ? "-" : waiting.cards[discardSelection.discard];
+  const revealCard = discardSelection.reveal === null ? "-" : waiting.cards[discardSelection.reveal];
+  controls.innerHTML = `
+    <div class="discard-summary">
+      <span>Discard <strong>${escapeHtml(discardCard)}</strong></span>
+      <span>Reveal <strong>${escapeHtml(revealCard)}</strong></span>
+    </div>
   `;
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(form);
-    await postJson("/api/discard", {
-      player: waiting.player,
-      discard_index: Number(formData.get("discard")),
-      reveal_index: Number(formData.get("reveal")),
-    });
-  });
-  actionPanel.appendChild(form);
+  actionPanel.appendChild(controls);
 }
 
 function renderBetControl(waiting) {
   const meta = document.createElement("p");
   meta.className = "callout";
-  meta.textContent = `Call ${waiting.call_amount}`;
+  meta.textContent = `Call ${formatAmount(waiting.call_amount)}`;
   actionPanel.appendChild(meta);
 
   const actions = document.createElement("div");
@@ -432,7 +538,7 @@ function renderResultPanel(state) {
       list.innerHTML += `
         <span>${escapeHtml(player.name)}</span>
         <span>${escapeHtml(player.hand_name)}</span>
-        <strong>${player.chips} (${formatSigned(profit)})</strong>
+        <strong>${formatAmount(player.chips)} (${formatSignedAmount(profit)})</strong>
       `;
     }
     actionPanel.appendChild(list);
@@ -480,8 +586,8 @@ function renderTurnOrder(state) {
 function renderLogs(state) {
   bettingLog.innerHTML = "";
   for (const item of [...(state.betting_history || [])].reverse()) {
-    const raiseText = item.raise_amount ? ` · raise ${item.raise_amount}` : "";
-    bettingLog.appendChild(textBlock(`${item.street} · P${Number(item.actor_index) + 1} · ${item.action} · +${item.paid}${raiseText}`));
+    const raiseText = item.raise_amount ? ` · raise ${formatAmount(item.raise_amount)}` : "";
+    bettingLog.appendChild(textBlock(`${item.street} · P${Number(item.actor_index) + 1} · ${item.action} · +${formatAmount(item.paid)}${raiseText}`));
   }
   eventLog.innerHTML = "";
   for (const item of [...(state.events || [])].reverse()) {
@@ -489,14 +595,67 @@ function renderLogs(state) {
   }
 }
 
-function renderCards(cards, hidden, hiddenCount = 0) {
+function renderCards(cards, hidden, hiddenCount = 0, interactive = false) {
   if (hidden) {
     return Array.from({ length: hiddenCount }, () => `<span class="playing-card back">?</span>`).join("");
   }
   if (!cards || cards.length === 0) {
     return `<span class="empty-slot">-</span>`;
   }
-  return cards.map((card) => `<span class="playing-card ${card[0] === "h" || card[0] === "d" ? "red" : "black"}">${escapeHtml(card)}</span>`).join("");
+  return cards.map((card, index) => {
+    const choice = discardSelection.discard === index
+      ? ["selected-discard", "Discard"]
+      : discardSelection.reveal === index
+        ? ["selected-reveal", "Reveal"]
+        : ["", ""];
+    const tag = interactive ? "button" : "span";
+    const attributes = interactive
+      ? ` type="button" data-discard-index="${index}" aria-pressed="${choice[0] ? "true" : "false"}"`
+      : "";
+    const marker = choice[1] ? `<small>${choice[1]}</small>` : "";
+    return `<${tag}${attributes} class="playing-card ${cardSuitClass(card)} ${choice[0]}">${escapeHtml(card)}${marker}</${tag}>`;
+  }).join("");
+}
+
+function syncDiscardSelection(state) {
+  const waiting = state.waiting;
+  const key = waiting?.type === "discard"
+    ? `${state.round_number}:${waiting.player}:${waiting.cards.join(",")}`
+    : null;
+  if (key !== discardSelection.key) {
+    discardSelection = { key, discard: null, reveal: null };
+  }
+}
+
+async function selectDiscardCard(index) {
+  if (discardSubmitting) return;
+  if (discardSelection.discard === index) {
+    discardSelection.discard = null;
+  } else if (discardSelection.reveal === index) {
+    discardSelection.reveal = null;
+  } else if (discardSelection.discard === null) {
+    discardSelection.discard = index;
+  } else {
+    discardSelection.reveal = index;
+  }
+  render(currentState);
+
+  if (discardSelection.discard !== null && discardSelection.reveal !== null) {
+    discardSubmitting = true;
+    try {
+      await postJson("/api/discard", {
+        player: currentState.waiting.player,
+        discard_index: discardSelection.discard,
+        reveal_index: discardSelection.reveal,
+      });
+    } finally {
+      discardSubmitting = false;
+    }
+  }
+}
+
+function cardSuitClass(card) {
+  return `suit-${String(card || "")[0] || "unknown"}`;
 }
 
 function textBlock(text) {
@@ -517,18 +676,27 @@ function formatActionCost(action, cost) {
   if (action === "CHECK" || action === "FOLD") return "";
   const prefix = action === "CALL" ? "" : "+";
   const suffix = cost.all_in ? " all-in" : "";
-  return `(${prefix}${cost.paid}${suffix})`;
+  return `(${prefix}${formatAmount(cost.paid)}${suffix})`;
 }
 
 function actionTooltip(action, cost) {
   if (action === "CHECK" || action === "FOLD") return action;
-  if (action === "CALL") return `Pay ${cost.paid}`;
-  return `Pay ${cost.paid}: call ${cost.call_amount}, raise ${cost.raise_amount}`;
+  if (action === "CALL") return `Pay ${formatAmount(cost.paid)}`;
+  return `Pay ${formatAmount(cost.paid)}: call ${formatAmount(cost.call_amount)}, raise ${formatAmount(cost.raise_amount)}`;
 }
 
-function formatSigned(value) {
+function formatAmount(value) {
   const number = Number(value || 0);
-  return number > 0 ? `+${number}` : String(number);
+  if (displayUnit === "ante") {
+    const ante = Math.max(1, Number(currentState?.ante ?? anteInputEl.value ?? 1));
+    return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 }).format(number / ante)}a`;
+  }
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(number);
+}
+
+function formatSignedAmount(value) {
+  const number = Number(value || 0);
+  return number > 0 ? `+${formatAmount(number)}` : formatAmount(number);
 }
 
 function syncAutoRoundSettings() {

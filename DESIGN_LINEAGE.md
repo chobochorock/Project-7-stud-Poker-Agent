@@ -2319,3 +2319,964 @@ Q_t(i,a) = R_t(i,a) + sum_j P_t(j|i,a) * V_(t+1)(j)
 ### 추천 커밋 메시지
 
 `docs: define temporal cluster transition model`
+
+## Cluster-Q의 이론적 정리와 현재 한계 (2026-07-17)
+
+UCT target을 학습한 encoder 위에서 spherical k-means 또는 diagonal GMM
+responsibility를 계산하고, component별 action-Q를 혼합하는 구조를 수식으로
+정리했다.
+
+```text
+observable history h
+→ value-aware encoder z(h)
+→ responsibility r_k(h)
+→ component action value q_(k,a)
+→ Q_hat(h,a) = sum_k r_k(h) q_(k,a)
+```
+
+이는 soft state aggregation이자 finite-basis linear Q approximator이며,
+nearest-neighbor Q-learning과 mixture-of-local-constant-experts의 중간 형태다.
+고정 encoder, 고정 cluster, 독립적이고 bounded한 rollout, 충분한 information
+state라는 가정을 두면 component action value에 concentration bound를 붙이고
+cluster 내부 abstraction error와 유한 horizon의 정책 손실을 합성할 수 있다.
+
+Effective sample size는 responsibility 또는 importance weight가 서로 다른 표본의
+실질 표본 수다.
+
+```text
+N_eff = (sum_i w_i)^2 / sum_i w_i^2
+```
+
+모든 weight가 같으면 실제 표본 수와 같고, 일부 표본에 weight가 몰리면 작아진다.
+PAC 형태의 오차는 대략 `1 / sqrt(N_eff)`로 줄지만, 현재 시스템 전체에는 다음
+가정이 성립하지 않는다.
+
+- UCT label은 adaptive하고 서로 독립이 아니다.
+- self-play 중 상대 정책과 방문분포가 바뀐다.
+- encoder와 cluster를 같은 shard에서 선택하고 평가한다.
+- H4는 random 또는 별도 휴리스틱이다.
+- 같은 cluster 내부에서 action-Q가 가깝다는 보장이 없다.
+
+따라서 `CLUSTER_AGENT_THEORY.md`의 bound는 조건부 분석이지 현재 agent의
+end-to-end PAC 보장이 아니다. 이 정리를 통해 “Gaussian 안에 들어가면 같은
+전략일 것”이라는 가정과 “그 가정을 검증할 수 있다”는 주장을 분리했다.
+
+### Gaussian/Beta cover 아이디어의 위치
+
+Gaussian ellipsoid, Mahalanobis box, bounded radial Beta 또는 product-Beta
+component는 명시적 support와 OOD gate를 만들 수 있다. Pearson type II는
+단위공 또는 타원체 안에서 밀도가 `f(x) ∝ (1 - ||x||^2)^beta` 꼴인 bounded
+elliptical distribution이며, Gaussian의 무한 support 대신 유한 support를 준다.
+
+이 계열로 얻는 것은 다음과 같다.
+
+- 기존 atlas가 online state를 cover하는지 판정
+- support 밖 상태에 추가 rollout 배정
+- novelty buffer와 dynamic component 생성
+- responsibility를 이용한 soft policy mixture
+
+그러나 density cover는 value cover가 아니다. 현재 결론은 geometry를 먼저
+복잡하게 만들기보다 action-Q, advantage, reward/transition residual로 split을
+검증해야 한다는 것이다. Beta/Pearson atlas는 후보로 보존하되 production
+경로에는 넣지 않았다.
+
+## 1000-ante 상한과 데이터 재해석 (2026-07-17~18)
+
+Stackless EV 환경에서 반복 raise가 허용되자 Q target의 최대값이 백만 ante를
+넘고 adaptive CI가 사실상 수렴하지 않았다. 이는 단순한 학습률 문제가 아니라
+게임 자체의 reward range가 지나치게 큰 문제였다.
+
+실제 피망식 고정 스택에 가까운 `1000 ante` effective stack 상한을 기준으로
+게임을 다시 정의했다. 이 변경은 다음 효과를 가진다.
+
+- terminal utility와 empirical bound의 range를 유한하게 고정
+- 올인 이후 추가 raise 제거
+- 무한히 커지는 팟과 6-bet tail 차단
+- 서로 다른 agent의 ante/hand 비교를 일관되게 유지
+
+규칙이나 reward range가 바뀐 뒤에는 과거 UCT/MCCFR data를 같은 문제의
+표본으로 볼 수 없다. 기존 stackless shard는 diagnostic으로만 보존하고 새
+규칙의 학습에는 섞지 않는 것으로 결정했다.
+
+## Kuhn CFR과 staged 7포커 MCCFR (2026-07-19~20)
+
+가위바위보, Kuhn poker와 같은 작은 불완전정보 게임에서 Q-learning, UCT와
+CFR의 차이를 확인했다. 고정 상대에 대한 Q/UCT는 best response를 배울 수
+있지만, 양쪽 전략이 동시에 변하는 zero-sum game의 평균전략 수렴에는
+counterfactual regret가 더 직접적인 기준이다.
+
+`kuhn_cfr.py`에 작은 exact CFR 기준선을 만들고 정보집합별 regret matching과
+평균전략을 검증했다. 이후 7포커에는 모든 street을 한꺼번에 넣지 않고 terminal에
+가까운 street부터 넓히는 staged MCCFR을 적용했다.
+
+```text
+7th table
+→ freeze 또는 warm-start
+→ 6th+7th table
+→ 5th+6th+7th table
+```
+
+초기 Python 7th 모델은 100,000 hands, 약 3.61M traversals에서 173,373개
+bucket을 만들었다. 추가 20,000 hands 뒤에는 약 182,745개가 되었다. 마지막
+출력의 `last_strategy`는 전체 평균 행동률이 아니라 마지막으로 조회된 한
+information bucket의 평균전략이었다.
+
+6th+7th 모델은 7th 모델을 동결된 continuation으로 연결해 학습했지만,
+20,000-hand 대전에서 7th-only 모델에 다음과 같이 패했다.
+
+```text
+6th+7th vs 7th-only
+ante/hand = -0.1123008
+95% CI    = [-0.1565662, -0.0680354]
+```
+
+이 실패는 “앞 street을 배우면 성능이 반드시 보존된다”는 가정이 틀렸음을
+보였다. 새 6th bucket의 sparse regret, 다른 도달분포, frozen continuation과의
+coordination mismatch가 함께 작용했다. 더 많은 hands를 바로 투입하기보다
+bucket reuse를 먼저 높여야 한다는 결론으로 이어졌다.
+
+## Bottom-up bound와 고정 상대 POMDP best response (2026-07-21~23)
+
+UCT가 root에서 아래로 내려가며 계산을 배분하는 것과 반대로, terminal에 가까운
+action return부터 confidence interval을 계산하고 열등한 행동을 제거하는
+bottom-up bounding을 toy high-card game에 구현했다.
+
+`bottom_up_bound.py`는 root card를 고정하고 모든 첫 행동을 같은 opponent
+card/chance sample에 평가한다. empirical Bernstein radius는 다음 형태다.
+
+```text
+r_n =
+  sqrt(2 * sample_variance * log(3 / delta) / n)
+  + 3 * reward_range * log(3 / delta) / n
+
+LCB(a) = mean(a) - r_n(a)
+UCB(a) = mean(a) + r_n(a)
+```
+
+`UCB(a) < max_b LCB(b)`인 행동을 제거할 수 있다. 다만 이 구현은 terminal
+바로 위 root action의 인증 실험이며 전체 belief tree를 재귀적으로 인증한
+알고리즘은 아니다.
+
+고정 휴리스틱은 동시에 학습하는 adversary가 아니므로, 상대 hidden card를
+숨은 환경 상태로 보고 exact POMDP best response를 계산했다.
+
+```text
+상대 카드 39개 branch
+→ 관측된 상대 행동별 posterior partition
+→ 내 차례에는 모든 합법 행동 max
+→ 상대 차례에는 고정 heuristic expectation
+→ terminal chip net
+```
+
+`pomdp_best_response.py`는 시작 스택 6에서 모든 rank와 양쪽 좌석을 약 10초에
+풀었고 다음 결과를 냈다.
+
+```text
+fixed heuristic average EV = approximately 0
+exact best-response EV      = +0.7153846 ante/hand
+```
+
+이 solver는 약한 카드로 체크한 뒤 상대의 작은 raise가 특정 range를 드러내면
+큰 재레이즈로 fold를 유도하는 check-raise bluff도 스스로 발견했다. 중요한
+교훈은 bluff를 reward shaping으로 넣지 않아도 belief update와 상대 반응을
+정확히 모델링하면 best response 안에서 자연스럽게 나온다는 것이다.
+
+이 경로는 고정 상대 착취에는 강하지만 self-play equilibrium을 보장하지 않는다.
+따라서 이후 연구를 두 갈래로 분리했다.
+
+```text
+fixed opponent → POMDP/belief best response
+adaptive opponent → CFR/MCCFR equilibrium learning
+```
+
+## Saddle-point와 다인 게임 검토 (2026-07-23~24)
+
+bilinear zero-sum saddle-point에서 asymmetric perturbation을 사용하는 GDA를
+`asymp_gda.py`로 재현했다. L2 perturbation을 KL 또는 entropy geometry로
+바꾸면 simplex 전략에 더 자연스러운 mirror/prox update가 되지만, 논문의
+수렴률을 그대로 유지하려면 해당 geometry의 strong convexity와 smoothness에
+맞춘 별도 증명이 필요하다.
+
+3인 Kuhn을 단순 trilinear tensor payoff로 확장하는
+`three_player_kuhn_gda.py`도 실험했다. 다인 extensive-form game은 각
+플레이어의 realization plan을 고정하면 다른 플레이어에 대해 multilinear지만,
+2인 zero-sum의 convex-concave saddle point 구조는 일반적으로 사라진다.
+따라서 2인 알고리즘을 tensor로 바꾼 것만으로 Nash 수렴은 따라오지 않는다.
+
+PED, exploitability descent와 strong Nash도 검토했다.
+
+- PED류는 현재 정책을 착취하는 방향으로 population을 확장할 수 있지만 모든
+  일반합 다인 게임에서 exploitability가 0으로 수렴한다는 보장은 없다.
+- 두 플레이어의 공동 deviation에도 견디는 strong Nash는 존재하지 않는 게임이
+  많아 기본 목표로 두기 어렵다.
+- 현재 7포커의 첫 기준은 2인 zero-sum chip EV와 Nash exploitability 또는
+  고정 상대 head-to-head EV로 제한한다.
+
+## Stud-Leduc 2계층 HRL 실험 (2026-07-24~27)
+
+OpenSpiel의 Leduc exploitability를 기준으로 삼고, public community card 대신
+각 플레이어가 서로 다른 public up-card를 받는 작은 Stud-Leduc을 만들었다.
+전체 트리를 정확히 만들 수 있어 HRL 구조가 균형을 훼손하는지를 exact best
+response로 측정할 수 있다.
+
+독립 C++ solver `D:\Experiment\Toy-Card-Game-Agent\stud_leduc_cfr.cpp`에 다음
+모드를 구현했다.
+
+```text
+flat
+  기존 exact CFR+
+
+latent
+  라운드 전 비공개 option 3개 선택
+  상위/하위 모두 terminal chip EV regret
+
+semantic
+  목표 투입률 tau 선택
+  상위 regret = terminal chip EV
+  하위 regret = 1 - |actual_commitment / max_commitment - tau|
+
+adaptive
+  0, 0.5, 1에서 시작
+  많이 사용되는 구간의 midpoint goal 활성화
+```
+
+두 플레이어 모두 각 betting round 직전에 자기 option을 비공개로 선택한다.
+자기 option과 과거 자기 option은 정보집합에 들어가고 상대 option은 제외되어
+perfect recall과 비공개성을 유지한다. 모든 모드의 평가는 원래 chip payoff의
+exact best response와 exploitability를 사용한다.
+
+목표 집합을 `{0, 0.25, 0.5, 0.75, 1}`로 조밀하게 하거나 adaptive split하는
+기능도 구현했다. 그러나 goal 수가 늘어난다는 사실만으로 exploitability가
+단조 감소하지는 않는다.
+
+```text
+더 조밀한 goal
+→ 표현 가능한 하위 정책 집합은 커질 수 있음
+→ 정보집합과 학습해야 할 regret도 증가
+→ 같은 node budget의 표본/순회 효율은 나빠질 수 있음
+```
+
+Semantic 하위 reward는 원래 zero-sum payoff와 다른 objective이므로 원 게임의
+Nash 수렴 보장을 잃는다. 이 실험의 의미는 HRL이 항상 좋다는 주장이 아니라,
+동일 training node visits에서 flat CFR+보다 exploitability AUC를 실제로
+낮추는지 반증 가능하게 만든 것이다. 현재 HRL은 연구 branch로 보존하고
+7포커 production 학습에는 아직 연결하지 않았다.
+
+## 피망식 5구 규칙 v3 확정 (2026-07-27)
+
+실제 플레이 관찰을 바탕으로 betting 규칙을 다시 정의했다.
+
+```text
+H4
+→ 5th: player당 aggressive action 최대 1회
+→ 6th: player당 최대 2회
+→ 7th: player당 최대 3회
+```
+
+추가 규칙:
+
+- 4th street에는 betting round가 없다.
+- `BBING`은 아직 베팅이 없을 때의 첫 베팅이다.
+- 그 뒤에는 직전 최고 bet의 2배인 `DDADANG`을 사용할 수 있다.
+- 한 번 check한 플레이어는 같은 street에서 다시 raise할 수 없다.
+- `BBING`, `DDADANG`, `QUARTER`, `HALF`, `FULL`은 aggressive action이다.
+
+이 변경으로 betting history의 최대 길이가 유한해지고 4th round 전체가
+사라졌다. 동시에 v1/v2의 UCT dataset과 MCCFR table은 v3와 호환되지 않게
+되었다. 과거 데이터를 억지로 재사용하지 않고 규칙 버전을 model/data 계약의
+일부로 둔다.
+
+## C++ 7포커 환경과 MCCFR 분리 (2026-07-27)
+
+Python의 deepcopy, JSON key 직렬화와 객체 dictionary overhead를 제거하기 위해
+v3 heads-up EV 환경과 MCCFR agent를 독립 C++ 실험으로 옮겼다.
+
+```text
+D:\Experiment\Project-7-stud-Poker-Agent\cpp_mccfr\
+  stud_mccfr.cpp
+  power64_v1.bin
+  *.bin checkpoints
+  README.md
+  IMPLEMENTATION_GUIDE.md
+  BUCKET_GROWTH.md
+```
+
+환경과 solver는 현재 한 translation unit에 있지만 state transition 함수와
+MCCFR class는 코드상 분리되어 있다. 같은 프로세스와 연속 자료구조를 사용하므로
+Python-C++ IPC에서 생기는 serialization, process call, information loss가 없다.
+학습 병목이 확인되기 전에는 별도 library/interface로 나누지 않는다.
+
+기존 legacy bucket은 다음 항목의 곱으로 커졌다.
+
+```text
+hand category
+x rank/public-card feature
+x pot/stack band
+x raise count
+x exact relative history
+x legal action mask
+```
+
+새 information set을 만나면 즉시 permanent entry를 만들고 merge나 eviction을
+하지 않으므로 sparse history가 table을 폭발시켰다. C++은 lookup을 빠르게 할
+뿐 coverage를 해결하지 않는다.
+
+## Frozen power bucket과 sparse table 완화 (2026-07-27)
+
+각 street에서 미래 완성 족보의 확률분포를 Monte Carlo로 계산하고
+`sqrt(probability)`로 변환했다. 두 power vector의 dot product는
+Bhattacharyya similarity에 해당한다. 이 vector와 expected tie-break rank,
+opponent public pressure를 묶어 centroid를 미리 fitting한 뒤 MCCFR 중에는
+고정한다.
+
+```text
+street
+x frozen power centroid
+x pot odds / stack-to-pot band
+x own/opponent raise count
+x checked flag
+x recent public action/intent
+x legal action mask
+```
+
+Centroid가 학습 중 움직이면 기존 regret entry의 의미가 바뀌므로 atlas는
+반드시 먼저 만들고 freeze한다. 첫 identical-seed 2,000-hand 7th-street
+비교는 다음과 같았다.
+
+```text
+legacy: 268,027 buckets, 61.3% single-touch, about -4.12 ante/hand
+power:    2,604 buckets,  4.9% single-touch, about -0.50 ante/hand
+```
+
+이는 clustering 자체의 승리가 아니라, 전략적으로 관련된 hand-power
+확률을 이용해 sparse information sets를 재사용한 결과다. garbage line을
+임의로 삭제하는 대신 low-touch ratio, hit rate, bucket growth로 실제 희소성을
+측정한다.
+
+초기 pruning은 속도를 높였지만 EV를 낮췄다. 따라서 regret-based cold branch
+pruning은 기본값을 off로 유지한다.
+
+## pmang_v2 cluster policy의 최종 실패 기록 (2026-07-27)
+
+새 규칙 데이터로 GMM policy agent를 다시 평가했지만 고정 휴리스틱에 명확히
+패했다.
+
+```text
+gmm-policy vs heuristic, 10,000 hands
+ante/hand = -4.9529389
+95% CI    = [-5.8048074, -4.1010704]
+average top responsibility = 0.8781
+effective clusters used    = 82.44
+```
+
+Responsibility가 날카롭고 많은 component를 사용했다는 사실은 좋은 전략을
+보장하지 않았다. 현재 cluster policy 실패의 주원인은 component 개수보다
+off-policy UCT target, action-value averaging, H4 mismatch와 원 게임의
+equilibrium objective 부재다.
+
+따라서 다음 항목은 production 경로에서 중단했다.
+
+- GMM/k-means component policy를 그대로 최종 agent로 사용
+- cluster 평균 Q의 greedy action을 정답으로 간주
+- 동일한 off-policy shard에 EM epoch만 추가
+- geometric coverage를 decision confidence로 해석
+
+Clustering은 폐기하지 않았지만 power abstraction, confidence/OOD gate,
+search prior처럼 효과를 별도로 측정할 수 있는 보조 역할로 축소했다.
+
+## 7포커 particle belief best response (2026-07-27)
+
+Toy POMDP의 고정 상대 best-response 경로를 7포커에 옮긴
+`agent/claude_belief_br.py`를 구현했다.
+
+상대 hidden-card particle `h`를 공개 betting action과의 일치도로 갱신한다.
+
+```text
+b'(h) ∝ b(h) exp(
+  -(strength(h) - observed_aggression)^2 / (2 sigma^2)
+)
+```
+
+각 합법 행동은 posterior particle에 대한 net-chip EV로 평가한다. Raise는
+상대가 fold하는 particle과 call하는 particle을 나누고, call range에
+조건부인 equity를 사용한다. 1-ply rollout이 얇은 value bet을 과대평가하는
+문제는 passive action보다 일정 margin 이상 좋을 때만 공격하는
+`aggression_margin`으로 제한했다.
+
+EV mode, `ante=1000`, fixed heuristic 상대의 실측:
+
+```text
+claude belief-BR average = +1.024 ante/hand
+seed results             = +0.287, +0.991, +1.793
+HA1 uniform belief       = -10.474 ± 3.973
+random                   = -6.334 ± 2.252
+```
+
+이 결과는 action-conditioned belief가 고정 상대 착취에 실제로 유용함을
+보인다. 그러나 `aggression_margin=0.40`은 myopic rollout의 보정 휴리스틱이고,
+상대가 동시에 학습하면 opponent likelihood와 best-response target이 움직인다.
+따라서 이것은 equilibrium agent가 아니라 고정 정책에 대한 planning oracle다.
+
+## Textbook external-sampling MCCFR 검증 (2026-07-27)
+
+7포커 결과를 해석하기 전에 작은 exact game에서 구현 자체를 검증했다.
+Stud-Leduc C++ solver에 다음 표준 external-sampling MCCFR을 추가했다.
+
+```text
+chance node     → 한 outcome sample
+opponent node   → current strategy에서 한 action sample
+traverser node  → 모든 legal action 평가
+terminal        → traverser utility 역전파
+```
+
+중요한 수정도 발견했다. 기존 C++ MCCFR은 average strategy를 regret를
+갱신하는 traverser node에서 누적했다. Alternating external sampling에서는
+다른 player가 traverser일 때 표본 경로에서 방문한 opponent node의 현재
+strategy를 누적해야 한다. 수정 전 model의 `strategy_sum`은 수정 후 checkpoint와
+같은 의미가 아니므로 이어 학습하거나 직접 비교하지 않는다.
+
+### Rank 3 Stud-Leduc
+
+```text
+nodes            = 28,057
+information sets = 738
+node budget      = 10,000,000
+
+Exact CFR+:
+  exploitability = 0.005182
+  elapsed        = 0.210 sec
+
+External MCCFR:
+  exploitability = 0.046758
+  elapsed        = 2.502 sec
+```
+
+External MCCFR은 1M visits의 `0.1597`에서 10M의 `0.0468`로 지속적으로
+exploitability를 낮췄다.
+
+### Rank 4 mini-Stud
+
+```text
+nodes            = 128,529
+information sets = 1,824
+node budget      = 20,000,000
+
+Exact CFR+:
+  exploitability = 0.024831
+  elapsed        = 0.430 sec
+
+External MCCFR:
+  exploitability = 0.044967
+  elapsed        = 15.14 sec
+```
+
+전체 tree가 작고 contiguous array에 들어가는 게임에서는 full CFR+가 더
+빠르다. MCCFR은 더 좋은 알고리즘이라서 쓰는 것이 아니라 full traversal을
+할 수 없는 게임에서 unbiased sampled regret update를 얻기 위해 쓴다.
+
+## 7포커 fixed-root MCCFR self-play (2026-07-27)
+
+기존 `choose_action`마다 짧게 MCCFR을 돌리는 online 방식 외에, 5th street
+경계 상태를 반복 표본화해 offline으로 regret와 average strategy를 누적하는
+fixed-root 경로를 추가했다.
+
+한 root iteration:
+
+```text
+52-card deck shuffle
+→ 두 player H4를 기존 heuristic으로 선택
+→ 5th public card까지 deal
+→ 같은 root에서 P0 external-sampling traversal
+→ 같은 root에서 P1 external-sampling traversal
+→ 다음 deck/root
+```
+
+이는 H4 이후 5th~7th street의 power-abstracted game에 대한 self-play다.
+상대 node는 현재 regret-matching strategy에서 sample되며, 두 player 모두
+번갈아 regret를 갱신한다. H4까지 포함한 전체 7포커 self-play는 아니다.
+
+61,000 root까지의 누적 training node visits는 `74,129,668`회였다. 모든
+checkpoint를 같은 seed의 paired 20,000-hand match로 동결 평가했다.
+
+| 누적 root | heuristic 상대 ante/hand | paired 95% CI |
+|---:|---:|---:|
+| 1,000 | -3.8048 | [-4.3369, -3.2726] |
+| 11,000 | -0.9941 | [-1.3553, -0.6328] |
+| 31,000 | -0.1620 | [-0.3737, 0.0497] |
+| 61,000 | -0.0836 | [-0.3000, 0.1328] |
+
+최종 model은 8,816개 bucket을 사용했고 평가 중 hit rate는 100%였다.
+`belief-br`, 240 particles, 5,000-hand 스트레스 테스트도 다음과 같이
+통계적 무승부였다.
+
+```text
+root_mccfr_61k vs belief-br
+ante/hand = -0.1640
+95% CI    = [-0.4456, 0.1176]
+```
+
+현재 결과는 “7포커 Nash equilibrium을 구했다”가 아니라 다음을 입증한다.
+
+- 수정된 external-sampling regret와 average strategy가 toy에서 수렴한다.
+- fixed-root self-play를 늘리면 실제 7포커 table의 상대 성능이 개선된다.
+- 31k root부터 고정 휴리스틱과 통계적 무승부에 도달한다.
+- 61k 이후의 작은 EV 차이는 현재 평가 noise보다 작다.
+
+`root_mccfr_61k.bin`을 100k root까지 늘리는 것은 유효하다. 다만
+`-0.084 → -0.076` 같은 선형 예측은 할 수 없다. 20,000-hand 평가의
+standard error가 약 `0.110 ante/hand`라 그 차이는 측정할 수 없는 크기다.
+
+## 현재 설계 판단과 보존할 기준선 (2026-07-27)
+
+### 계속 사용하는 것
+
+- exact terminal evaluator와 zero-sum chip-net 정산
+- paired-seat evaluation과 95% confidence interval
+- 규칙 version을 model/data 계약에 포함
+- 작은 game의 exact exploitability oracle
+- 고정된 power atlas와 bucket growth diagnostics
+- 표준 external-sampling MCCFR
+- 5th-street fixed-root self-play
+- 고정 상대용 particle-belief best response
+
+### 연구 branch로 보존하는 것
+
+- Gaussian/Beta/Pearson bounded atlas
+- value-aware split/merge와 dynamic bucket
+- temporal cluster DAG와 abstract Bellman backup
+- semantic/adaptive HRL goal
+- bottom-up confidence-bound belief planning
+- asymmetric perturbation과 다인 equilibrium 실험
+
+### 현재 production 경로에서 사용하지 않는 것
+
+- random H4를 가진 cluster policy
+- descendant와 root가 섞인 adaptive UCT shard
+- component 평균 Q의 단순 greedy policy
+- latest-only clone self-play와 반복 distillation
+- 규칙이 다른 과거 v1/v2 table 또는 rollout
+- 수정 전 average-strategy MCCFR checkpoint
+
+### 다음 한 번의 실험
+
+새 구조를 더 추가하기 전에 다음 비교만 한다.
+
+```text
+같은 fixed-root training node visits
+power64 vs 더 세밀한 frozen power atlas
+→ 같은 frozen heuristic/belief-BR 평가
+```
+
+더 세밀한 atlas가 개선되지 않으면 현재 병목은 cluster 수가 아니라 H4
+휴리스틱 또는 imperfect-recall aliasing이다. 그때 다음 구조적 확장은 H4
+action을 CFR game tree에 넣거나 별도의 exact/strong continuation target으로
+학습하는 것이다.
+
+상세 재현 명령과 최신 수치는 `CFR_MCCFR_VALIDATION.md`에 둔다.
+
+## Power bucket 진단 필드 수정 (2026-07-27)
+
+Power model 출력에서 `buckets_by_hand_category`와
+`buckets_by_history_length`가 모두 index 0에만 나타났다. 실제 전략이
+street만 사용한 것이 아니라, 통계 코드가 legacy key의 `category`와
+`history_length`를 읽은 반면 `make_power_key()`는 두 필드를 의도적으로
+채우지 않아 기본값 0이 남은 진단 오류였다.
+
+Power key의 실제 분화축은 다음과 같다.
+
+```text
+street
+x power_cluster
+x pot_odds / stack_pot
+x own/opponent bet count
+x checked
+x last_action_class
+x betting_goal
+x legal_action_mask
+```
+
+Hand category는 별도 key가 아니라 power vector의 final hand-category
+distribution 9차원과 expected primary rank에 포함된다. Exact history는 power
+abstraction에서 의도적으로 제거하고 bet count, checked, recent action과 goal로
+근사한다. 따라서 hand 정보는 보존되지만 exact perfect recall은 보장하지 않는다.
+
+진단 출력은 power mode에서 의미 없는 legacy 배열을 `null`로 표시하고 실제
+분화축을 출력하도록 수정했다. 기존 model key와 binary checkpoint format은
+변경하지 않았다. `root_mccfr_100k.bin`의 새 출력은 다음을 보였다.
+
+```text
+power clusters active: 64 / 64 / 64 by street
+own bet count buckets: [1647, 2523, 3210, 1547]
+opponent bet count:    [382, 2525, 2777, 3243]
+checked:               [8299, 628]
+last action class:     [190, 192, 0, 3500, 5045, 0]
+betting goal:          [1647, 3421, 3859]
+legal action count:    [0, 0, 3454, 0, 0, 5473, 0, 0, 0]
+street:                [762, 1838, 6327]
+```
+
+즉 기존의 all-zero category/history 출력은 학습 실패의 증거가 아니었다.
+다만 exact history를 버린 power abstraction의 equilibrium error 가능성은
+별도의 문제로 남는다.
+
+### 추천 커밋 메시지
+
+`docs: record clustering, belief BR, HRL, and MCCFR lineage`
+
+## 100M snapshot의 top-p 및 적응형 cluster 실험 (2026-07-29)
+
+`root_mccfr_current_snapshot.bin`을 동결하고 다음 순서로 실험했다.
+
+```text
+hard MCCFR table
+→ Gaussian local bandwidth + top-p 0.99
+→ local temperature calibration
+→ 평균 surrogate regret가 threshold를 넘는 parent에서 centroid 1개 append
+→ 기존 top-p 혼합전략으로 새 information-set node 초기화
+→ local temperature 재조정
+```
+
+20,000 roots를 두 번 순회하는 데 `1,021.6초`가 걸렸다. 7th street의
+cluster 6에서 새 cluster 64가 생성되었고 초기 전략은
+`QUARTER 0.0206355, FOLD 0.979364`였다.
+
+내부 surrogate loss는 감소했다.
+
+```text
+첫 calibration:       20.7274 → 20.1358
+cluster 추가 이후:   18.6093 → 18.1469
+```
+
+하지만 동일 seed, 1,000-hand policy-LBR 평가는 다음과 같았다. 값은
+LBR이 얻은 ante/hand이므로 낮을수록 방어 정책이 좋다.
+
+| 정책 | LBR | 95% CI |
+|---|---:|---:|
+| Hard snapshot | 1.3970 | [0.7564, 2.0376] |
+| Top-p 0.99, 기본 local temperature | 1.3675 | [0.4602, 2.2748] |
+| 새 cluster + 보정 temperature | 1.7925 | [1.0162, 2.5688] |
+| 새 cluster, temperature 파일 제외 | 1.3675 | [0.4602, 2.2748] |
+
+마지막 두 비교에서 temperature 파일을 제외하자 결과가 top-p-only와
+정확히 같았다. 이번 표본에서는 새 cluster 하나의 실질적 영향은 없었고,
+악화는 local temperature calibration에서 발생했다. 현재 surrogate는
+실제 LBR 목적과 정렬되지 않으므로 temperature를 surrogate만으로 채택하면
+안 된다. 이후에는 후보 temperature를 별도 validation LBR 또는 여러 seed의
+accept/reject gate로 검증해야 한다.
+
+이 실험 직후 구현상의 원인도 확인했다. Power cluster 하나는 전역 정책
+하나가 아니라 `power cluster × betting context`별 정책 묶음인데, 최초
+구현은 발견된 context 하나만 초기화했다. 이후 구현은 새 centroid를 만들
+때 해당 street의 기존 betting context 전체를 순회하고, 각 context마다
+이웃 cluster의 전략을 responsibility로 혼합해 child node를 초기화하도록
+수정했다. 100-root smoke test에서는 7th-street child cluster 하나에
+103개 context node가 생성되었고 self-test를 통과했다. 위 20,000-root
+adaptive 산출물은 수정 전 구현의 진단 결과이므로 최종 후보로 사용하지
+않는다.
+
+수정된 구현으로 5,000-root calibration을 성장 전후 한 번씩 수행했다.
+소요 시간은 `252초`였다. 7th-street parent cluster 45에서 child 64를
+추가하고 103개 betting-context node를 초기화했다. 발견 상태의 상속
+전략은 다음과 같았다.
+
+```text
+DDADANG  0.150065
+QUARTER  0.713256
+HALF     0.041378
+CALL     0.037878
+FOLD     0.057423
+```
+
+동일 seed의 1,000-hand policy-LBR 결과:
+
+| 정책 | LBR | 95% CI |
+|---|---:|---:|
+| Hard snapshot | 1.39700 | [0.7564, 2.0376] |
+| Top-p 0.99 | 1.36750 | [0.4602, 2.2748] |
+| Child cluster, temperature 미적용 | 1.36750 | [0.4602, 2.2748] |
+| Child cluster + local temperature | 1.36125 | [0.4457, 2.2768] |
+
+혼합전략 상속은 함수 보존 초기화이므로 temperature 조정 전 결과가
+동일한 것이 정상이다. Local temperature 적용 후 명목상 `0.00625a/hand`
+개선됐지만 표준오차 `0.46712`보다 매우 작아 효과를 주장할 수 없다.
+현재 결론은 "파괴 없이 자유도 하나를 추가했다"까지이며, 개선 판정에는
+더 큰 paired validation 또는 여러 seed가 필요하다.
+
+Adaptive 평가에서 처음 관측된 `4 / 297,696` policy miss는 새 centroid가
+top-p를 독점했지만 아직 child node가 없는 신규 문맥이었다. 이 경우 전체
+기존 이웃으로 fallback하도록 수정했으며, 같은 평가에서 LBR 값은 유지되고
+policy miss는 0이 되었다.
+
+## 처음부터 학습하는 adaptive soft-cluster 비교 (2026-07-29)
+
+기존 10M/100M hard table을 soft policy로 사후 변환하지 않고, 빈 regret
+table에서 `mix`와 `simple` 두 정책을 같은 self-play 조건으로 학습했다.
+
+공통 설정은 street별 초기 centroid 8개, `top-p=0.99`, local Gaussian
+bandwidth, 1000-ante stack, plain MCCFR, 동일 deal seed이다. 한 상태의
+cluster responsibility를 `r_k`라고 하면 local expert regret은 다음처럼
+갱신한다.
+
+```text
+Delta R_k(a) = r_k * (Q(a) - V_k)
+V_k = sum_a pi_k(a) Q(a)
+pi_mix(a) = sum_k r_k pi_k(a)
+```
+
+10,000 roots마다 dominant cluster별 sampled one-step action gap의 평균을
+계산한다. 최대 평균 gap이 `1 ante`를 넘으면 최악 사례의 power vector를
+새 centroid로 추가한다.
+
+- `mix`: 양의 `Q(a) - V_mix` 전체를 정규화한 혼합정책으로 초기화
+- `simple`: 가장 큰 `Q(a) - V_mix` 행동 하나의 one-hot 정책으로 초기화
+- threshold 이하: centroid 대신 local temperature의 이산 후보
+  `{0.25, 0.5, 1, 2, 4}` 중 하나를 선택
+
+온도 후보 계산은 성장 regret 표본 16개당 하나만 사용한다. 여기서 gap은
+formal counterfactual regret/exploitability가 아니라 sampled opponent
+trajectory에서 얻은 one-step surrogate이다.
+
+### 결과
+
+10k roots의 첫 적응에서 최대 평균 gap은 `79.5861 ante`였고, 두 방식
+모두 첫 신규 7th-street expert가 `CALL 100%`여서 정책과 평가값이 같았다.
+
+| 10k 평가 | mix | simple |
+|---|---:|---:|
+| heuristic, 20k hands | -1.8771 | -1.8771 |
+| policy-LBR lower bound, 1k hands | 6.8230 | 6.8230 |
+
+10k checkpoint에서 90k roots를 더 학습했다. 모든 구간의 최대 평균
+gap이 `42~198 ante`여서 temperature 분기는 한 번도 실행되지 않았다.
+따라서 아래 결과는 새 expert의 mix/simple 초기화만 비교한다.
+
+| 누적 100k 평가 | mix | simple |
+|---|---:|---:|
+| heuristic, 100k hands | -0.70757 | -0.56738 |
+| heuristic 95% CI | [-0.78736, -0.62778] | [-0.64458, -0.49018] |
+| policy-LBR lower bound, 5k hands | 4.33505 | 3.97153 |
+| policy-LBR 95% CI | [2.28530, 6.38480] | [2.31655, 5.62650] |
+
+`simple`은 heuristic 상대로 약 `0.1402 ante/hand` 좋았다. LBR도 명목상
+낮았지만 신뢰구간이 크게 겹쳐 방어력 우위를 주장할 수 없다. 두 모델
+모두 heuristic에 지고 LBR에 크게 착취되므로 기존 hard MCCFR 결과를
+대체하지 못한다.
+
+신규 centroid 10개가 전부 7th street에 생긴 것도 중요한 실패 신호다.
+global maximum gap 하나만 고르는 규칙은 street별 payoff 분산과 표본 수
+차이에 민감해 5th/6th street 성장을 굶길 수 있다. 다음 실험은 새 모델을
+더 얹기 전에 street별 gap 정규화 또는 street별 성장 quota를 비교한다.
+
+## 동일 node-visit 예산의 hard/fixed/adaptive 비교 (2026-07-29)
+
+앞선 비교는 같은 root 수를 사용했지만 soft traversal은 여러 expert를
+동시에 갱신하므로 실제 연산량이 달랐다. 이를 바로잡기 위해
+`--root-node-budget`을 추가하고, 다음 세 방식을 동일한 누적 게임 트리
+node 방문 수에서 비교했다.
+
+- `hard`: 가장 가까운 centroid 하나만 사용
+- `fixed`: Gaussian responsibility로 정책을 혼합하되 atlas와 온도는 고정
+- `adaptive`: `simple` 방식으로 centroid를 추가하고 local temperature를 조정
+
+공통 조건은 1000-ante stack, street별 초기 centroid 8개, 빈 regret table,
+plain MCCFR, 같은 seed이다. Soft 방식은 `top-p=0.99`, 기본 온도 1,
+local bandwidth를 사용했다. Adaptive의 성장 threshold는 `1 ante`,
+적응 주기는 10,000 roots이다.
+
+### 10M node visits
+
+| 방식 | 학습 시간 | heuristic EV (20k) | policy-LBR (1k) |
+|---|---:|---:|---:|
+| hard | 44.5s | +0.02752 | 1.14463 |
+| fixed | 193.2s | -0.89458 | 5.65625 |
+| adaptive | 216.1s | -0.91880 | 5.07350 |
+
+이 시점의 adaptive는 마지막에 7th-street cluster 하나를 추가했을 뿐,
+신규 expert를 후속 self-play로 충분히 학습하지 못했다. LBR 표본도
+1,000 hands라 신뢰구간이 넓어 10M 수치는 방향 확인용이다.
+
+### 누적 100M node visits
+
+| 방식 | 추가 90M 시간 | heuristic EV (100k, 95% CI) | policy-LBR (5k, 95% CI) |
+|---|---:|---:|---:|
+| hard | 301.7s | +0.04476 [0.00128, 0.08824] | 2.50558 [1.74079, 3.27036] |
+| fixed | 1745.5s | -0.76399 [-0.83864, -0.68935] | 4.88243 [3.58723, 6.17762] |
+| adaptive | 2123.7s | -0.20693 [-0.27847, -0.13539] | 2.55863 [1.62129, 3.49596] |
+
+Adaptive는 fixed-soft보다 heuristic EV를 `0.55706 ante/hand` 개선했고,
+policy-LBR lower bound를 `2.32380 ante/hand` 낮췄다. 따라서 centroid
+성장이 고정 soft atlas의 추상화 오차를 줄인다는 증거는 얻었다.
+
+그러나 adaptive와 hard의 LBR 신뢰구간은 크게 겹친다. Adaptive가 hard보다
+낮은 asymptotic exploitability floor를 갖는다는 증거는 아직 없다.
+Heuristic EV에서는 hard가 유의하게 더 좋고, 학습 시간도 adaptive가 약
+7배 길었다.
+
+Adaptive atlas는 최종적으로 street별 `8/8/25` clusters가 됐다. 모든 신규
+cluster가 7th street에 생겼고, 최대 sampled surrogate gap은 계속
+`83~205 ante` 수준이어서 temperature 분기는 한 번도 실행되지 않았다.
+이는 현재 global maximum 기준이 7th-street payoff scale에 편향되며,
+surrogate가 안정적으로 감소하지 않는다는 뜻이다.
+
+현재 결론은 다음과 같다.
+
+1. Adaptive growth는 fixed-soft보다 확실히 유용하다.
+2. 100M에서 adaptive의 방어력은 hard와 구분되지 않을 정도까지 따라왔다.
+3. 더 낮은 수렴 바닥은 확인되지 않았고, 1B 학습을 정당화할 곡선도 없다.
+4. 다음 실험은 street별 gap 정규화 또는 street별 성장 quota를 먼저
+   적용하고, 같은 LBR seed와 예산으로 30M/100M/300M checkpoint를 비교한다.
+
+Policy-LBR은 알려진 평가 정책에 대한 근사 best response가 얻은
+착취 가능 이득의 lower bound이다. 이것은 원 게임 exploitability의 정확한
+값이나 upper bound가 아니며, sampled one-step gap도 그 대용물이 아니다.
+
+## Street-balanced temperature/growth 실험 (2026-07-29)
+
+이전 adaptive는 모든 street의 sampled gap 중 전역 최댓값 하나를
+선택했다. 7th street의 payoff 변동이 가장 커 신규 cluster가 모두 7th에
+생겼고, 고정 threshold `1 ante`를 항상 초과해 temperature 분기는 한 번도
+실행되지 않았다.
+
+다음 최소 변경을 적용했다.
+
+```text
+적응 street: 5th -> 6th -> 7th -> 반복
+threshold(j) = max(1, 200 * 0.9^j)
+
+street의 최대 평균 gap > threshold
+-> 최악 사례를 centroid로 새 simple-policy cluster 생성
+
+그 외
+-> 해당 street의 local temperature만 이산 후보로 조정
+```
+
+CFR regret update 자체는 계속 모든 soft expert의 과도한 행동 확률을
+수정한다. Temperature는 기존 local policy들의 혼합 비율만 바꾸며,
+현재 atlas로 설명하기 어려운 큰 action gap만 신규 cluster가 담당한다.
+
+### 기존 adaptive의 학습 기울기 재측정
+
+기존 hard/adaptive 10M과 100M을 동일한 5,000-hand policy-LBR,
+32 particles, 같은 평가 seed로 다시 측정했다.
+
+| 방식 | 10M LBR | 100M LBR | 명목 감소량 |
+|---|---:|---:|---:|
+| hard | 3.03108 | 2.40121 | 0.62986 |
+| 기존 global adaptive | 4.68133 | 2.83803 | 1.84330 |
+
+기존 adaptive의 명목 감소량은 hard의 약 2.9배였지만 각 checkpoint의
+신뢰구간이 겹치므로 더 빠른 asymptotic rate의 증명은 아니다. 또한 학습
+seed가 동일하지 않아 이 표는 장기 추세 신호로만 사용한다.
+
+### 같은 seed의 10M/30M 비교
+
+새 방식과 hard를 같은 학습 seed `15101`, 같은 초기 8-cluster atlas,
+같은 node-visit 예산으로 각각 처음부터 학습했다. 평가는 100,000-hand
+heuristic match와 5,000-hand policy-LBR에 같은 평가 seed를 사용했다.
+
+| 방식 | 예산 | heuristic EV | policy-LBR |
+|---|---:|---:|---:|
+| hard | 10M | +0.13104 | 2.56137 |
+| hard | 30M | +0.19546 | 1.94507 |
+| balanced decay | 10M | -0.39203 | 4.43216 |
+| balanced decay | 30M | +0.04661 | 4.21800 |
+
+10M까지는 threshold가 높아 cluster를 만들지 않고 temperature만 조정했다.
+30M에서는 threshold가 내려가며 7th cluster 세 개가 생성됐다. 5th/6th의
+평균 gap은 `2~9 ante`였으므로 강제 분할하지 않고 temperature만 조정했다.
+
+결과는 두 목표를 분리해서 봐야 한다.
+
+- heuristic EV 개선량: hard `+0.06442`, balanced `+0.43864`
+- LBR 감소량: hard `0.61631`, balanced `0.21416`
+
+Balanced 방식은 특정 heuristic에 대한 활용 정책을 훨씬 빨리 찾았지만,
+근사 best response에 대한 방어력은 hard보다 느리게 개선됐다. Soft
+mixture의 유연성이 곧 equilibrium 수렴 가속을 뜻하지는 않는다.
+
+따라서 이 설정의 100M 연장은 중단했다. 다음 실험에서는 하나의 surrogate로
+temperature와 split을 모두 결정하지 않는다. Cluster 생성은
+counterfactual/action gap을 사용하되, temperature 변경은 별도 validation
+LBR에서 개선된 후보만 채택하는 acceptance gate가 필요하다.
+
+## Temperature-free weighted cluster growth (2026-07-29)
+
+Local temperature를 제거하고 cluster의 고정 state mass만 responsibility에
+포함했다.
+
+```text
+r_k(z) proportional to
+    m_k * exp(-distance_k(z) / (2 * local_variance_k))
+```
+
+초기 `POWERAT1` atlas는 cluster mass를 균등하게 초기화한다. 새 cluster는
+선택된 parent mass의 10%를 받고 parent는 나머지 90%를 유지한다. 이 mass는
+정책의 우수성이 아니라 state support prior이며 CFR 구간 중에는 바뀌지
+않는다. 저장 형식은 mass를 포함하는 `POWERAT2`로 확장했고 기존 atlas는
+계속 읽을 수 있다.
+
+같은 seed와 초기 8-cluster atlas에서 centroid 생성법 두 개만 비교했다.
+
+- `point`: interval의 최대 one-step regret 상태 한 개를 centroid로 사용
+- `residual`: 선택된 parent에서 regret이 큰 상위 64개 상태를 보관하고
+  `max(regret - threshold, 0)`으로 가중 평균한 centroid 사용
+
+둘 다 신규 expert는 최대-regret 행동의 one-hot으로 초기화하고, 이후 정책은
+CFR regret으로만 갱신했다. 적응 주기는 10,000 roots, threshold는
+`1 ante`이며 local temperature 조정은 없다.
+
+### 10k roots
+
+두 방식 모두 같은 7th-street parent를 분할하고 같은 행동으로 초기화했다.
+새 child가 후속 CFR update를 받기 전이라 평가 정책도 완전히 같았다.
+
+| 방식 | heuristic EV (20k) | policy-LBR (1k) |
+|---|---:|---:|
+| point | -0.59921 | 4.06063 |
+| residual | -0.59921 | 4.06063 |
+
+### 누적 100k roots
+
+10k checkpoint에서 각 방식으로 90k roots를 추가 학습했다. 평가는
+100,000-hand heuristic match와 5,000-hand policy-LBR를 사용했다.
+
+| 방식 | heuristic EV | policy-LBR | LBR 95% CI |
+|---|---:|---:|---:|
+| point | -0.37998 | 2.31000 | [1.15790, 3.46210] |
+| residual | -0.40453 | 2.71855 | [1.91420, 3.52290] |
+
+Point의 LBR이 명목상 `0.40855 ante/hand` 낮지만 신뢰구간이 겹치므로
+통계적 우위를 주장할 수 없다. Residual 평균 centroid가 point보다 낫다는
+증거는 없었다. Point는 구현과 계산이 더 단순하므로 두 방식 중에는 point를
+기준선으로 남긴다.
+
+두 run 모두 신규 cluster 10개가 전부 7th street에 생겼다. 이는 centroid
+계산법이 아니라 global maximum gap 선택의 결과다. 또한 100k에서도 두
+정책 모두 heuristic에 지므로 순정 hard MCCFR을 대체하지 못한다.
+
+### Ante1000 hard 100k 기준선
+
+Point/residual과 학습 deal 순서를 맞추기 위해 hard도 첫 10k roots는
+seed `16101`, 이어지는 90k roots는 seed `16102`로 학습했다. 모든 모델은
+`ante=1000`, effective stack `1,000,000 chips = 1000 ante`를 사용했다.
+평가도 같은 seed `16301`로 수행했다.
+
+| 방식 | 누적 node visits | 학습 시간 | heuristic EV | policy-LBR |
+|---|---:|---:|---:|---:|
+| hard | 76.28M | 319.5s | -0.02596 | 1.54909 |
+| point mass | 55.89M | 1688.8s | -0.37998 | 2.31000 |
+| residual mass | 54.86M | 1681.3s | -0.40453 | 2.71855 |
+
+Heuristic 95% CI는 hard `[-0.07505, 0.02313]`, point
+`[-0.45007, -0.30989]`, residual `[-0.47246, -0.33659]`였다. Hard만
+heuristic과 통계적으로 구분되지 않는 동률이고 두 soft 방식은 명확히 졌다.
+
+LBR 95% CI는 hard `[0.75571, 2.34246]`, point `[1.15790, 3.46210]`,
+residual `[1.91420, 3.52290]`로 겹친다. 따라서 hard의 명목 LBR 우위는
+관측됐지만 통계적 확정은 아니다. Hard 평가에는 20회의 policy miss가
+있어 uniform fallback이 사용됐지만 전체 query 대비 극소수였다.
+
+같은 root 수에서 hard는 정책 경로상 더 많은 tree node를 방문했음에도
+벽시계는 soft보다 약 5.3배 빨랐고 bucket도 `1,143`개로 soft의 `2,198`개보다
+적었다. 이 실험에서도 hard abstraction + CFR regret matching이 주력
+기준선이다.

@@ -16,7 +16,7 @@ from agent import PokerAgent
 from poker_env import DEFAULT_EV_STACK_ANTE, EV_RAISE_CAP, PokerGame
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SUITS = {"s": 0, "h": 1, "d": 2, "c": 3}
 RANK_LABELS = ("2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A")
 RANKS = {rank: index for index, rank in enumerate(RANK_LABELS)}

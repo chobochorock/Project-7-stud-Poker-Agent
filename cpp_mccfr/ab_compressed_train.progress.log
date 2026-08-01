@@ -1,0 +1,4 @@
+{"root_iteration":25000,"traversals":50000,"training_node_visits":39472617,"buckets":8773,"elapsed_seconds":195.288}
+{"root_iteration":50000,"traversals":100000,"training_node_visits":65326113,"buckets":8901,"elapsed_seconds":338.471}
+{"root_iteration":75000,"traversals":150000,"training_node_visits":88485702,"buckets":8947,"elapsed_seconds":466.629}
+{"root_iteration":100000,"traversals":200000,"training_node_visits":110698226,"buckets":8969,"elapsed_seconds":589.162}

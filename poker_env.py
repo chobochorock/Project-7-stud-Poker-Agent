@@ -14,9 +14,11 @@ BETTING_ACTIONS = (
     "CHECK", "BBING", "DDADANG", "QUARTER", "HALF", "FULL", "CALL", "FOLD"
 )
 GAME_MODES = ("cash", "tournament", "ev")
+AGGRESSIVE_ACTIONS = frozenset({"BBING", "DDADANG", "QUARTER", "HALF", "FULL"})
+STREET_BET_CAPS = {"4th": 0, "5th": 1, "6th": 2, "7th_hidden": 3}
 EV_RAISE_CAP = 6
 DEFAULT_EV_STACK_ANTE = 1000
-BETTING_RULES_VERSION = 2
+BETTING_RULES_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -95,14 +97,17 @@ class Player:
         else:
             self.hidden_cards.append(card)
 
-    def discard_and_reveal(self, discard_idx: int, reveal_idx: int) -> bool:
-        if len(self.hidden_cards) != 4:
-            return False
-        if discard_idx == reveal_idx:
-            return False
-        if not (0 <= discard_idx < 4 and 0 <= reveal_idx < 4):
-            return False
+    def can_discard_and_reveal(self, discard_idx: int, reveal_idx: int) -> bool:
+        return (
+            len(self.hidden_cards) == 4
+            and discard_idx != reveal_idx
+            and 0 <= discard_idx < 4
+            and 0 <= reveal_idx < 4
+        )
 
+    def discard_and_reveal(self, discard_idx: int, reveal_idx: int) -> bool:
+        if not self.can_discard_and_reveal(discard_idx, reveal_idx):
+            return False
         self.discarded_card = self.hidden_cards[discard_idx]
         revealed_card = self.hidden_cards[reveal_idx]
         self.hidden_cards = [
@@ -226,8 +231,10 @@ class PokerGame:
         ante: int = 1,
         game_mode: str = "cash",
         ev_stack_ante: int = DEFAULT_EV_STACK_ANTE,
+        ev_stack_antes: Sequence[int] | None = None,
     ):
-        if len(player_names) < 2:
+        names = list(player_names)[:5]
+        if len(names) < 2:
             raise ValueError("A hand needs at least two players.")
         if starting_chips <= 0:
             raise ValueError("starting_chips must be positive.")
@@ -235,14 +242,16 @@ class PokerGame:
             raise ValueError("ante must be positive.")
         if ev_stack_ante <= 0:
             raise ValueError("ev_stack_ante must be positive.")
+        if ev_stack_antes is not None and (
+            len(ev_stack_antes) != len(names)
+            or any(stack <= 0 for stack in ev_stack_antes)
+        ):
+            raise ValueError("ev_stack_antes must contain one positive value per player.")
 
         game_mode = game_mode.lower()
         if game_mode not in GAME_MODES:
             raise ValueError(f"Unknown game mode: {game_mode}")
-        if game_mode == "ev" and len(player_names) != 2:
-            raise ValueError("EV mode currently supports exactly two players.")
-
-        self.players = [Player(name, starting_chips) for name in list(player_names)[:5]]
+        self.players = [Player(name, starting_chips) for name in names]
         for player in self.players:
             player.stackless = game_mode == "ev"
             if player.stackless:
@@ -255,6 +264,8 @@ class PokerGame:
         self.game_mode = game_mode
         self.ev_stack_ante = ev_stack_ante
         self.ev_stack = ante * ev_stack_ante
+        stack_antes = ev_stack_antes or [ev_stack_ante] * len(self.players)
+        self.ev_stacks = [ante * int(stack) for stack in stack_antes]
         self.current_highest_bet = 0
         self.pot = 0
         self.street = "setup"
@@ -335,22 +346,25 @@ class PokerGame:
         else:
             valid.append("CALL")
 
-        can_raise = not self._checked_this_street(player)
+        bet_cap = STREET_BET_CAPS.get(self.street, 0)
+        can_raise = (
+            not self._checked_this_street(player)
+            and self._bets_this_street(player) < bet_cap
+        )
         if self.game_mode == "ev":
-            remaining = self.ev_stack - player.invested
-            if self.current_highest_bet == 0 and remaining > 0:
+            remaining = self._ev_stack(player) - player.invested
+            if can_raise and self.current_highest_bet == 0 and remaining > 0:
                 valid.append("BBING")
             if (
                 can_raise
                 and self.pot > 0
-                and self.raise_count < EV_RAISE_CAP
                 and remaining > call_amount
             ):
                 if self.current_highest_bet > 0:
                     valid.append("DDADANG")
                 valid.extend(["QUARTER", "HALF"])
         else:
-            if player.chips > call_amount and self.current_highest_bet == 0:
+            if can_raise and player.chips > call_amount and self.current_highest_bet == 0:
                 valid.append("BBING")
             if can_raise and player.chips > call_amount and self.pot > 0:
                 if self.current_highest_bet > 0:
@@ -371,9 +385,14 @@ class PokerGame:
                     "seat": f"opponent_{offset}",
                     "seat_index": self.players.index(opponent),
                     "chips": (
-                        self.ev_stack - opponent.invested
+                        self._ev_stack(opponent) - opponent.invested
                         if self.game_mode == "ev"
                         else opponent.chips
+                    ),
+                    "effective_stack": (
+                        self._ev_stack(opponent)
+                        if self.game_mode == "ev"
+                        else None
                     ),
                     "invested": opponent.invested,
                     "round_bet": opponent.current_bet,
@@ -393,7 +412,7 @@ class PokerGame:
             "pot": self.pot,
             "current_highest_bet": self.current_highest_bet,
             "my_chips": (
-                self.ev_stack - player.invested
+                self._ev_stack(player) - player.invested
                 if self.game_mode == "ev"
                 else player.chips
             ),
@@ -405,9 +424,18 @@ class PokerGame:
             "my_discarded_card": str(player.discarded_card) if player.discarded_card else None,
             "call_amount": call_amount,
             "raise_count": self.raise_count,
-            "raise_cap": EV_RAISE_CAP if self.game_mode == "ev" else None,
-            "effective_stack_ante": self.ev_stack_ante if self.game_mode == "ev" else None,
-            "effective_stack": self.ev_stack if self.game_mode == "ev" else None,
+            "raise_cap": STREET_BET_CAPS.get(self.street, 0),
+            "my_bet_count": self._bets_this_street(player),
+            "effective_stack_ante": (
+                self._ev_stack(player) // self.ante
+                if self.game_mode == "ev"
+                else None
+            ),
+            "effective_stack": (
+                self._ev_stack(player)
+                if self.game_mode == "ev"
+                else None
+            ),
             "opponents": opponents,
             "betting_history": self._history_from_view(viewer_index),
         }
@@ -443,7 +471,7 @@ class PokerGame:
         paid = self._commit_chips(player, total_bet, count_for_round=True)
         if player.current_bet > self.current_highest_bet:
             self.current_highest_bet = player.current_bet
-        if self.game_mode == "ev" and action in {"DDADANG", "QUARTER", "HALF"}:
+        if action in AGGRESSIVE_ACTIONS:
             self.raise_count += 1
 
         self._record_bet(player, action, paid, call_amount, raise_amount)
@@ -574,13 +602,16 @@ class PokerGame:
         self.start_game()
 
         self.street = "discard_reveal"
+        choices: dict[str, tuple[int, int]] = {}
         for player in self.players:
             if player.is_eliminated:
                 continue
             agent = active_agents[player.name]
-            discard_idx, reveal_idx = agent.choose_discard_and_reveal(player.hidden_cards)
-            if not player.discard_and_reveal(discard_idx, reveal_idx):
-                player.discard_and_reveal(0, 1)
+            choice = agent.choose_discard_and_reveal(player.hidden_cards)
+            choices[player.name] = choice if player.can_discard_and_reveal(*choice) else (0, 1)
+        for player in self.players:
+            if not player.is_eliminated:
+                player.discard_and_reveal(*choices[player.name])
         self.log_global_state("discard one card and reveal one card")
 
         streets = [
@@ -601,10 +632,12 @@ class PokerGame:
             self.deal_cards_to_active(is_public=is_public)
             self.log_global_state(f"deal {street_name}")
 
-            if len([player for player in survivors if player.can_act()]) >= 2:
+            if street_name != "4th" and len(
+                [player for player in survivors if player.can_act()]
+            ) >= 2:
                 self.play_betting_round(active_agents)
             else:
-                print("  -> betting skipped because too few players can act.")
+                print("  -> betting skipped.")
 
         result = self.resolve_showdown()
         self._notify_agents(active_agents)
@@ -619,7 +652,7 @@ class PokerGame:
     def _commit_chips(self, player: Player, requested_amount: int, count_for_round: bool) -> int:
         amount = max(0, int(math.ceil(requested_amount)))
         if self.game_mode == "ev":
-            amount = min(amount, max(0, self.ev_stack - player.invested))
+            amount = min(amount, max(0, self._ev_stack(player) - player.invested))
         else:
             amount = min(player.chips, amount)
         player.chips -= amount
@@ -627,11 +660,14 @@ class PokerGame:
         if count_for_round:
             player.current_bet += amount
         self.pot += amount
-        if self.game_mode == "ev" and player.invested >= self.ev_stack:
+        if self.game_mode == "ev" and player.invested >= self._ev_stack(player):
             player.is_all_in = True
         elif self.game_mode != "ev" and player.chips == 0:
             player.is_all_in = True
         return amount
+
+    def _ev_stack(self, player: Player) -> int:
+        return self.ev_stacks[self.players.index(player)]
 
     def _raise_amount(self, action: str, call_amount: int) -> int:
         pot_after_call = self.pot + call_amount
@@ -653,6 +689,15 @@ class PokerGame:
             event["street"] == self.street
             and event["actor_index"] == player_index
             and event["action"] == "CHECK"
+            for event in self.betting_history
+        )
+
+    def _bets_this_street(self, player: Player) -> int:
+        player_index = self.players.index(player)
+        return sum(
+            event["street"] == self.street
+            and event["actor_index"] == player_index
+            and event["action"] in AGGRESSIVE_ACTIONS
             for event in self.betting_history
         )
 

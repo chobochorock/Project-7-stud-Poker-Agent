@@ -1,5 +1,9 @@
 # 7-Stud Poker Agent
 
+2026-09-17 구조 정리: [폴더와 실행법](D:/Experiment/Project-7-stud-Poker-Agent/PROJECT_STRUCTURE.md), [코딩 스타일](D:/Experiment/CODE_STYLE.md), [실험 검토](D:/Experiment/EXPERIMENT_REVIEW_2026-09-17.md). 이전 경로는 compatibility link이며 정식 소스는 `environments/`, `agents/`에 있습니다.
+
+2026-09-19 구간별 LightGBM regret ensemble: [계열 폴더·코드·학습 결과 안내](D:/Experiment/Project-7-stud-Poker-Agent/agents/lightgbm_regret_ensemble/README.md). 이 계열의 모델과 데이터는 `agents/lightgbm_regret_ensemble/data/`에 모았습니다.
+
 최근 CFR/MCCFR 구현 구조, 수렴 검증, 7포커 fixed-root 실험 결과는
 [CFR_MCCFR_VALIDATION.md](CFR_MCCFR_VALIDATION.md)에 정리되어 있습니다.
 현재 C++ power-bucket MCCFR 모델의 정확한 동작은

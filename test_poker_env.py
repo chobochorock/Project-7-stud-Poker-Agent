@@ -155,23 +155,31 @@ class PokerRuleTests(unittest.TestCase):
         self.assertNotIn("Bob", dumped)
 
     def test_cash_mode_restores_fixed_stacks_each_round(self):
-        game = PokerGame(["A", "B"], log_file=None, starting_chips=100, game_mode="cash")
+        game = PokerGame(
+            ["A", "B"], log_file=None, starting_chips=100, game_mode="cash"
+        )
         game.players[0].chips = 25
         game.players[1].chips = 175
 
         game.start_game()
 
-        self.assertEqual([player.hand_start_chips for player in game.players], [100, 100])
+        self.assertEqual(
+            [player.hand_start_chips for player in game.players], [100, 100]
+        )
         self.assertEqual([player.chips for player in game.players], [99, 99])
 
     def test_tournament_mode_keeps_current_stacks(self):
-        game = PokerGame(["A", "B"], log_file=None, starting_chips=100, game_mode="tournament")
+        game = PokerGame(
+            ["A", "B"], log_file=None, starting_chips=100, game_mode="tournament"
+        )
         game.players[0].chips = 50
         game.players[1].chips = 150
 
         game.start_game()
 
-        self.assertEqual([player.hand_start_chips for player in game.players], [50, 150])
+        self.assertEqual(
+            [player.hand_start_chips for player in game.players], [50, 150]
+        )
         self.assertEqual([player.chips for player in game.players], [49, 149])
 
     def test_street_caps_aggressive_actions_per_player(self):
@@ -261,7 +269,9 @@ class PokerRuleTests(unittest.TestCase):
 
         self.assertEqual([player.invested for player in game.players], [40, 40])
         self.assertTrue(all(player.is_all_in for player in game.players))
-        self.assertTrue(all(not game.get_valid_actions(player) for player in game.players))
+        self.assertTrue(
+            all(not game.get_valid_actions(player) for player in game.players)
+        )
 
     def test_ev_rollout_writes_both_player_perspectives(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -274,7 +284,9 @@ class PokerRuleTests(unittest.TestCase):
             self.assertGreater(result["table_bytes"], 0)
 
             with contextlib.closing(sqlite3.connect(output)) as connection:
-                state_json = connection.execute("SELECT state_json FROM q_values LIMIT 1").fetchone()[0]
+                state_json = connection.execute(
+                    "SELECT state_json FROM q_values LIMIT 1"
+                ).fetchone()[0]
                 schema_version = connection.execute(
                     "SELECT value FROM metadata WHERE key = 'schema_version'"
                 ).fetchone()[0]
@@ -289,7 +301,9 @@ class PokerRuleTests(unittest.TestCase):
     def test_ev_rollout_stops_at_size_limit(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output = Path(tmp_dir) / "limited.sqlite3"
-            result = run_rollouts(output, hands=100, flush_hands=1, progress_seconds=0, max_bytes=1)
+            result = run_rollouts(
+                output, hands=100, flush_hands=1, progress_seconds=0, max_bytes=1
+            )
 
             self.assertEqual(result["stopped_by"], "size_limit")
             self.assertLess(result["hands"], 100)
@@ -306,10 +320,16 @@ class PokerRuleTests(unittest.TestCase):
         self.assertEqual(state["game_mode"], "cash")
 
     def test_main_builds_five_random_players(self):
-        agents = build_active_agents(["random", "random", "random", "random", "random"], "unused.json")
+        agents = build_active_agents(
+            ["random", "random", "random", "random", "random"], "unused.json"
+        )
 
-        self.assertEqual(list(agents), ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"])
-        self.assertTrue(all(type(agent).__name__ == "PokerAgent" for agent in agents.values()))
+        self.assertEqual(
+            list(agents), ["Player_1", "Player_2", "Player_3", "Player_4", "Player_5"]
+        )
+        self.assertTrue(
+            all(type(agent).__name__ == "PokerAgent" for agent in agents.values())
+        )
 
     def test_main_builds_heuristic_player(self):
         agents = build_active_agents(["heuristic", "random"], "unused.json")
@@ -330,11 +350,15 @@ class PokerRuleTests(unittest.TestCase):
             "call_amount": 0,
             "my_hidden_cards": ["sA", "hA"],
             "my_public_cards": ["dA", "cA", "sK"],
-            "opponents": [{"public_cards": ["h2"], "is_folded": False, "is_eliminated": False}],
+            "opponents": [
+                {"public_cards": ["h2"], "is_folded": False, "is_eliminated": False}
+            ],
             "betting_history": [],
         }
 
-        action = agent.choose_action(state, ["CHECK", "BBING", "QUARTER", "HALF", "FULL"])
+        action = agent.choose_action(
+            state, ["CHECK", "BBING", "QUARTER", "HALF", "FULL"]
+        )
 
         self.assertEqual(action, "FULL")
 
@@ -347,7 +371,13 @@ class PokerRuleTests(unittest.TestCase):
             "call_amount": 80,
             "my_hidden_cards": ["s2", "h7"],
             "my_public_cards": ["d9"],
-            "opponents": [{"public_cards": ["sA", "hK"], "is_folded": False, "is_eliminated": False}],
+            "opponents": [
+                {
+                    "public_cards": ["sA", "hK"],
+                    "is_folded": False,
+                    "is_eliminated": False,
+                }
+            ],
             "betting_history": [{"actor": "opponent_1", "action": "FULL"}],
         }
 
@@ -358,7 +388,9 @@ class PokerRuleTests(unittest.TestCase):
     def test_heuristic_discard_and_reveal_returns_distinct_valid_indices(self):
         agent = HeuristicPokerAgent("Heuristic")
 
-        discard_idx, reveal_idx = agent.choose_discard_and_reveal(cards(["s2", "hA", "dA", "c9"]))
+        discard_idx, reveal_idx = agent.choose_discard_and_reveal(
+            cards(["s2", "hA", "dA", "c9"])
+        )
 
         self.assertIn(discard_idx, range(4))
         self.assertIn(reveal_idx, range(4))
@@ -414,9 +446,23 @@ class PokerRuleTests(unittest.TestCase):
         self.assertEqual(result["total_samples"], 1560)
         self.assertEqual(result["win_probability"], 1.0)
         self.assertEqual(result["equity"], 1.0)
-        self.assertAlmostEqual(sum(hand["probability"] for hand in result["hands"]), 1.0)
+        self.assertAlmostEqual(
+            sum(hand["probability"] for hand in result["hands"]), 1.0
+        )
         self.assertAlmostEqual(sum(result["opponent_hand_categories"].values()), 1.0)
         self.assertTrue(all("c2" not in hand["cards"] for hand in result["hands"]))
+
+
+class CheckpointSafetyTests(unittest.TestCase):
+    def test_unreadable_checkpoint_does_not_start_empty_training(self):
+        from agent.learning_agent import SharedTrajectoryDatabase
+
+        with tempfile.TemporaryDirectory() as folder:
+            filename = Path(folder) / "corrupt.json"
+            filename.write_bytes(b"broken checkpoint")
+            with self.assertRaisesRegex(RuntimeError, "Cannot load checkpoint"):
+                SharedTrajectoryDatabase(str(filename)).load()
+            self.assertEqual(filename.read_bytes(), b"broken checkpoint")
 
 
 if __name__ == "__main__":

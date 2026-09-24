@@ -51,7 +51,9 @@ def collect_player_types(args: argparse.Namespace) -> list[str]:
     return selected_types
 
 
-def build_active_agents(player_types: Sequence[str], db_filename: str) -> dict[str, BasePokerAgent]:
+def build_active_agents(
+    player_types: Sequence[str], db_filename: str
+) -> dict[str, BasePokerAgent]:
     active_agents: dict[str, BasePokerAgent] = {}
     for index, agent_type in enumerate(player_types[:5], start=1):
         player_name = f"Player_{index}"
@@ -64,17 +66,65 @@ def build_active_agents(player_types: Sequence[str], db_filename: str) -> dict[s
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a 7-stud poker game.")
-    parser.add_argument("-p1", type=_player_type, default="human", choices=PLAYER_TYPES, help="Player 1 type")
-    parser.add_argument("-p2", type=_player_type, default="random", choices=PLAYER_TYPES, help="Player 2 type")
-    parser.add_argument("-p3", type=_player_type, default="empty", choices=PLAYER_TYPES, help="Player 3 type")
-    parser.add_argument("-p4", type=_player_type, default="empty", choices=PLAYER_TYPES, help="Player 4 type")
-    parser.add_argument("-p5", type=_player_type, default="empty", choices=PLAYER_TYPES, help="Player 5 type")
-    parser.add_argument("--interactive", action="store_true", help="Choose player types interactively in the terminal")
-    parser.add_argument("--db", type=str, default="LearningAgent_Shared_db.json", help="Learning DB path")
-    parser.add_argument("--log", type=str, default="state_log.txt", help="Game log path")
-    parser.add_argument("--starting-chips", type=int, default=1000, help="Starting chips per player")
+    parser.add_argument(
+        "-p1",
+        type=_player_type,
+        default="human",
+        choices=PLAYER_TYPES,
+        help="Player 1 type",
+    )
+    parser.add_argument(
+        "-p2",
+        type=_player_type,
+        default="random",
+        choices=PLAYER_TYPES,
+        help="Player 2 type",
+    )
+    parser.add_argument(
+        "-p3",
+        type=_player_type,
+        default="empty",
+        choices=PLAYER_TYPES,
+        help="Player 3 type",
+    )
+    parser.add_argument(
+        "-p4",
+        type=_player_type,
+        default="empty",
+        choices=PLAYER_TYPES,
+        help="Player 4 type",
+    )
+    parser.add_argument(
+        "-p5",
+        type=_player_type,
+        default="empty",
+        choices=PLAYER_TYPES,
+        help="Player 5 type",
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Choose player types interactively in the terminal",
+    )
+    parser.add_argument(
+        "--db",
+        type=str,
+        default="LearningAgent_Shared_db.json",
+        help="Learning DB path",
+    )
+    parser.add_argument(
+        "--log", type=str, default="state_log.txt", help="Game log path"
+    )
+    parser.add_argument(
+        "--starting-chips", type=int, default=1000, help="Starting chips per player"
+    )
     parser.add_argument("--ante", type=int, default=1, help="Ante per hand")
-    parser.add_argument("--mode", choices=GAME_MODES, default="cash", help="Cash resets stacks each round")
+    parser.add_argument(
+        "--mode",
+        choices=GAME_MODES,
+        default="cash",
+        help="Cash resets stacks each round",
+    )
     parser.add_argument("--rounds", type=int, default=1, help="Maximum rounds to play")
     return parser.parse_args()
 
@@ -102,7 +152,10 @@ def main() -> int:
     cumulative_profit = {name: 0 for name in active_agents}
     rounds_played = 0
     for _ in range(max(1, args.rounds)):
-        if args.mode == "tournament" and sum(player.chips > 0 for player in game.players) < 2:
+        if (
+            args.mode == "tournament"
+            and sum(player.chips > 0 for player in game.players) < 2
+        ):
             break
         game.play_hand(active_agents)
         rounds_played += 1

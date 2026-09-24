@@ -10,7 +10,7 @@ from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
-from agent.cpp_mccfr_agent import CppMCCFRAgent
+from agent.cpp_mccfr_agent import CppMCCFRAgent, CppPBSSeventhAgent
 from agent.hand_range import estimate_uniform_hand_range
 from agent.heuristic_agent import HeuristicPokerAgent
 from agent.human_agent import WebHumanAgent
@@ -18,7 +18,16 @@ from agent.learning_agent import LearningAgent
 from poker_env import GAME_MODES, PokerGame, Player, get_best_hand
 
 
-PLAYER_TYPES = ("human", "random", "heuristic", "ha1", "learning", "cpp-mccfr", "empty")
+PLAYER_TYPES = (
+    "human",
+    "random",
+    "heuristic",
+    "ha1",
+    "learning",
+    "cpp-mccfr",
+    "pbs-7th-resolver",
+    "empty",
+)
 STREETS = (("4th", True), ("5th", True), ("6th", True), ("7th_hidden", False))
 RANK_LABELS = {
     14: "A",
@@ -84,14 +93,24 @@ class WebPokerController:
         game_mode: str = "cash",
     ) -> dict[str, Any]:
         normalized_types = [player_type.lower() for player_type in player_types[:5]]
-        unknown_types = [player_type for player_type in normalized_types if player_type not in PLAYER_TYPES]
+        unknown_types = [
+            player_type
+            for player_type in normalized_types
+            if player_type not in PLAYER_TYPES
+        ]
         if unknown_types:
             raise ValueError(f"Unknown player types: {unknown_types}")
         game_mode = game_mode.lower()
         if game_mode not in GAME_MODES:
             raise ValueError(f"Unknown game mode: {game_mode}")
-        if "cpp-mccfr" in normalized_types and game_mode != "ev":
-            raise ValueError("C++ MCCFR requires EV mode.")
+        cpp_types = {"cpp-mccfr", "pbs-7th-resolver"}
+        if cpp_types.intersection(normalized_types) and game_mode != "ev":
+            raise ValueError("C++ MCCFR agents require EV mode.")
+        if (
+            "pbs-7th-resolver" in normalized_types
+            and sum(player_type != "empty" for player_type in normalized_types) != 2
+        ):
+            raise ValueError("PBS 7th Resolver currently requires heads-up play.")
 
         for agent in self.agents.values():
             close = getattr(agent, "close", None)
@@ -122,7 +141,9 @@ class WebPokerController:
             ante=ante,
             game_mode=game_mode,
         )
-        self.initial_stacks = {player.name: player.chips for player in self.game.players}
+        self.initial_stacks = {
+            player.name: player.chips for player in self.game.players
+        }
         self.cumulative_profit = {player.name: 0 for player in self.game.players}
         self.replay_file = self._episode_replay_path()
         self._begin_round()
@@ -142,10 +163,18 @@ class WebPokerController:
     def start_next_hand(self) -> dict[str, Any]:
         return self.start_next_round()
 
-    def submit_discard(self, player_name: str, discard_index: int, reveal_index: int) -> dict[str, Any]:
+    def submit_discard(
+        self, player_name: str, discard_index: int, reveal_index: int
+    ) -> dict[str, Any]:
         game = self._require_game()
-        if not self.waiting or self.waiting.get("type") != "discard" or self.waiting.get("player") != player_name:
-            raise ValueError("No discard/reveal choice is currently expected for that player.")
+        if (
+            not self.waiting
+            or self.waiting.get("type") != "discard"
+            or self.waiting.get("player") != player_name
+        ):
+            raise ValueError(
+                "No discard/reveal choice is currently expected for that player."
+            )
 
         player = self._player_by_name(player_name)
         if not player.can_discard_and_reveal(discard_index, reveal_index):
@@ -160,7 +189,11 @@ class WebPokerController:
 
     def submit_action(self, player_name: str, action: str) -> dict[str, Any]:
         game = self._require_game()
-        if not self.waiting or self.waiting.get("type") != "bet" or self.waiting.get("player") != player_name:
+        if (
+            not self.waiting
+            or self.waiting.get("type") != "bet"
+            or self.waiting.get("player") != player_name
+        ):
             raise ValueError("No betting action is currently expected for that player.")
 
         action = action.upper()
@@ -185,9 +218,13 @@ class WebPokerController:
     ) -> dict[str, Any]:
         game = self._require_game()
         if len(game.players) != 2:
-            raise ValueError("Hand range analysis currently supports heads-up games only.")
+            raise ValueError(
+                "Hand range analysis currently supports heads-up games only."
+            )
         if game.street not in {street for street, _ in STREETS}:
-            raise ValueError("Hand range analysis is available after the first four-card deal.")
+            raise ValueError(
+                "Hand range analysis is available after the first four-card deal."
+            )
         if not 1 <= samples_per_hand <= 128:
             raise ValueError("samples_per_hand must be between 1 and 128.")
 
@@ -197,7 +234,9 @@ class WebPokerController:
         opponents = [
             opponent
             for opponent in game.players
-            if opponent is not player and not opponent.is_folded and not opponent.is_eliminated
+            if opponent is not player
+            and not opponent.is_folded
+            and not opponent.is_eliminated
         ]
         if len(opponents) != 1:
             raise ValueError("Exactly one active opponent is required.")
@@ -256,8 +295,10 @@ class WebPokerController:
             "hand_number": self.round_number,
             "episode_over": self.phase == "game_over",
             "game_over": self.phase == "game_over",
-            "next_round_available": self.phase == "complete" and self._can_start_next_round(),
-            "next_hand_available": self.phase == "complete" and self._can_start_next_round(),
+            "next_round_available": self.phase == "complete"
+            and self._can_start_next_round(),
+            "next_hand_available": self.phase == "complete"
+            and self._can_start_next_round(),
             "acting_player": self.waiting.get("player") if self.waiting else None,
             "priority_player": self._priority_player_name(),
             "turn_order": self._turn_order(),
@@ -268,7 +309,10 @@ class WebPokerController:
 
     def _advance_until_wait(self) -> None:
         for _ in range(10000):
-            if self.phase in {"idle", "complete", "game_over"} or self.waiting is not None:
+            if (
+                self.phase in {"idle", "complete", "game_over"}
+                or self.waiting is not None
+            ):
                 return
             if self.phase == "discard_reveal":
                 if self._advance_discard_reveal():
@@ -298,7 +342,9 @@ class WebPokerController:
 
         game.start_game()
         self.round_number += 1
-        self.round_start_stacks = {player.name: player.hand_start_chips for player in game.players}
+        self.round_start_stacks = {
+            player.name: player.hand_start_chips for player in game.players
+        }
         self.phase = "discard_reveal"
         live_count = sum(1 for player in game.players if not player.is_eliminated)
         self._event(f"Round {self.round_number} started with {live_count} players.")
@@ -319,7 +365,9 @@ class WebPokerController:
                 self._event(f"{player.name} must discard one card and reveal one card.")
                 return True
 
-            choice = self.agents[player.name].choose_discard_and_reveal(player.hidden_cards)
+            choice = self.agents[player.name].choose_discard_and_reveal(
+                player.hidden_cards
+            )
             self.pending_discard_choices[player.name] = (
                 choice if player.can_discard_and_reveal(*choice) else (0, 1)
             )
@@ -340,7 +388,11 @@ class WebPokerController:
 
     def _advance_street_start(self) -> None:
         game = self._require_game()
-        survivors = [player for player in game.players if not player.is_folded and not player.is_eliminated]
+        survivors = [
+            player
+            for player in game.players
+            if not player.is_folded and not player.is_eliminated
+        ]
         if len(survivors) <= 1 or self.street_index >= len(STREETS):
             self.phase = "showdown"
             return
@@ -377,18 +429,34 @@ class WebPokerController:
             cursor=game._first_bettor_index(pending),
             first_bettor=game.players[game._first_bettor_index(pending)].name,
         )
-        self._event(f"Betting started on {game.street}; {self.betting.first_bettor} has priority.")
+        self._event(
+            f"Betting started on {game.street}; {self.betting.first_bettor} has priority."
+        )
 
     def _advance_betting(self) -> bool:
         game = self._require_game()
         if self.betting is None:
             self.phase = "street_start"
             return False
-        if sum(1 for player in game.players if not player.is_folded and not player.is_eliminated) <= 1:
+        if (
+            sum(
+                1
+                for player in game.players
+                if not player.is_folded and not player.is_eliminated
+            )
+            <= 1
+        ):
             self.betting.pending.clear()
 
         while self.betting.pending:
-            if sum(1 for player in game.players if not player.is_folded and not player.is_eliminated) <= 1:
+            if (
+                sum(
+                    1
+                    for player in game.players
+                    if not player.is_folded and not player.is_eliminated
+                )
+                <= 1
+            ):
                 self.betting.pending.clear()
                 break
             player = game.players[self.betting.cursor % len(game.players)]
@@ -419,7 +487,13 @@ class WebPokerController:
             state = game.get_ai_state(player, valid_actions)
             action = self.agents[player.name].choose_action(state, valid_actions)
             if action not in valid_actions:
-                action = "CHECK" if "CHECK" in valid_actions else "CALL" if "CALL" in valid_actions else "FOLD"
+                action = (
+                    "CHECK"
+                    if "CHECK" in valid_actions
+                    else "CALL"
+                    if "CALL" in valid_actions
+                    else "FOLD"
+                )
 
             game.log_global_state(f"{player.name} chooses {action}")
             is_raise = game.apply_action(player, action)
@@ -436,7 +510,11 @@ class WebPokerController:
         if self.betting is None:
             return
         if is_raise:
-            self.betting.pending = {other for other in self._require_game().players if other.can_act() and other is not player}
+            self.betting.pending = {
+                other
+                for other in self._require_game().players
+                if other.can_act() and other is not player
+            }
         else:
             self.betting.pending.discard(player)
 
@@ -444,7 +522,9 @@ class WebPokerController:
         game = self._require_game()
         self.result = game.resolve_showdown()
         for player in game.players:
-            round_start = self.round_start_stacks.get(player.name, player.hand_start_chips)
+            round_start = self.round_start_stacks.get(
+                player.name, player.hand_start_chips
+            )
             self.cumulative_profit[player.name] += player.chips - round_start
         round_summaries = self._round_summaries()
         self.result["round_summaries"] = round_summaries
@@ -456,7 +536,9 @@ class WebPokerController:
             self.phase = "game_over"
             self.episode_finished_at = datetime.now().isoformat(timespec="seconds")
             winner = self._winner_name() or "No winner"
-            self._event(f"Episode over. {winner} wins after {self.round_number} rounds.")
+            self._event(
+                f"Episode over. {winner} wins after {self.round_number} rounds."
+            )
         else:
             self.phase = "complete"
             self._event("Round complete. Next round is available.")
@@ -467,13 +549,34 @@ class WebPokerController:
             self.result["replay_file"] = self.replay_file
 
     def _player_state(self, player: Player) -> dict[str, Any]:
-        reveal_hidden = self.phase in {"complete", "game_over"} or self.agent_types.get(player.name) == "human"
-        hidden_cards = [str(card) for card in player.hidden_cards] if reveal_hidden else []
+        reveal_hidden = (
+            self.phase in {"complete", "game_over"}
+            or self.agent_types.get(player.name) == "human"
+        )
+        hidden_cards = (
+            [str(card) for card in player.hidden_cards] if reveal_hidden else []
+        )
         if self.phase in {"complete", "game_over"}:
-            status = "ELIMINATED" if player.is_eliminated else "FOLDED" if player.is_folded else "ACTIVE"
+            status = (
+                "ELIMINATED"
+                if player.is_eliminated
+                else "FOLDED"
+                if player.is_folded
+                else "ACTIVE"
+            )
         else:
-            status = "ELIMINATED" if player.is_eliminated else "FOLDED" if player.is_folded else "ALL-IN" if player.is_all_in else "ACTIVE"
-        round_start_chips = self.round_start_stacks.get(player.name, player.hand_start_chips)
+            status = (
+                "ELIMINATED"
+                if player.is_eliminated
+                else "FOLDED"
+                if player.is_folded
+                else "ALL-IN"
+                if player.is_all_in
+                else "ACTIVE"
+            )
+        round_start_chips = self.round_start_stacks.get(
+            player.name, player.hand_start_chips
+        )
         current_net = self.cumulative_profit.get(player.name, 0)
         if self.phase not in {"complete", "game_over"}:
             current_net += player.chips - round_start_chips
@@ -486,14 +589,17 @@ class WebPokerController:
             "hidden_cards": hidden_cards,
             "hidden_count": len(player.hidden_cards),
             "public_cards": [str(card) for card in player.public_cards],
-            "discarded_card": str(player.discarded_card) if player.discarded_card else None,
+            "discarded_card": str(player.discarded_card)
+            if player.discarded_card
+            else None,
             "is_folded": player.is_folded,
             "is_all_in": player.is_all_in,
             "is_eliminated": player.is_eliminated,
             "status": status,
             "hand_score": list(player.hand_score),
             "hand_name": self._player_hand_name(player) if reveal_hidden else "-",
-            "is_acting": self.waiting is not None and self.waiting.get("player") == player.name,
+            "is_acting": self.waiting is not None
+            and self.waiting.get("player") == player.name,
             "has_priority": self._priority_player_name() == player.name,
             "round_delta": player.chips - round_start_chips,
             "hand_delta": player.chips - round_start_chips,
@@ -516,7 +622,9 @@ class WebPokerController:
         self.events.append(message)
         self._capture_frame(message)
 
-    def _action_costs(self, player: Player, valid_actions: Sequence[str]) -> dict[str, dict[str, Any]]:
+    def _action_costs(
+        self, player: Player, valid_actions: Sequence[str]
+    ) -> dict[str, dict[str, Any]]:
         game = self._require_game()
         call_amount = max(0, game.current_highest_bet - player.current_bet)
         costs: dict[str, dict[str, Any]] = {}
@@ -527,11 +635,19 @@ class WebPokerController:
             requested = 0
             if action == "CALL":
                 requested = call_amount
-                paid = requested if game.game_mode == "ev" else min(player.chips, requested)
+                paid = (
+                    requested
+                    if game.game_mode == "ev"
+                    else min(player.chips, requested)
+                )
             elif action not in {"CHECK", "FOLD"}:
                 raise_amount = game._raise_amount(action, call_amount)
                 requested = call_amount + raise_amount
-                paid = requested if game.game_mode == "ev" else min(player.chips, requested)
+                paid = (
+                    requested
+                    if game.game_mode == "ev"
+                    else min(player.chips, requested)
+                )
 
             costs[action] = {
                 "paid": paid,
@@ -560,7 +676,11 @@ class WebPokerController:
             return []
 
         ordered_players = game.players[start_index:] + game.players[:start_index]
-        return [player.name for player in ordered_players if not player.is_folded and not player.is_eliminated]
+        return [
+            player.name
+            for player in ordered_players
+            if not player.is_folded and not player.is_eliminated
+        ]
 
     def _live_player_count(self) -> int:
         if self.game is None:
@@ -606,17 +726,25 @@ class WebPokerController:
         return [
             {
                 "name": player.name,
-                "status": "FOLDED" if player.is_folded else "ELIMINATED" if player.is_eliminated else "ACTIVE",
+                "status": "FOLDED"
+                if player.is_folded
+                else "ELIMINATED"
+                if player.is_eliminated
+                else "ACTIVE",
                 "cards": [str(card) for card in player.get_all_cards()],
                 "public_cards": [str(card) for card in player.public_cards],
                 "hidden_cards": [str(card) for card in player.hidden_cards],
-                "discarded_card": str(player.discarded_card) if player.discarded_card else None,
+                "discarded_card": str(player.discarded_card)
+                if player.discarded_card
+                else None,
                 "hand_score": list(player.hand_score),
                 "hand_name": self._player_hand_name(player),
                 "chips": player.chips,
                 "invested": player.invested,
-                "round_delta": player.chips - self.round_start_stacks.get(player.name, player.hand_start_chips),
-                "hand_delta": player.chips - self.round_start_stacks.get(player.name, player.hand_start_chips),
+                "round_delta": player.chips
+                - self.round_start_stacks.get(player.name, player.hand_start_chips),
+                "hand_delta": player.chips
+                - self.round_start_stacks.get(player.name, player.hand_start_chips),
             }
             for player in game.players
         ]
@@ -630,8 +758,12 @@ class WebPokerController:
                 "final_chips": {player.name: player.chips for player in game.players},
                 "cumulative_profit": dict(self.cumulative_profit),
                 "payouts": self.result.get("payouts", []) if self.result else [],
-                "round_summaries": self.result.get("round_summaries", []) if self.result else [],
-                "hand_summaries": self.result.get("hand_summaries", []) if self.result else [],
+                "round_summaries": self.result.get("round_summaries", [])
+                if self.result
+                else [],
+                "hand_summaries": self.result.get("hand_summaries", [])
+                if self.result
+                else [],
                 "frames": list(self.round_frames),
                 "betting_history": list(game.betting_history),
             }
@@ -642,7 +774,11 @@ class WebPokerController:
             return "폴드"
         if len(player.get_all_cards()) < 5:
             if self.phase in {"complete", "game_over"} and self.game is not None:
-                active_players = [other for other in self.game.players if not other.is_folded and not other.is_eliminated]
+                active_players = [
+                    other
+                    for other in self.game.players
+                    if not other.is_folded and not other.is_eliminated
+                ]
                 if len(active_players) == 1 and active_players[0] is player:
                     return "상대 폴드 승리"
             return "-"
@@ -677,7 +813,9 @@ class WebPokerController:
                         "current_bet": player.current_bet,
                         "hidden_cards": [str(card) for card in player.hidden_cards],
                         "public_cards": [str(card) for card in player.public_cards],
-                        "discarded_card": str(player.discarded_card) if player.discarded_card else None,
+                        "discarded_card": str(player.discarded_card)
+                        if player.discarded_card
+                        else None,
                         "is_folded": player.is_folded,
                         "is_all_in": player.is_all_in,
                         "is_eliminated": player.is_eliminated,
@@ -709,7 +847,9 @@ class WebPokerController:
         path = Path(self.replay_file)
         payload = {
             "replay_version": 2,
-            "replay_scope": f"{self.game_mode}_session" if self.game_mode in {"cash", "ev"} else "episode",
+            "replay_scope": f"{self.game_mode}_session"
+            if self.game_mode in {"cash", "ev"}
+            else "episode",
             "game_mode": self.game_mode,
             "created_at": self.episode_started_at,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -728,7 +868,9 @@ class WebPokerController:
             "events": self.events,
             "rounds": self.round_results,
         }
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return str(path)
 
     def _agent_summary_slug(self) -> str:
@@ -740,7 +882,9 @@ class WebPokerController:
         parts = [f"{agent_type}{counts[agent_type]}" for agent_type in seen_order]
         return "-".join(parts) if parts else "empty"
 
-    def _create_agent(self, agent_type: str, name: str, db_filename: str) -> BasePokerAgent | None:
+    def _create_agent(
+        self, agent_type: str, name: str, db_filename: str
+    ) -> BasePokerAgent | None:
         if agent_type == "human":
             return WebHumanAgent(name)
         if agent_type == "random":
@@ -753,6 +897,8 @@ class WebPokerController:
             return LearningAgent(name, db_filename=db_filename)
         if agent_type == "cpp-mccfr":
             return CppMCCFRAgent(name)
+        if agent_type == "pbs-7th-resolver":
+            return CppPBSSeventhAgent(name)
         if agent_type == "empty":
             return None
         raise ValueError(f"Unknown player type: {agent_type}")

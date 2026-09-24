@@ -70,7 +70,9 @@ class PokerWebHandler(BaseHTTPRequestHandler):
                 return
             self._send_json({"error": "Not found"}, status=404)
         except Exception as exc:
-            self._send_json({"error": str(exc), "state": controller.public_state()}, status=400)
+            self._send_json(
+                {"error": str(exc), "state": controller.public_state()}, status=400
+            )
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -102,7 +104,9 @@ class PokerWebHandler(BaseHTTPRequestHandler):
             return
 
         content = resolved_path.read_bytes()
-        content_type = mimetypes.guess_type(str(resolved_path))[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(str(resolved_path))[0] or "application/octet-stream"
+        )
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
@@ -111,7 +115,9 @@ class PokerWebHandler(BaseHTTPRequestHandler):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the local web GUI for 7-stud poker.")
+    parser = argparse.ArgumentParser(
+        description="Run the local web GUI for 7-stud poker."
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8765, help="Port to bind")
     return parser.parse_args()

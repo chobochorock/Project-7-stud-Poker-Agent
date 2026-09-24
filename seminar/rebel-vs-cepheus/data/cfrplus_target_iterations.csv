@@ -1,0 +1,4 @@
+benchmark,target_exploitability,cfr_iterations,cfrplus_iterations,cfr_is_lower_bound
+Matching pennies,0.001,3539,343,false
+1000x1000 random matrices,0.001,510,83,false
+1000x1000 random matrices,0.0001,10000,331,true

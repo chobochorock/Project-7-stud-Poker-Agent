@@ -1,0 +1,3333 @@
+{
+  "project": "Project-7-stud-Poker-Agent",
+  "entries": [
+    {
+      "old": "poker_env.py",
+      "new": "environments/seven_stud/poker_env.py",
+      "directory": false,
+      "bytes": 28465,
+      "sha256": "31D9D154E63C7CEACFB8931E342DA0C688E580B35EC972826D0AA2021DFE2194"
+    },
+    {
+      "old": "agent/learning_agent.py",
+      "new": "agents/tabular_rl/learning_agent.py",
+      "directory": false,
+      "bytes": 6900,
+      "sha256": "D970EB8F99B0186FB2F30B8D43CC607587C18E8A914CB02035B229A3C4DF94C0"
+    },
+    {
+      "old": "agent/MyMCCFR.py",
+      "new": "agents/python_mccfr/MyMCCFR.py",
+      "directory": false,
+      "bytes": 508,
+      "sha256": "D54313DEA5756295CF6A3AA28882A2CF8291340C05104BF10A185592C2B3CBB0"
+    },
+    {
+      "old": "agent/mccfr_agent.py",
+      "new": "agents/python_mccfr/mccfr_agent.py",
+      "directory": false,
+      "bytes": 22817,
+      "sha256": "49B97DDF92EB9651F42CD3FE14E5CF312CD284A8279CD8B82146A721DB4EE780"
+    },
+    {
+      "old": "mccfr_train.py",
+      "new": "agents/python_mccfr/mccfr_train.py",
+      "directory": false,
+      "bytes": 6876,
+      "sha256": "2A28BCA403B5E4FCB194B7493B2E743300F14E6BF20F4ABBCB9A5B7F3DAED314"
+    },
+    {
+      "old": "mccfr_kmeans.py",
+      "new": "agents/python_mccfr/mccfr_kmeans.py",
+      "directory": false,
+      "bytes": 6265,
+      "sha256": "2D5AA636BD1E698E3276D1B1E966AD34F47247DC196CFDBA50AB8237E1F2D2B5"
+    },
+    {
+      "old": "kuhn_cfr.py",
+      "new": "agents/python_mccfr/kuhn_cfr.py",
+      "directory": false,
+      "bytes": 6613,
+      "sha256": "DAC918118A851E8061202EF9A9644725DC04C99B2FEAD7CB4BD3A1499BA1E4B5"
+    },
+    {
+      "old": "test_kuhn_cfr.py",
+      "new": "agents/python_mccfr/test_kuhn_cfr.py",
+      "directory": false,
+      "bytes": 573,
+      "sha256": "FB577FB7CB93886DCF1D72F35D3DE005E6E20CE9D095F9CCCB6FD3C3C8C977A0"
+    },
+    {
+      "old": "test_mccfr_agent.py",
+      "new": "agents/python_mccfr/test_mccfr_agent.py",
+      "directory": false,
+      "bytes": 10275,
+      "sha256": "E95CC18832ACE183DC9F76B25E15FCFA62C896B46018E344A601CFB20D828F3F"
+    },
+    {
+      "old": "train_rebel_v7.py",
+      "new": "agents/rebel/train_rebel_v7.py",
+      "directory": false,
+      "bytes": 9236,
+      "sha256": "497C99F07C3E8D9070C4C97D78986D374BEF6D358724FD5EA6DB777C56964F57"
+    },
+    {
+      "old": "rebel_value_server.py",
+      "new": "agents/rebel/rebel_value_server.py",
+      "directory": false,
+      "bytes": 3927,
+      "sha256": "4A038FFD9B10D43BB423768BFCF42D1C05EF0B6A4DC5C1DC71103C245BA01EC7"
+    },
+    {
+      "old": "agent/cluster_agent.py",
+      "new": "agents/clustering/cluster_agent.py",
+      "directory": false,
+      "bytes": 8780,
+      "sha256": "2E65F396A4EE74DD05B5BEFDCAD5508F66763EC6C3F3EA1090C087C4C4A11576"
+    },
+    {
+      "old": "cluster_q_learning.py",
+      "new": "agents/clustering/cluster_q_learning.py",
+      "directory": false,
+      "bytes": 8875,
+      "sha256": "FC966573994E9AD94786CF84A8F5111651DD2D844B1E89B871A5FC9934753397"
+    },
+    {
+      "old": "clustering_analyze.py",
+      "new": "agents/clustering/clustering_analyze.py",
+      "directory": false,
+      "bytes": 7053,
+      "sha256": "723BB3A4972D8A4932877C052D1B5C8D3D46C8710BAE84A353054CC03A39A86D"
+    },
+    {
+      "old": "clustering_train.py",
+      "new": "agents/clustering/clustering_train.py",
+      "directory": false,
+      "bytes": 37603,
+      "sha256": "92E53E6779D47FBF00E8AB4E1FB1EAFAB5AC192DB38D95EB03C06C4FA27ADB02"
+    },
+    {
+      "old": "evaluate_cluster_agent.py",
+      "new": "agents/clustering/evaluate_cluster_agent.py",
+      "directory": false,
+      "bytes": 15873,
+      "sha256": "0C32BCA968A96D44FB3DA06A24A8DE7CF82CB51437C4FE199D758DB0DE2FE0CB"
+    },
+    {
+      "old": "test_clustering_train.py",
+      "new": "agents/clustering/test_clustering_train.py",
+      "directory": false,
+      "bytes": 7808,
+      "sha256": "AA74D6509F349EA5B85D11BE7CB8318E41598BB847FC6BD8C76560B93D68EC09"
+    },
+    {
+      "old": "agent/base.py",
+      "new": "agents/common/base.py",
+      "directory": false,
+      "bytes": 2282,
+      "sha256": "589982C0E8E7545EF25718ECEC1AD0BC2AFE667D2A95D3031402B86B9C982E1A"
+    },
+    {
+      "old": "agent/hand_range.py",
+      "new": "agents/common/hand_range.py",
+      "directory": false,
+      "bytes": 5295,
+      "sha256": "500B9FDA18DFFFCC1D92F0DA9045F7270F46260305A38EF5EA80C82E34843AA2"
+    },
+    {
+      "old": "agent/heuristic_agent.py",
+      "new": "agents/baselines/heuristic_agent.py",
+      "directory": false,
+      "bytes": 10458,
+      "sha256": "DEEF35668DBCE466C03A8E2A2823FD65BA1D6ABAB0179424DDAB1220A0EE85B4"
+    },
+    {
+      "old": "agent/HA1.py",
+      "new": "agents/baselines/HA1.py",
+      "directory": false,
+      "bytes": 9523,
+      "sha256": "FB5849C0EFE2C2FE68F3503E12054DA83C13B8E5985D28A211890915B46BF352"
+    },
+    {
+      "old": "agent/human_agent.py",
+      "new": "agents/baselines/human_agent.py",
+      "directory": false,
+      "bytes": 2338,
+      "sha256": "622D8CC7053968DE30C38202E5053C592EAD86314AFC4996FA8C86B38062DC8B"
+    },
+    {
+      "old": "analyze_deep_cfr_history.py",
+      "new": "agents/deep_cfr/analyze_deep_cfr_history.py",
+      "directory": false,
+      "bytes": 7599,
+      "sha256": "9ABE6C070395EF4DDFB2660EF1C045B3103FD3A99FA1B527E1719C96D4A6FEC4"
+    },
+    {
+      "old": "deep_cfr_ipc_server.py",
+      "new": "agents/deep_cfr/deep_cfr_ipc_server.py",
+      "directory": false,
+      "bytes": 5935,
+      "sha256": "7DC75A97DC9D8A83E3BC5AFA01BBFCBDF51B29AB97A8E9456B0F9E096EEA66FD"
+    },
+    {
+      "old": "train_deep_cfr_7th.py",
+      "new": "agents/deep_cfr/train_deep_cfr_7th.py",
+      "directory": false,
+      "bytes": 20127,
+      "sha256": "64A6DDD1F4CACB1C1B97D919653E8E01CCF7B18518A36AAA4823976AA8D3852F"
+    },
+    {
+      "old": "evaluate_deep_cfr_7th.py",
+      "new": "agents/deep_cfr/evaluate_deep_cfr_7th.py",
+      "directory": false,
+      "bytes": 3179,
+      "sha256": "4BE745DA6C4482BA26DB969C0572DF598FF79C856F8D54EC8A52ED837840539B"
+    },
+    {
+      "old": "test_deep_cfr_training.py",
+      "new": "agents/deep_cfr/test_deep_cfr_training.py",
+      "directory": false,
+      "bytes": 832,
+      "sha256": "EC3A8B9F1FB1CC90938BDB2496C9EBD8B968CA3B4C9CADB253652040531B3993"
+    },
+    {
+      "old": "agent/uct_agent.py",
+      "new": "agents/search/uct_agent.py",
+      "directory": false,
+      "bytes": 22711,
+      "sha256": "9222CBB4D9853FD2A1A69DC1DD2512AC47DED601CDBD0C1FAED360855A1E4B38"
+    },
+    {
+      "old": "agent/claude_belief_br.py",
+      "new": "agents/search/claude_belief_br.py",
+      "directory": false,
+      "bytes": 21771,
+      "sha256": "F3A525D4197D1B35A59F0916F18B2D34CF2692F02ECE71D7CD295209E387A117"
+    },
+    {
+      "old": "agent/claude_search.py",
+      "new": "agents/search/claude_search.py",
+      "directory": false,
+      "bytes": 13470,
+      "sha256": "6BE24D2D781A80FCF170929303C9BEFCEBC17FEB8B4B91D416F01B61BD908562"
+    },
+    {
+      "old": "uct_rollout.py",
+      "new": "agents/search/uct_rollout.py",
+      "directory": false,
+      "bytes": 14759,
+      "sha256": "EDF2B9351FBFBC3A98B58B5810E59E1D7D3F011206EDDAF8AFE07AB285959E57"
+    },
+    {
+      "old": "ev_rollout.py",
+      "new": "agents/search/ev_rollout.py",
+      "directory": false,
+      "bytes": 15539,
+      "sha256": "18B7F3EC064CFA8D0A0E5DE1AF4650008C4CC2A1A617E11E423E12B8E72764F5"
+    },
+    {
+      "old": "h4_rollout.py",
+      "new": "agents/search/h4_rollout.py",
+      "directory": false,
+      "bytes": 13978,
+      "sha256": "7C87DD732E0EC2D2C5B506663B401A20F9DD074F5F2373148D1333D50CD2E965"
+    },
+    {
+      "old": "seventh_oracle_asymp.py",
+      "new": "agents/search/seventh_oracle_asymp.py",
+      "directory": false,
+      "bytes": 11417,
+      "sha256": "77CFEAD3CCA6BB482092D80E2559C925E6F5211F749CA2D931008BE6CE58E648"
+    },
+    {
+      "old": "test_uct_rollout.py",
+      "new": "agents/search/test_uct_rollout.py",
+      "directory": false,
+      "bytes": 8351,
+      "sha256": "76AB58B98FD854102CA4D970191AC33DE04DF1BA661559937B8A3800C47B8E4F"
+    },
+    {
+      "old": "test_h4_rollout.py",
+      "new": "agents/search/test_h4_rollout.py",
+      "directory": false,
+      "bytes": 1756,
+      "sha256": "7FD8A7815CB21AF8455CE4218A8588C2DD754F23C2E8A1459C406C6AD79A55C6"
+    },
+    {
+      "old": "test_claude_belief_br.py",
+      "new": "agents/search/test_claude_belief_br.py",
+      "directory": false,
+      "bytes": 7023,
+      "sha256": "B6CD5C7B836E68DBCF57015A39745EF82298EE4D138276C5DCF504F2C6EA4769"
+    },
+    {
+      "old": "evaluate_five_player_ev.py",
+      "new": "agents/evaluation/evaluate_five_player_ev.py",
+      "directory": false,
+      "bytes": 9481,
+      "sha256": "0012295F1F8AE3F1FA57CCE10AC9695C4977CA2760BDB37834B44EB222DC53FE"
+    },
+    {
+      "old": "evaluate_heads_up.py",
+      "new": "agents/evaluation/evaluate_heads_up.py",
+      "directory": false,
+      "bytes": 4405,
+      "sha256": "36F0B13E543D56D2D83F43C1CE1E1EDB6AF70D25A5F14168133E9B4DE48CF047"
+    },
+    {
+      "old": "evaluate_stack_sensitivity.py",
+      "new": "agents/evaluation/evaluate_stack_sensitivity.py",
+      "directory": false,
+      "bytes": 5679,
+      "sha256": "78ACAC1E1151095FEEF64D17E0F21A5E6E08F732A6576815DE6FD98B51B4B230"
+    },
+    {
+      "old": "cpp_mccfr",
+      "new": "agents/cpp_mccfr",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "agent/cpp_mccfr_agent.py",
+      "new": "agents/cpp_mccfr/cpp_mccfr_agent.py",
+      "directory": false,
+      "bytes": 9304,
+      "sha256": "532F5FD6BA53ECD025A337D213CAD80BCF905ABF08A224C72F46C64B92611F58"
+    },
+    {
+      "old": "deep_cfr_compact",
+      "new": "agents/deep_cfr/compact",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "online_rebel_stud_leduc",
+      "new": "agents/rebel/online_stud_leduc",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "rebel_7stud_checkpoints",
+      "new": "agents/rebel/checkpoint_evaluation",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "br_gap_experiment",
+      "new": "agents/evaluation/br_gap",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_cuda_em_smoke",
+      "new": "agents/clustering/data/models/clustering_cuda_em_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_smoke",
+      "new": "agents/clustering/data/models/clustering_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_stack1000_uct_4x8h",
+      "new": "agents/clustering/data/models/clustering_stack1000_uct_4x8h",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_stack1000_uct_4x8h_td20k",
+      "new": "agents/clustering/data/models/clustering_stack1000_uct_4x8h_td20k",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_uct_selfplay_smoke",
+      "new": "agents/clustering/data/models/clustering_uct_selfplay_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_uct_v1",
+      "new": "agents/clustering/data/models/clustering_uct_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/clustering_uct_v1_full_em_cuda",
+      "new": "agents/clustering/data/models/clustering_uct_v1_full_em_cuda",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_5th_plus_v1",
+      "new": "agents/deep_cfr/data/models/deep_cfr_5th_plus_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_5th_smoke",
+      "new": "agents/deep_cfr/data/models/deep_cfr_5th_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_5th_strat_h128_v1",
+      "new": "agents/deep_cfr/data/models/deep_cfr_5th_strat_h128_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_7th_pilot",
+      "new": "agents/deep_cfr/data/models/deep_cfr_7th_pilot",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_7th_smoke",
+      "new": "agents/deep_cfr/data/models/deep_cfr_7th_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_7th_smoke_v2",
+      "new": "agents/deep_cfr/data/models/deep_cfr_7th_smoke_v2",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_7th_v1",
+      "new": "agents/deep_cfr/data/models/deep_cfr_7th_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_corrected_h128_v1",
+      "new": "agents/deep_cfr/data/models/deep_cfr_corrected_h128_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_corrected_smoke",
+      "new": "agents/deep_cfr/data/models/deep_cfr_corrected_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_corrected_smoke2",
+      "new": "agents/deep_cfr/data/models/deep_cfr_corrected_smoke2",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_corrected_smoke3",
+      "new": "agents/deep_cfr/data/models/deep_cfr_corrected_smoke3",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_gap_smoke",
+      "new": "agents/deep_cfr/data/models/deep_cfr_gap_smoke",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_stratified_7th_h128_screen",
+      "new": "agents/deep_cfr/data/models/deep_cfr_stratified_7th_h128_screen",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_stratified_7th_h256_screen",
+      "new": "agents/deep_cfr/data/models/deep_cfr_stratified_7th_h256_screen",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_stratified_smoke_v1",
+      "new": "agents/deep_cfr/data/models/deep_cfr_stratified_smoke_v1",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/kmeans_trained",
+      "new": "agents/clustering/data/models/kmeans_trained",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_plus_v3_live_eval",
+      "new": "agents/python_mccfr/data/models/mccfr_plus_v3_live_eval",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_v3_live_eval",
+      "new": "agents/python_mccfr/data/models/mccfr_v3_live_eval",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/pmang_v2",
+      "new": "agents/clustering/data/models/pmang_v2",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/pmang_v2_selfplay_3h",
+      "new": "agents/clustering/data/models/pmang_v2_selfplay_3h",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_adaptive_mixed_q",
+      "new": "agents/clustering/data/models/uct_adaptive_mixed_q",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_root_4x8h",
+      "new": "agents/clustering/data/models/uct_vs_uct_root_4x8h",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_root_4x8h_gmm_td20k",
+      "new": "agents/clustering/data/models/uct_vs_uct_root_4x8h_gmm_td20k",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_root_4x8h_gmm_td20k_v2",
+      "new": "agents/clustering/data/models/uct_vs_uct_root_4x8h_gmm_td20k_v2",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_root_4x8h_kmeans_td20k",
+      "new": "agents/clustering/data/models/uct_vs_uct_root_4x8h_kmeans_td20k",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_root_4x8h_kmeans_td20k_v2",
+      "new": "agents/clustering/data/models/uct_vs_uct_root_4x8h_kmeans_td20k_v2",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/uct_vs_uct_tree64_4x8h",
+      "new": "agents/clustering/data/models/uct_vs_uct_tree64_4x8h",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "models/deep_cfr_uniform.pt",
+      "new": "agents/deep_cfr/data/models/deep_cfr_uniform.pt",
+      "directory": false,
+      "bytes": 2158954,
+      "sha256": null
+    },
+    {
+      "old": "models/kuhn_cfr.json",
+      "new": "agents/python_mccfr/data/models/kuhn_cfr.json",
+      "directory": false,
+      "bytes": 1415,
+      "sha256": null
+    },
+    {
+      "old": "models/match_evaluation.json",
+      "new": "agents/evaluation/data/models/match_evaluation.json",
+      "directory": false,
+      "bytes": 1266,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_6plus.json",
+      "new": "agents/python_mccfr/data/models/mccfr_6plus.json",
+      "directory": false,
+      "bytes": 75127572,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_6stage.json",
+      "new": "agents/python_mccfr/data/models/mccfr_6stage.json",
+      "directory": false,
+      "bytes": 67277986,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_7th_kmeans.json",
+      "new": "agents/python_mccfr/data/models/mccfr_7th_kmeans.json",
+      "directory": false,
+      "bytes": 1644083,
+      "sha256": null
+    },
+    {
+      "old": "models/mccfr_7th.json",
+      "new": "agents/python_mccfr/data/models/mccfr_7th.json",
+      "directory": false,
+      "bytes": 42192551,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_final_smoke.json",
+      "new": "agents/rebel/data/models/rebel_v7_final_smoke.json",
+      "directory": false,
+      "bytes": 480,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_final_smoke.pt",
+      "new": "agents/rebel/data/models/rebel_v7_final_smoke.pt",
+      "directory": false,
+      "bytes": 244768,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_1k.json",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_1k.json",
+      "directory": false,
+      "bytes": 473,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_1k.pt",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_1k.pt",
+      "directory": false,
+      "bytes": 1123185,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_final.json",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_final.json",
+      "directory": false,
+      "bytes": 475,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_final.pt",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_final.pt",
+      "directory": false,
+      "bytes": 271346,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_smoke.json",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_smoke.json",
+      "directory": false,
+      "bytes": 475,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_pbs_smoke.pt",
+      "new": "agents/rebel/data/models/rebel_v7_pbs_smoke.pt",
+      "directory": false,
+      "bytes": 271346,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe_best.json",
+      "new": "agents/rebel/data/models/rebel_v7_probe_best.json",
+      "directory": false,
+      "bytes": 478,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe_best.pt",
+      "new": "agents/rebel/data/models/rebel_v7_probe_best.pt",
+      "directory": false,
+      "bytes": 1016861,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe_v2.json",
+      "new": "agents/rebel/data/models/rebel_v7_probe_v2.json",
+      "directory": false,
+      "bytes": 406,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe_v2.pt",
+      "new": "agents/rebel/data/models/rebel_v7_probe_v2.pt",
+      "directory": false,
+      "bytes": 1016807,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe.json",
+      "new": "agents/rebel/data/models/rebel_v7_probe.json",
+      "directory": false,
+      "bytes": 400,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_probe.pt",
+      "new": "agents/rebel/data/models/rebel_v7_probe.pt",
+      "directory": false,
+      "bytes": 1016662,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_smoke_v2.json",
+      "new": "agents/rebel/data/models/rebel_v7_smoke_v2.json",
+      "directory": false,
+      "bytes": 403,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_smoke_v2.pt",
+      "new": "agents/rebel/data/models/rebel_v7_smoke_v2.pt",
+      "directory": false,
+      "bytes": 244699,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_smoke.json",
+      "new": "agents/rebel/data/models/rebel_v7_smoke.json",
+      "directory": false,
+      "bytes": 397,
+      "sha256": null
+    },
+    {
+      "old": "models/rebel_v7_smoke.pt",
+      "new": "agents/rebel/data/models/rebel_v7_smoke.pt",
+      "directory": false,
+      "bytes": 244566,
+      "sha256": null
+    },
+    {
+      "old": "LearningAgent_Shared_db.json",
+      "new": "agents/tabular_rl/data/LearningAgent_Shared_db.json",
+      "directory": false,
+      "bytes": 369896,
+      "sha256": null
+    },
+    {
+      "old": "replays",
+      "new": "data/replays",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/logs",
+      "new": "agents/cpp_mccfr/data/logs",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/results",
+      "new": "agents/cpp_mccfr/data/results",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/ab_compressed_100k.bin",
+      "new": "agents/cpp_mccfr/data/ab_compressed_100k.bin",
+      "directory": false,
+      "bytes": 2080827,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/ab_compressed_train.json",
+      "new": "agents/cpp_mccfr/data/ab_compressed_train.json",
+      "directory": false,
+      "bytes": 2426,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/ab_recall_train.json",
+      "new": "agents/cpp_mccfr/data/ab_recall_train.json",
+      "directory": false,
+      "bytes": 1313,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/action_range_teacher100m_v1.bin",
+      "new": "agents/cpp_mccfr/data/action_range_teacher100m_v1.bin",
+      "directory": false,
+      "bytes": 1808,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_decay_5k.bin",
+      "new": "agents/cpp_mccfr/data/asymp_decay_5k.bin",
+      "directory": false,
+      "bytes": 3834746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_eta1e5_5k.bin",
+      "new": "agents/cpp_mccfr/data/asymp_eta1e5_5k.bin",
+      "directory": false,
+      "bytes": 3834954,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_mu0_5k.bin",
+      "new": "agents/cpp_mccfr/data/asymp_mu0_5k.bin",
+      "directory": false,
+      "bytes": 3834850,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_mu001_5k.bin",
+      "new": "agents/cpp_mccfr/data/asymp_mu001_5k.bin",
+      "directory": false,
+      "bytes": 3834850,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_script_smoke.bin",
+      "new": "agents/cpp_mccfr/data/asymp_script_smoke.bin",
+      "directory": false,
+      "bytes": 3834746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_smoke_1k.bin",
+      "new": "agents/cpp_mccfr/data/asymp_smoke_1k.bin",
+      "directory": false,
+      "bytes": 3834746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_smoke_resume.bin",
+      "new": "agents/cpp_mccfr/data/asymp_smoke_resume.bin",
+      "directory": false,
+      "bytes": 3834746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/asymp_smoke.bin",
+      "new": "agents/cpp_mccfr/data/asymp_smoke.bin",
+      "directory": false,
+      "bytes": 3834746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_10m_atlas.bin",
+      "new": "agents/cpp_mccfr/data/balanced_decay_10m_atlas.bin",
+      "directory": false,
+      "bytes": 3480,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_10m_temp.txt",
+      "new": "agents/cpp_mccfr/data/balanced_decay_10m_temp.txt",
+      "directory": false,
+      "bytes": 98,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_10m.bin",
+      "new": "agents/cpp_mccfr/data/balanced_decay_10m.bin",
+      "directory": false,
+      "bytes": 270995,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_30m_atlas.bin",
+      "new": "agents/cpp_mccfr/data/balanced_decay_30m_atlas.bin",
+      "directory": false,
+      "bytes": 3912,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_30m_temp.txt",
+      "new": "agents/cpp_mccfr/data/balanced_decay_30m_temp.txt",
+      "directory": false,
+      "bytes": 105,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_decay_30m.bin",
+      "new": "agents/cpp_mccfr/data/balanced_decay_30m.bin",
+      "directory": false,
+      "bytes": 342683,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke_atlas.bin",
+      "new": "agents/cpp_mccfr/data/balanced_smoke_atlas.bin",
+      "directory": false,
+      "bytes": 3480,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke_temp.txt",
+      "new": "agents/cpp_mccfr/data/balanced_smoke_temp.txt",
+      "directory": false,
+      "bytes": 81,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke.bin",
+      "new": "agents/cpp_mccfr/data/balanced_smoke.bin",
+      "directory": false,
+      "bytes": 241531,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke2_atlas.bin",
+      "new": "agents/cpp_mccfr/data/balanced_smoke2_atlas.bin",
+      "directory": false,
+      "bytes": 3480,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke2_temp.txt",
+      "new": "agents/cpp_mccfr/data/balanced_smoke2_temp.txt",
+      "directory": false,
+      "bytes": 87,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/balanced_smoke2.bin",
+      "new": "agents/cpp_mccfr/data/balanced_smoke2.bin",
+      "directory": false,
+      "bytes": 224363,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_adaptive_100m.json",
+      "new": "agents/cpp_mccfr/data/curve_adaptive_100m.json",
+      "directory": false,
+      "bytes": 942,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_adaptive_10m.json",
+      "new": "agents/cpp_mccfr/data/curve_adaptive_10m.json",
+      "directory": false,
+      "bytes": 944,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_hard_100m.json",
+      "new": "agents/cpp_mccfr/data/curve_hard_100m.json",
+      "directory": false,
+      "bytes": 945,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_hard_10m.json",
+      "new": "agents/cpp_mccfr/data/curve_hard_10m.json",
+      "directory": false,
+      "bytes": 947,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_hard_30m.bin",
+      "new": "agents/cpp_mccfr/data/curve_hard_30m.bin",
+      "directory": false,
+      "bytes": 266819,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/curve_hard_seed15101_10m.bin",
+      "new": "agents/cpp_mccfr/data/curve_hard_seed15101_10m.bin",
+      "directory": false,
+      "bytes": 265891,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/deep_cfr_evaluate.exe",
+      "new": "agents/cpp_mccfr/bin/deep_cfr_evaluate.exe",
+      "directory": false,
+      "bytes": 910240,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/deep_cfr_ipc_probe.exe",
+      "new": "agents/cpp_mccfr/bin/deep_cfr_ipc_probe.exe",
+      "directory": false,
+      "bytes": 616601,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/deep_cfr_traverse.exe",
+      "new": "agents/cpp_mccfr/bin/deep_cfr_traverse.exe",
+      "directory": false,
+      "bytes": 885951,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/experiment_hard100k_5k.json",
+      "new": "agents/cpp_mccfr/data/experiment_hard100k_5k.json",
+      "directory": false,
+      "bytes": 919,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/experiment_hard10m_5k.json",
+      "new": "agents/cpp_mccfr/data/experiment_hard10m_5k.json",
+      "directory": false,
+      "bytes": 918,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/experiment_hard28m_5k.json",
+      "new": "agents/cpp_mccfr/data/experiment_hard28m_5k.json",
+      "directory": false,
+      "bytes": 918,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/experiment_local10m_5k.json",
+      "new": "agents/cpp_mccfr/data/experiment_local10m_5k.json",
+      "directory": false,
+      "bytes": 915,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_100m_atlas.bin",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_100m_atlas.bin",
+      "directory": false,
+      "bytes": 5928,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_100m_temp.txt",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_100m_temp.txt",
+      "directory": false,
+      "bytes": 107,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_100m.bin",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_100m.bin",
+      "directory": false,
+      "bytes": 677227,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_10m_atlas.bin",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_10m_atlas.bin",
+      "directory": false,
+      "bytes": 3624,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_10m_temp.txt",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_10m_temp.txt",
+      "directory": false,
+      "bytes": 74,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_adaptive_10m.bin",
+      "new": "agents/cpp_mccfr/data/fair_adaptive_10m.bin",
+      "directory": false,
+      "bytes": 289787,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_fixed_100m.bin",
+      "new": "agents/cpp_mccfr/data/fair_fixed_100m.bin",
+      "directory": false,
+      "bytes": 267283,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_fixed_10m.bin",
+      "new": "agents/cpp_mccfr/data/fair_fixed_10m.bin",
+      "directory": false,
+      "bytes": 266355,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_hard_100m.bin",
+      "new": "agents/cpp_mccfr/data/fair_hard_100m.bin",
+      "directory": false,
+      "bytes": 266355,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_hard_10m.bin",
+      "new": "agents/cpp_mccfr/data/fair_hard_10m.bin",
+      "directory": false,
+      "bytes": 260555,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_smoke_adaptive_atlas.bin",
+      "new": "agents/cpp_mccfr/data/fair_smoke_adaptive_atlas.bin",
+      "directory": false,
+      "bytes": 3624,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_smoke_adaptive_temp.txt",
+      "new": "agents/cpp_mccfr/data/fair_smoke_adaptive_temp.txt",
+      "directory": false,
+      "bytes": 74,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_smoke_adaptive.bin",
+      "new": "agents/cpp_mccfr/data/fair_smoke_adaptive.bin",
+      "directory": false,
+      "bytes": 225523,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_smoke_fixed.bin",
+      "new": "agents/cpp_mccfr/data/fair_smoke_fixed.bin",
+      "directory": false,
+      "bytes": 204179,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fair_smoke_hard.bin",
+      "new": "agents/cpp_mccfr/data/fair_smoke_hard.bin",
+      "directory": false,
+      "bytes": 58947,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r10_100k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r10_100k.bin",
+      "directory": false,
+      "bytes": 2085476,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r10_10k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r10_10k.bin",
+      "directory": false,
+      "bytes": 1967388,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r100_100k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r100_100k.bin",
+      "directory": false,
+      "bytes": 2066220,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r100_10k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r100_10k.bin",
+      "directory": false,
+      "bytes": 1884332,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r1000_100k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r1000_100k.bin",
+      "directory": false,
+      "bytes": 1966228,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/fold_prior_r1000_10k.bin",
+      "new": "agents/cpp_mccfr/data/fold_prior_r1000_10k.bin",
+      "directory": false,
+      "bytes": 735932,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/h4_100m_100k.bin",
+      "new": "agents/cpp_mccfr/data/h4_100m_100k.bin",
+      "directory": false,
+      "bytes": 3338680,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/h4_100m_10k.bin",
+      "new": "agents/cpp_mccfr/data/h4_100m_10k.bin",
+      "directory": false,
+      "bytes": 2243404,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/h4_100m_smoke.bin",
+      "new": "agents/cpp_mccfr/data/h4_100m_smoke.bin",
+      "directory": false,
+      "bytes": 8176,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/h4_q_exact_10k.bin",
+      "new": "agents/cpp_mccfr/data/h4_q_exact_10k.bin",
+      "directory": false,
+      "bytes": 2228716,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/h4_q_smoke.bin",
+      "new": "agents/cpp_mccfr/data/h4_q_smoke.bin",
+      "directory": false,
+      "bytes": 40612,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_100k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_100k.bin",
+      "directory": false,
+      "bytes": 4166507,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_10k.bin",
+      "directory": false,
+      "bytes": 3830571,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_only_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_only_10k.bin",
+      "directory": false,
+      "bytes": 696483,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_s1_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_s1_10k.bin",
+      "directory": false,
+      "bytes": 3828251,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_s10_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_s10_10k.bin",
+      "directory": false,
+      "bytes": 3835443,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_s100_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_s100_10k.bin",
+      "directory": false,
+      "bytes": 3852379,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_s100v2_100k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_s100v2_100k.bin",
+      "directory": false,
+      "bytes": 4164651,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitate_s100v2_10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitate_s100v2_10k.bin",
+      "directory": false,
+      "bytes": 3852379,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitation_covered_ft10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitation_covered_ft10k.bin",
+      "directory": false,
+      "bytes": 4260931,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitation_covered.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitation_covered.bin",
+      "directory": false,
+      "bytes": 4250259,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_imitation_external_smoke.bin",
+      "new": "agents/cpp_mccfr/data/hard128_imitation_external_smoke.bin",
+      "directory": false,
+      "bytes": 3100699,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_prior_s10k_r100k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_prior_s10k_r100k.bin",
+      "directory": false,
+      "bytes": 4142379,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_prior_s10k_r10k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_prior_s10k_r10k.bin",
+      "directory": false,
+      "bytes": 4016635,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_warm_1m_scale01_ft100k.bin",
+      "new": "agents/cpp_mccfr/data/hard128_warm_1m_scale01_ft100k.bin",
+      "directory": false,
+      "bytes": 6218204,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_warm_1m_scale01_ft10m.bin",
+      "new": "agents/cpp_mccfr/data/hard128_warm_1m_scale01_ft10m.bin",
+      "directory": false,
+      "bytes": 6231196,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard128_warm_1m.bin",
+      "new": "agents/cpp_mccfr/data/hard128_warm_1m.bin",
+      "directory": false,
+      "bytes": 6217044,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/hard64_matched_100k.bin",
+      "new": "agents/cpp_mccfr/data/hard64_matched_100k.bin",
+      "directory": false,
+      "bytes": 2091731,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/imitation_smoke.bin",
+      "new": "agents/cpp_mccfr/data/imitation_smoke.bin",
+      "directory": false,
+      "bytes": 77507,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/local_split_helpers_test.exe",
+      "new": "agents/cpp_mccfr/bin/local_split_helpers_test.exe",
+      "directory": false,
+      "bytes": 64684,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_100k.bin",
+      "directory": false,
+      "bytes": 1389244,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_10k.bin",
+      "directory": false,
+      "bytes": 850308,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_eps10_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_eps10_100k.bin",
+      "directory": false,
+      "bytes": 2291956,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_eps10_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_eps10_10k.bin",
+      "directory": false,
+      "bytes": 1368828,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_eps10_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_eps10_1m.bin",
+      "directory": false,
+      "bytes": 3544060,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_legacy_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_legacy_10k.bin",
+      "directory": false,
+      "bytes": 1396900,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_selfplay_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_selfplay_100k.bin",
+      "directory": false,
+      "bytes": 2304020,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_selfplay_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_selfplay_10k.bin",
+      "directory": false,
+      "bytes": 1356764,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k128_selfplay_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k128_selfplay_1m.bin",
+      "directory": false,
+      "bytes": 3505084,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_eps10_seed37301_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_eps10_seed37301_1m.bin",
+      "directory": false,
+      "bytes": 6383740,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_eps20_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_eps20_100k.bin",
+      "directory": false,
+      "bytes": 3999940,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_eps20_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_eps20_10k.bin",
+      "directory": false,
+      "bytes": 2280820,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_eps20_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_eps20_1m.bin",
+      "directory": false,
+      "bytes": 6541500,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_mixed_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_mixed_100k.bin",
+      "directory": false,
+      "bytes": 3980916,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_mixed_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_mixed_10k.bin",
+      "directory": false,
+      "bytes": 2255300,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k256_mixed_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k256_mixed_1m.bin",
+      "directory": false,
+      "bytes": 6491156,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k512_eps20_10m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k512_eps20_10m.bin",
+      "directory": false,
+      "bytes": 15402508,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k512_eps20_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k512_eps20_1m.bin",
+      "directory": false,
+      "bytes": 11397260,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_pair_r1000_k512_hardem_mix50_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_pair_r1000_k512_hardem_mix50_1m.bin",
+      "directory": false,
+      "bytes": 10922588,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k112_uniform_pool500k_memory16_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k112_uniform_pool500k_memory16_1m.bin",
+      "directory": false,
+      "bytes": 16835804,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k16_64_256_pool500k_memory16_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k16_64_256_pool500k_memory16_100k.bin",
+      "directory": false,
+      "bytes": 36318932,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k16_64_256_pool500k_memory16_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k16_64_256_pool500k_memory16_10k.bin",
+      "directory": false,
+      "bytes": 5578468,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k16_64_256_pool500k_memory16_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k16_64_256_pool500k_memory16_1m.bin",
+      "directory": false,
+      "bytes": 42545812,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_epsheur20_memory16_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_epsheur20_memory16_100k.bin",
+      "directory": false,
+      "bytes": 20376124,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_epsheur20_memory16_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_epsheur20_memory16_10k.bin",
+      "directory": false,
+      "bytes": 7728644,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_epsheur20_memory16_10m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_epsheur20_memory16_10m.bin",
+      "directory": false,
+      "bytes": 93258460,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_epsheur20_memory16_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_epsheur20_memory16_1m.bin",
+      "directory": false,
+      "bytes": 52714604,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_epsheur20_memory16_30m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_epsheur20_memory16_30m.bin",
+      "directory": false,
+      "bytes": 97146780,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_memory4_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_memory4_100k.bin",
+      "directory": false,
+      "bytes": 31502612,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_memory4_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_memory4_10k.bin",
+      "directory": false,
+      "bytes": 5649924,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_memory4_10m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_memory4_10m.bin",
+      "directory": false,
+      "bytes": 39266028,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_memory4_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_memory4_1m.bin",
+      "directory": false,
+      "bytes": 37984692,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_pool250k_memory81_100k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_pool250k_memory81_100k.bin",
+      "directory": false,
+      "bytes": 296709468,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_pool250k_memory81_10k.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_pool250k_memory81_10k.bin",
+      "directory": false,
+      "bytes": 13401508,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_pool250k_memory81_10m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_pool250k_memory81_10m.bin",
+      "directory": false,
+      "bytes": 482353084,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/made_call_r1000_k512_pool250k_memory81_1m.bin",
+      "new": "agents/cpp_mccfr/data/made_call_r1000_k512_pool250k_memory81_1m.bin",
+      "directory": false,
+      "bytes": 447777428,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_hard_100k.bin",
+      "new": "agents/cpp_mccfr/data/mass_hard_100k.bin",
+      "directory": false,
+      "bytes": 265195,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_hard_10k.bin",
+      "new": "agents/cpp_mccfr/data/mass_hard_10k.bin",
+      "directory": false,
+      "bytes": 256611,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_100k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/mass_point_100k_atlas.bin",
+      "directory": false,
+      "bytes": 5192,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_100k.bin",
+      "new": "agents/cpp_mccfr/data/mass_point_100k.bin",
+      "directory": false,
+      "bytes": 509955,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_100k.json",
+      "new": "agents/cpp_mccfr/data/mass_point_100k.json",
+      "directory": false,
+      "bytes": 1858,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_10k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/mass_point_10k_atlas.bin",
+      "directory": false,
+      "bytes": 3824,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_10k.bin",
+      "new": "agents/cpp_mccfr/data/mass_point_10k.bin",
+      "directory": false,
+      "bytes": 294891,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_point_10k.json",
+      "new": "agents/cpp_mccfr/data/mass_point_10k.json",
+      "directory": false,
+      "bytes": 1806,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_100k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/mass_residual_100k_atlas.bin",
+      "directory": false,
+      "bytes": 5192,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_100k.bin",
+      "new": "agents/cpp_mccfr/data/mass_residual_100k.bin",
+      "directory": false,
+      "bytes": 509955,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_100k.json",
+      "new": "agents/cpp_mccfr/data/mass_residual_100k.json",
+      "directory": false,
+      "bytes": 1860,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_10k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/mass_residual_10k_atlas.bin",
+      "directory": false,
+      "bytes": 3824,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_10k.bin",
+      "new": "agents/cpp_mccfr/data/mass_residual_10k.bin",
+      "directory": false,
+      "bytes": 294891,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mass_residual_10k.json",
+      "new": "agents/cpp_mccfr/data/mass_residual_10k.json",
+      "directory": false,
+      "bytes": 1808,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mccfr_plus_5th.bin",
+      "new": "agents/cpp_mccfr/data/mccfr_plus_5th.bin",
+      "directory": false,
+      "bytes": 2045795,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mccfr_plus_v3_next.bin",
+      "new": "agents/cpp_mccfr/data/mccfr_plus_v3_next.bin",
+      "directory": false,
+      "bytes": 689523,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/mccfr_plus_v3.bin",
+      "new": "agents/cpp_mccfr/data/mccfr_plus_v3.bin",
+      "directory": false,
+      "bytes": 653331,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_10m_common_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory16_10m_common_lbr64.json",
+      "directory": false,
+      "bytes": 2186,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_common_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory16_30m_common_lbr64.json",
+      "directory": false,
+      "bytes": 2186,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_conflict_20k.csv",
+      "new": "agents/cpp_mccfr/data/memory16_30m_conflict_20k.csv",
+      "directory": false,
+      "bytes": 6659810,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_conflict_a4_smoke.csv",
+      "new": "agents/cpp_mccfr/data/memory16_30m_conflict_a4_smoke.csv",
+      "directory": false,
+      "bytes": 430199,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_conflict_smoke.csv",
+      "new": "agents/cpp_mccfr/data/memory16_30m_conflict_smoke.csv",
+      "directory": false,
+      "bytes": 430199,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_lbr_attribution_10k64.csv",
+      "new": "agents/cpp_mccfr/data/memory16_30m_lbr_attribution_10k64.csv",
+      "directory": false,
+      "bytes": 624707,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_30m_lbr_attribution_2k64.csv",
+      "new": "agents/cpp_mccfr/data/memory16_30m_lbr_attribution_2k64.csv",
+      "directory": false,
+      "bytes": 127503,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_k512_10m_bucket_touches.csv",
+      "new": "agents/cpp_mccfr/data/memory16_k512_10m_bucket_touches.csv",
+      "directory": false,
+      "bytes": 15792128,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory16_k512_1m_bucket_touches.csv",
+      "new": "agents/cpp_mccfr/data/memory16_k512_1m_bucket_touches.csv",
+      "directory": false,
+      "bytes": 8734950,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory4_k512_10m_bucket_touches.csv",
+      "new": "agents/cpp_mccfr/data/memory4_k512_10m_bucket_touches.csv",
+      "directory": false,
+      "bytes": 6686811,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_100k_common_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_100k_common_lbr64.json",
+      "directory": false,
+      "bytes": 2200,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_10k_common_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_10k_common_lbr64.json",
+      "directory": false,
+      "bytes": 2192,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_1m_common_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_1m_common_lbr64.json",
+      "directory": false,
+      "bytes": 2188,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_pool250k_100k_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_pool250k_100k_lbr64.json",
+      "directory": false,
+      "bytes": 2198,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_pool250k_10k_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_pool250k_10k_lbr64.json",
+      "directory": false,
+      "bytes": 2190,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/memory81_pool250k_1m_lbr64.json",
+      "new": "agents/cpp_mccfr/data/memory81_pool250k_1m_lbr64.json",
+      "directory": false,
+      "bytes": 2188,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/partial_asymp_100m_10k_b64.bin",
+      "new": "agents/cpp_mccfr/data/partial_asymp_100m_10k_b64.bin",
+      "directory": false,
+      "bytes": 3845562,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/posterior_range_imitation20k_ft10k.bin",
+      "new": "agents/cpp_mccfr/data/posterior_range_imitation20k_ft10k.bin",
+      "directory": false,
+      "bytes": 19327020,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/posterior_range_imitation20k.bin",
+      "new": "agents/cpp_mccfr/data/posterior_range_imitation20k.bin",
+      "directory": false,
+      "bytes": 1888972,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/posterior64_imitation20k_ft10k.bin",
+      "new": "agents/cpp_mccfr/data/posterior64_imitation20k_ft10k.bin",
+      "directory": false,
+      "bytes": 10954140,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/posterior64_imitation20k.bin",
+      "new": "agents/cpp_mccfr/data/posterior64_imitation20k.bin",
+      "directory": false,
+      "bytes": 963060,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_k_epsilon_ablation_1m.json",
+      "new": "agents/cpp_mccfr/data/power_k_epsilon_ablation_1m.json",
+      "directory": false,
+      "bytes": 2614,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_100m_nodes.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_100m_nodes.atlas",
+      "directory": false,
+      "bytes": 379181,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_100m_nodes.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_100m_nodes.bin",
+      "directory": false,
+      "bytes": 11973812,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_10m.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_10m.atlas",
+      "directory": false,
+      "bytes": 128901,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_1m.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_1m.atlas",
+      "directory": false,
+      "bytes": 128901,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_1m.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_1m.bin",
+      "directory": false,
+      "bytes": 3629700,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_static_10m.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_static_10m.bin",
+      "directory": false,
+      "bytes": 3647564,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_static_10m.bin.progress",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_static_10m.bin.progress",
+      "directory": false,
+      "bytes": 4,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_static_10m.bin.stderr.log",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_static_10m.bin.stderr.log",
+      "directory": false,
+      "bytes": 189724,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_static_10m.bin.stdout.log",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_static_10m.bin.stdout.log",
+      "directory": false,
+      "bytes": 691022,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown_static_1p1m.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown_static_1p1m.bin",
+      "directory": false,
+      "bytes": 3632716,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown512_10m.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown512_10m.atlas",
+      "directory": false,
+      "bytes": 366213,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown512_1m.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown512_1m.atlas",
+      "directory": false,
+      "bytes": 366213,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_cooldown512_1m.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_cooldown512_1m.bin",
+      "directory": false,
+      "bytes": 12633156,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_touch_1m.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_touch_1m.atlas",
+      "directory": false,
+      "bytes": 87813,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_touch_warm100k.atlas",
+      "new": "agents/cpp_mccfr/data/power_tree_touch_warm100k.atlas",
+      "directory": false,
+      "bytes": 87813,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power_tree_touch_warm100k.bin",
+      "new": "agents/cpp_mccfr/data/power_tree_touch_warm100k.bin",
+      "directory": false,
+      "bytes": 2098036,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power112_uniform_pool500k_v1.bin",
+      "new": "agents/cpp_mccfr/data/power112_uniform_pool500k_v1.bin",
+      "directory": false,
+      "bytes": 51096,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power128_selfplay100m_eps10_v1.bin",
+      "new": "agents/cpp_mccfr/data/power128_selfplay100m_eps10_v1.bin",
+      "directory": false,
+      "bytes": 58392,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power128_selfplay100m_eps10_v1.json",
+      "new": "agents/cpp_mccfr/data/power128_selfplay100m_eps10_v1.json",
+      "directory": false,
+      "bytes": 746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power128_selfplay100m_v1.bin",
+      "new": "agents/cpp_mccfr/data/power128_selfplay100m_v1.bin",
+      "directory": false,
+      "bytes": 58392,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power128_selfplay100m_v1.json",
+      "new": "agents/cpp_mccfr/data/power128_selfplay100m_v1.json",
+      "directory": false,
+      "bytes": 684,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power128_v1.bin",
+      "new": "agents/cpp_mccfr/data/power128_v1.bin",
+      "directory": false,
+      "bytes": 58392,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power16_64_256_pool500k_v1.bin",
+      "new": "agents/cpp_mccfr/data/power16_64_256_pool500k_v1.bin",
+      "directory": false,
+      "bytes": 51096,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power16_pool_smoke.bin",
+      "new": "agents/cpp_mccfr/data/power16_pool_smoke.bin",
+      "directory": false,
+      "bytes": 7320,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power256_mixed_self_lbr_epsheur_v1.bin",
+      "new": "agents/cpp_mccfr/data/power256_mixed_self_lbr_epsheur_v1.bin",
+      "directory": false,
+      "bytes": 116760,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power256_mixed_self_lbr_epsheur_v1.json",
+      "new": "agents/cpp_mccfr/data/power256_mixed_self_lbr_epsheur_v1.json",
+      "directory": false,
+      "bytes": 2002,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power256_selfplay100m_eps10_seed37301_v1.bin",
+      "new": "agents/cpp_mccfr/data/power256_selfplay100m_eps10_seed37301_v1.bin",
+      "directory": false,
+      "bytes": 116760,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power256_selfplay100m_eps20_v1.bin",
+      "new": "agents/cpp_mccfr/data/power256_selfplay100m_eps20_v1.bin",
+      "directory": false,
+      "bytes": 116760,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power256_selfplay100m_eps20_v1.json",
+      "new": "agents/cpp_mccfr/data/power256_selfplay100m_eps20_v1.json",
+      "directory": false,
+      "bytes": 746,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_epsheur20_memory16_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_epsheur20_memory16_v1.bin",
+      "directory": false,
+      "bytes": 233496,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_hardem_epsheur_lbr50_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_hardem_epsheur_lbr50_v1.bin",
+      "directory": false,
+      "bytes": 454680,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_hardem_epsheur_lbr50_v1.json",
+      "new": "agents/cpp_mccfr/data/power512_hardem_epsheur_lbr50_v1.json",
+      "directory": false,
+      "bytes": 1536,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_heuristic_memory4_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_heuristic_memory4_v1.bin",
+      "directory": false,
+      "bytes": 233496,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_heuristic_pool_250k_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_heuristic_pool_250k_v1.bin",
+      "directory": false,
+      "bytes": 233496,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_heuristic_pool_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_heuristic_pool_v1.bin",
+      "directory": false,
+      "bytes": 233496,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power512_selfplay100m_eps20_v1.bin",
+      "new": "agents/cpp_mccfr/data/power512_selfplay100m_eps20_v1.bin",
+      "directory": false,
+      "bytes": 233496,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power64_snapshot_adaptive1.bin",
+      "new": "agents/cpp_mccfr/data/power64_snapshot_adaptive1.bin",
+      "directory": false,
+      "bytes": 27816,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power64_snapshot_adaptive2.bin",
+      "new": "agents/cpp_mccfr/data/power64_snapshot_adaptive2.bin",
+      "directory": false,
+      "bytes": 27816,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/power64_v1.bin",
+      "new": "agents/cpp_mccfr/data/power64_v1.bin",
+      "directory": false,
+      "bytes": 27672,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/prior_v5_smoke.bin",
+      "new": "agents/cpp_mccfr/data/prior_v5_smoke.bin",
+      "directory": false,
+      "bytes": 35924,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_final_smoke.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_final_smoke.bin",
+      "directory": false,
+      "bytes": 58712,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_pbs_1k.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_pbs_1k.bin",
+      "directory": false,
+      "bytes": 65344024,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_pbs_final.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_pbs_final.bin",
+      "directory": false,
+      "bytes": 65368,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_pbs_final2.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_pbs_final2.bin",
+      "directory": false,
+      "bytes": 65368,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_pbs_smoke.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_pbs_smoke.bin",
+      "directory": false,
+      "bytes": 65368,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_probe_v2.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_probe_v2.bin",
+      "directory": false,
+      "bytes": 5868824,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_probe.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_probe.bin",
+      "directory": false,
+      "bytes": 5865624,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_smoke_v2.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_smoke_v2.bin",
+      "directory": false,
+      "bytes": 58712,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_v7_smoke.bin",
+      "new": "agents/cpp_mccfr/data/rebel_v7_smoke.bin",
+      "directory": false,
+      "bytes": 58680,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_value_pbs.stderr.log",
+      "new": "agents/cpp_mccfr/data/rebel_value_pbs.stderr.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_value_pbs.stdout.log",
+      "new": "agents/cpp_mccfr/data/rebel_value_pbs.stdout.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_value_smoke.stderr.log",
+      "new": "agents/cpp_mccfr/data/rebel_value_smoke.stderr.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/rebel_value_smoke.stdout.log",
+      "new": "agents/cpp_mccfr/data/rebel_value_smoke.stdout.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_100k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_100k.bin",
+      "directory": false,
+      "bytes": 2071083,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_10m.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_10m.bin",
+      "directory": false,
+      "bytes": 2087091,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_11k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_11k.bin",
+      "directory": false,
+      "bytes": 1980603,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_1m.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_1m.bin",
+      "directory": false,
+      "bytes": 2087091,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_21k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_21k.bin",
+      "directory": false,
+      "bytes": 2005659,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_31k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_31k.bin",
+      "directory": false,
+      "bytes": 2026539,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_41k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_41k.bin",
+      "directory": false,
+      "bytes": 2032339,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_51k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_51k.bin",
+      "directory": false,
+      "bytes": 2040691,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_61k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_61k.bin",
+      "directory": false,
+      "bytes": 2045331,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_61k.out",
+      "new": "agents/cpp_mccfr/data/root_mccfr_61k.out",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_ante1000_100k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_ante1000_100k.bin",
+      "directory": false,
+      "bytes": 2096139,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_ante1000_100m.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_ante1000_100m.bin",
+      "directory": false,
+      "bytes": 2144627,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_ante1000_10m.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_ante1000_10m.bin",
+      "directory": false,
+      "bytes": 2138595,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_current_snapshot.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_current_snapshot.bin",
+      "directory": false,
+      "bytes": 2144627,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_smoke.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_smoke.bin",
+      "directory": false,
+      "bytes": 1692459,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_snapshot_adaptive1.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_snapshot_adaptive1.bin",
+      "directory": false,
+      "bytes": 2143699,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_snapshot_adaptive2.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_snapshot_adaptive2.bin",
+      "directory": false,
+      "bytes": 2167363,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_stack20_100k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_stack20_100k.bin",
+      "directory": false,
+      "bytes": 4062571,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/root_mccfr_stack20_10k.bin",
+      "new": "agents/cpp_mccfr/data/root_mccfr_stack20_10k.bin",
+      "directory": false,
+      "bytes": 3744963,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seed_fold1_10k.bin",
+      "new": "agents/cpp_mccfr/data/seed_fold1_10k.bin",
+      "directory": false,
+      "bytes": 1988259,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seed_uniform_10k.bin",
+      "new": "agents/cpp_mccfr/data/seed_uniform_10k.bin",
+      "directory": false,
+      "bytes": 1990115,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_100k.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_100k.json",
+      "directory": false,
+      "bytes": 3786,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_1m_mu0p1.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_1m_mu0p1.json",
+      "directory": false,
+      "bytes": 3752,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_1m_mu0p25.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_1m_mu0p25.json",
+      "directory": false,
+      "bytes": 3806,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_1m_mu0p5.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_1m_mu0p5.json",
+      "directory": false,
+      "bytes": 3813,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_1m_mu1.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_1m_mu1.json",
+      "directory": false,
+      "bytes": 3812,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu0p1.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu0p1.json",
+      "directory": false,
+      "bytes": 3771,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu0p5.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu0p5.json",
+      "directory": false,
+      "bytes": 3804,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu1.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu1.json",
+      "directory": false,
+      "bytes": 3786,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu10.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu10.json",
+      "directory": false,
+      "bytes": 3795,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu2.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu2.json",
+      "directory": false,
+      "bytes": 3786,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu20.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu20.json",
+      "directory": false,
+      "bytes": 3798,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu40.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu40.json",
+      "directory": false,
+      "bytes": 3800,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/seventh_oracle_mu5.json",
+      "new": "agents/cpp_mccfr/data/seventh_oracle_mu5.json",
+      "directory": false,
+      "bytes": 3800,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_mix_atlas.bin",
+      "new": "agents/cpp_mccfr/data/smoke_mix_atlas.bin",
+      "directory": false,
+      "bytes": 3768,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_mix_temp.txt",
+      "new": "agents/cpp_mccfr/data/smoke_mix_temp.txt",
+      "directory": false,
+      "bytes": 77,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_mix.bin",
+      "new": "agents/cpp_mccfr/data/smoke_mix.bin",
+      "directory": false,
+      "bytes": 266355,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_simple_atlas.bin",
+      "new": "agents/cpp_mccfr/data/smoke_simple_atlas.bin",
+      "directory": false,
+      "bytes": 3768,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_simple_temp.txt",
+      "new": "agents/cpp_mccfr/data/smoke_simple_temp.txt",
+      "directory": false,
+      "bytes": 77,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/smoke_simple.bin",
+      "new": "agents/cpp_mccfr/data/smoke_simple.bin",
+      "directory": false,
+      "bytes": 266355,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_100k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/soft_mix_100k_atlas.bin",
+      "directory": false,
+      "bytes": 4920,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_100k_temp.txt",
+      "new": "agents/cpp_mccfr/data/soft_mix_100k_temp.txt",
+      "directory": false,
+      "bytes": 93,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_100k.bin",
+      "new": "agents/cpp_mccfr/data/soft_mix_100k.bin",
+      "directory": false,
+      "bytes": 505779,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_10k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/soft_mix_10k_atlas.bin",
+      "directory": false,
+      "bytes": 3624,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_10k_temp.txt",
+      "new": "agents/cpp_mccfr/data/soft_mix_10k_temp.txt",
+      "directory": false,
+      "bytes": 74,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_mix_10k.bin",
+      "new": "agents/cpp_mccfr/data/soft_mix_10k.bin",
+      "directory": false,
+      "bytes": 290483,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_seed8.bin",
+      "new": "agents/cpp_mccfr/data/soft_seed8.bin",
+      "directory": false,
+      "bytes": 3480,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_100k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/soft_simple_100k_atlas.bin",
+      "directory": false,
+      "bytes": 4920,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_100k_temp.txt",
+      "new": "agents/cpp_mccfr/data/soft_simple_100k_temp.txt",
+      "directory": false,
+      "bytes": 93,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_100k.bin",
+      "new": "agents/cpp_mccfr/data/soft_simple_100k.bin",
+      "directory": false,
+      "bytes": 506475,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_10k_atlas.bin",
+      "new": "agents/cpp_mccfr/data/soft_simple_10k_atlas.bin",
+      "directory": false,
+      "bytes": 3624,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_10k_temp.txt",
+      "new": "agents/cpp_mccfr/data/soft_simple_10k_temp.txt",
+      "directory": false,
+      "bytes": 74,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/soft_simple_10k.bin",
+      "new": "agents/cpp_mccfr/data/soft_simple_10k.bin",
+      "directory": false,
+      "bytes": 290483,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/split_touch_decay_smoke.atlas",
+      "new": "agents/cpp_mccfr/data/split_touch_decay_smoke.atlas",
+      "directory": false,
+      "bytes": 366213,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/split_touch_decay_smoke.bin",
+      "new": "agents/cpp_mccfr/data/split_touch_decay_smoke.bin",
+      "directory": false,
+      "bytes": 43676,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/split_touch_inherit_smoke.atlas",
+      "new": "agents/cpp_mccfr/data/split_touch_inherit_smoke.atlas",
+      "directory": false,
+      "bytes": 130755,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/split_touch_inherit_smoke.bin",
+      "new": "agents/cpp_mccfr/data/split_touch_inherit_smoke.bin",
+      "directory": false,
+      "bytes": 3667052,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/st.txt",
+      "new": "agents/cpp_mccfr/data/st.txt",
+      "directory": false,
+      "bytes": 53,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_adaptive_touch.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_adaptive_touch.exe",
+      "directory": false,
+      "bytes": 863805,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_adaptive.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_adaptive.exe",
+      "directory": false,
+      "bytes": 397531,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_asymp_progress.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_asymp_progress.exe",
+      "directory": false,
+      "bytes": 459494,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_asymp.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_asymp.exe",
+      "directory": false,
+      "bytes": 459494,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_balanced.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_balanced.exe",
+      "directory": false,
+      "bytes": 428618,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_baseline.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_baseline.exe",
+      "directory": false,
+      "bytes": 312219,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_bounded_cache.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_bounded_cache.exe",
+      "directory": false,
+      "bytes": 863775,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_conditional.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_conditional.exe",
+      "directory": false,
+      "bytes": 604037,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_diagnostics.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_diagnostics.exe",
+      "directory": false,
+      "bytes": 726516,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_epsilon_atlas.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_epsilon_atlas.exe",
+      "directory": false,
+      "bytes": 610715,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_fold_prior.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_fold_prior.exe",
+      "directory": false,
+      "bytes": 609613,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_fold_seed.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_fold_seed.exe",
+      "directory": false,
+      "bytes": 486829,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_h4q.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_h4q.exe",
+      "directory": false,
+      "bytes": 559190,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_hard_em.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_hard_em.exe",
+      "directory": false,
+      "bytes": 646217,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_heuristics.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_heuristics.exe",
+      "directory": false,
+      "bytes": 667489,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_imitation.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_imitation.exe",
+      "directory": false,
+      "bytes": 545427,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_inspect.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_inspect.exe",
+      "directory": false,
+      "bytes": 657408,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_lbr_check.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_lbr_check.exe",
+      "directory": false,
+      "bytes": 291954,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_lbr_fast_native.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_lbr_fast_native.exe",
+      "directory": false,
+      "bytes": 604443,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_lbr_h4.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_lbr_h4.exe",
+      "directory": false,
+      "bytes": 875891,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_lbr.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_lbr.exe",
+      "directory": false,
+      "bytes": 338375,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_local_split.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_local_split.exe",
+      "directory": false,
+      "bytes": 851966,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_mass_growth.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_mass_growth.exe",
+      "directory": false,
+      "bytes": 438634,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_memory.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_memory.exe",
+      "directory": false,
+      "bytes": 649368,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_memory16.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_memory16.exe",
+      "directory": false,
+      "bytes": 651578,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_memory81.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_memory81.exe",
+      "directory": false,
+      "bytes": 670641,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_mixed_atlas.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_mixed_atlas.exe",
+      "directory": false,
+      "bytes": 618972,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_multi_stack.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_multi_stack.exe",
+      "directory": false,
+      "bytes": 440799,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_o2.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_o2.exe",
+      "directory": false,
+      "bytes": 615799,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_partial_asymp.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_partial_asymp.exe",
+      "directory": false,
+      "bytes": 486315,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_pbs_resolver.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_pbs_resolver.exe",
+      "directory": false,
+      "bytes": 872132,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_power_tree_check.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_power_tree_check.exe",
+      "directory": false,
+      "bytes": 807961,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_prior.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_prior.exe",
+      "directory": false,
+      "bytes": 541383,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_range.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_range.exe",
+      "directory": false,
+      "bytes": 584872,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_recall_native.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_recall_native.exe",
+      "directory": false,
+      "bytes": 607385,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_recall.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_recall.exe",
+      "directory": false,
+      "bytes": 356813,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_seventh_resolver.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_seventh_resolver.exe",
+      "directory": false,
+      "bytes": 779330,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_soft_growth.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_soft_growth.exe",
+      "directory": false,
+      "bytes": 422754,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_soft.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_soft.exe",
+      "directory": false,
+      "bytes": 354059,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_stack.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_stack.exe",
+      "directory": false,
+      "bytes": 439227,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_static.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_static.exe",
+      "directory": false,
+      "bytes": 3164538,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_street_clusters.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_street_clusters.exe",
+      "directory": false,
+      "bytes": 730146,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_temperature.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_temperature.exe",
+      "directory": false,
+      "bytes": 377368,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr_touch_decay_test.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr_touch_decay_test.exe",
+      "directory": false,
+      "bytes": 733267,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_mccfr.exe",
+      "new": "agents/cpp_mccfr/bin/stud_mccfr.exe",
+      "directory": false,
+      "bytes": 3407891,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_exact_pbs.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_exact_pbs.exe",
+      "directory": false,
+      "bytes": 301646,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_recursive_pbs.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_recursive_pbs.exe",
+      "directory": false,
+      "bytes": 349872,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_recursive_verify.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_recursive_verify.exe",
+      "directory": false,
+      "bytes": 355501,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_recursive.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_recursive.exe",
+      "directory": false,
+      "bytes": 349872,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_seventh_lbr.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_seventh_lbr.exe",
+      "directory": false,
+      "bytes": 321600,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_seventh_verify.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_seventh_verify.exe",
+      "directory": false,
+      "bytes": 320416,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_seventh_verify2.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_seventh_verify2.exe",
+      "directory": false,
+      "bytes": 320416,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_seventh.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_seventh.exe",
+      "directory": false,
+      "bytes": 319904,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_v7_generate_pbs.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_v7_generate_pbs.exe",
+      "directory": false,
+      "bytes": 270008,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_v7_generate_verify.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_v7_generate_verify.exe",
+      "directory": false,
+      "bytes": 268442,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_rebel_v7_generate.exe",
+      "new": "agents/cpp_mccfr/bin/stud_rebel_v7_generate.exe",
+      "directory": false,
+      "bytes": 271032,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud_regret_upper.exe",
+      "new": "agents/cpp_mccfr/bin/stud_regret_upper.exe",
+      "directory": false,
+      "bytes": 223750,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_compact_smoke.bin",
+      "new": "agents/cpp_mccfr/data/stud5_compact_smoke.bin",
+      "directory": false,
+      "bytes": 12618892,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_hard_stack_10k.bin",
+      "new": "agents/cpp_mccfr/data/stud5_hard_stack_10k.bin",
+      "directory": false,
+      "bytes": 339742342,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_hard_stack_compact_100k.bin",
+      "new": "agents/cpp_mccfr/data/stud5_hard_stack_compact_100k.bin",
+      "directory": false,
+      "bytes": 31496542,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_hard_stack_compact_10k.bin",
+      "new": "agents/cpp_mccfr/data/stud5_hard_stack_compact_10k.bin",
+      "directory": false,
+      "bytes": 23277892,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_hard_stack_compact_1m.bin",
+      "new": "agents/cpp_mccfr/data/stud5_hard_stack_compact_1m.bin",
+      "directory": false,
+      "bytes": 37165492,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_mccfr.exe",
+      "new": "agents/cpp_mccfr/bin/stud5_mccfr.exe",
+      "directory": false,
+      "bytes": 518365,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_smoke_v2.bin",
+      "new": "agents/cpp_mccfr/data/stud5_smoke_v2.bin",
+      "directory": false,
+      "bytes": 5262818,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_smoke_v3.bin",
+      "new": "agents/cpp_mccfr/data/stud5_smoke_v3.bin",
+      "directory": false,
+      "bytes": 5142532,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_smoke_v4.bin",
+      "new": "agents/cpp_mccfr/data/stud5_smoke_v4.bin",
+      "directory": false,
+      "bytes": 39305960,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_smoke.bin",
+      "new": "agents/cpp_mccfr/data/stud5_smoke.bin",
+      "directory": false,
+      "bytes": 6094012,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/stud5_team_lbr.exe",
+      "new": "agents/cpp_mccfr/bin/stud5_team_lbr.exe",
+      "directory": false,
+      "bytes": 555433,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/team_lbr_12k.bin",
+      "new": "agents/cpp_mccfr/data/team_lbr_12k.bin",
+      "directory": false,
+      "bytes": 6442604,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/team_lbr_4k.bin",
+      "new": "agents/cpp_mccfr/data/team_lbr_4k.bin",
+      "directory": false,
+      "bytes": 2289804,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/team_lbr_smoke.bin",
+      "new": "agents/cpp_mccfr/data/team_lbr_smoke.bin",
+      "directory": false,
+      "bytes": 18604,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/team_lbr_tail1_12k.bin",
+      "new": "agents/cpp_mccfr/data/team_lbr_tail1_12k.bin",
+      "directory": false,
+      "bytes": 5332044,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/team_lbr_tail1_4k.bin",
+      "new": "agents/cpp_mccfr/data/team_lbr_tail1_4k.bin",
+      "directory": false,
+      "bytes": 1960364,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_10m_cal20k.txt",
+      "new": "agents/cpp_mccfr/data/temperature_10m_cal20k.txt",
+      "directory": false,
+      "bytes": 659,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_eval_calibrated.json",
+      "new": "agents/cpp_mccfr/data/temperature_eval_calibrated.json",
+      "directory": false,
+      "bytes": 917,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_eval_default.json",
+      "new": "agents/cpp_mccfr/data/temperature_eval_default.json",
+      "directory": false,
+      "bytes": 915,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_eval_hard.json",
+      "new": "agents/cpp_mccfr/data/temperature_eval_hard.json",
+      "directory": false,
+      "bytes": 918,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_smoke.txt",
+      "new": "agents/cpp_mccfr/data/temperature_smoke.txt",
+      "directory": false,
+      "bytes": 622,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_snapshot_adaptive1.txt",
+      "new": "agents/cpp_mccfr/data/temperature_snapshot_adaptive1.txt",
+      "directory": false,
+      "bytes": 713,
+      "sha256": null
+    },
+    {
+      "old": "cpp_mccfr/temperature_snapshot_adaptive2.txt",
+      "new": "agents/cpp_mccfr/data/temperature_snapshot_adaptive2.txt",
+      "directory": false,
+      "bytes": 680,
+      "sha256": null
+    },
+    {
+      "old": "deep_cfr_compact/runs",
+      "new": "agents/deep_cfr/compact/data/runs",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "deep_cfr_compact/deep_cfr_compact_traverse.exe",
+      "new": "agents/deep_cfr/compact/bin/deep_cfr_compact_traverse.exe",
+      "directory": false,
+      "bytes": 888452,
+      "sha256": null
+    },
+    {
+      "old": "online_rebel_stud_leduc/results",
+      "new": "agents/rebel/online_stud_leduc/data/results",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "rebel_7stud_checkpoints/run",
+      "new": "agents/rebel/checkpoint_evaluation/data/run",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "rebel_7stud_checkpoints/generate_v7_hands.exe",
+      "new": "agents/rebel/checkpoint_evaluation/bin/generate_v7_hands.exe",
+      "directory": false,
+      "bytes": 307294,
+      "sha256": null
+    },
+    {
+      "old": "rebel_7stud_checkpoints/stud_rebel_recursive.exe",
+      "new": "agents/rebel/checkpoint_evaluation/bin/stud_rebel_recursive.exe",
+      "directory": false,
+      "bytes": 349872,
+      "sha256": null
+    },
+    {
+      "old": "br_gap_experiment/results",
+      "new": "agents/evaluation/br_gap/data/results",
+      "directory": true,
+      "bytes": null,
+      "sha256": null
+    },
+    {
+      "old": "br_gap_experiment/compare_heuristic_k512.exe",
+      "new": "agents/evaluation/br_gap/bin/compare_heuristic_k512.exe",
+      "directory": false,
+      "bytes": 278409,
+      "sha256": null
+    },
+    {
+      "old": "br_gap_experiment/evaluate_seventh_resolver_gap.exe",
+      "new": "agents/evaluation/br_gap/bin/evaluate_seventh_resolver_gap.exe",
+      "directory": false,
+      "bytes": 269951,
+      "sha256": null
+    },
+    {
+      "old": "state_log.txt",
+      "new": "data/runtime/state_log.txt",
+      "directory": false,
+      "bytes": 30850,
+      "sha256": null
+    },
+    {
+      "old": "web_100m.stderr.log",
+      "new": "data/runtime/web_100m.stderr.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_100m.stdout.log",
+      "new": "data/runtime/web_100m.stdout.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_server_8765.stderr.log",
+      "new": "data/runtime/web_server_8765.stderr.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_server_8765.stdout.log",
+      "new": "data/runtime/web_server_8765.stdout.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_server_8877.stderr.log",
+      "new": "data/runtime/web_server_8877.stderr.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_server_8877.stdout.log",
+      "new": "data/runtime/web_server_8877.stdout.log",
+      "directory": false,
+      "bytes": 0,
+      "sha256": null
+    },
+    {
+      "old": "web_server.pid",
+      "new": "data/runtime/web_server.pid",
+      "directory": false,
+      "bytes": 7,
+      "sha256": null
+    },
+    {
+      "old": "web_state_log.txt",
+      "new": "data/runtime/web_state_log.txt",
+      "directory": false,
+      "bytes": 186517,
+      "sha256": null
+    }
+  ],
+  "version": 1,
+  "date": "2026-09-17",
+  "compatibility": "relative symbolic links"
+}

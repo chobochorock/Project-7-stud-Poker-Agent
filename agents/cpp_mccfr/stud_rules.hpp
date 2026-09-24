@@ -1,0 +1,1 @@
+../../environments/seven_stud/stud_rules.hpp

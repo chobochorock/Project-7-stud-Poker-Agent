@@ -63,15 +63,21 @@ class WebControllerTests(unittest.TestCase):
 
         state = controller.submit_discard("Player_1", 0, 1)
         self.assertEqual(state["waiting"]["player"], "Player_2")
-        player_1 = next(player for player in state["players"] if player["name"] == "Player_1")
+        player_1 = next(
+            player for player in state["players"] if player["name"] == "Player_1"
+        )
         self.assertEqual(player_1["hidden_count"], 4)
         self.assertEqual(player_1["public_cards"], [])
 
         state = controller.submit_discard("Player_2", 0, 1)
         self.assertEqual(state["waiting"]["type"], "bet")
         self.assertTrue(all(player["hidden_count"] == 2 for player in state["players"]))
-        self.assertTrue(all(len(player["public_cards"]) == 3 for player in state["players"]))
-        player_1 = next(player for player in state["players"] if player["name"] == "Player_1")
+        self.assertTrue(
+            all(len(player["public_cards"]) == 3 for player in state["players"])
+        )
+        player_1 = next(
+            player for player in state["players"] if player["name"] == "Player_1"
+        )
         self.assertNotEqual(player_1["hand_name"], "-")
 
         acting_player = state["waiting"]["player"]
@@ -79,7 +85,9 @@ class WebControllerTests(unittest.TestCase):
         action = "CHECK" if "CHECK" in valid_actions else "CALL"
         state = controller.submit_action(acting_player, action)
 
-        self.assertIn(state["phase"], {"betting", "street_start", "showdown", "complete"})
+        self.assertIn(
+            state["phase"], {"betting", "street_start", "showdown", "complete"}
+        )
 
     def test_betting_wait_includes_action_costs_and_priority(self):
         random.seed(11)
@@ -109,7 +117,9 @@ class WebControllerTests(unittest.TestCase):
         self.assertEqual(result["possible_hands"], 903)
         self.assertEqual(result["total_samples"], 903)
         self.assertAlmostEqual(
-            result["win_probability"] + result["tie_probability"] + result["loss_probability"],
+            result["win_probability"]
+            + result["tie_probability"]
+            + result["loss_probability"],
             1.0,
         )
 
@@ -168,12 +178,16 @@ class WebControllerTests(unittest.TestCase):
         random.seed(21)
         controller = WebPokerController()
 
-        first_state = controller.start(["random", "random"], log_file=None, replay_dir=None, game_mode="cash")
+        first_state = controller.start(
+            ["random", "random"], log_file=None, replay_dir=None, game_mode="cash"
+        )
         first_profit = dict(first_state["session"]["cumulative_profit"])
         second_state = controller.start_next_round()
 
         self.assertEqual(second_state["game_mode"], "cash")
-        self.assertEqual(controller.round_start_stacks, {"Player_1": 1000, "Player_2": 1000})
+        self.assertEqual(
+            controller.round_start_stacks, {"Player_1": 1000, "Player_2": 1000}
+        )
         self.assertEqual(sum(first_profit.values()), 0)
         self.assertEqual(sum(second_state["session"]["cumulative_profit"].values()), 0)
         self.assertEqual(second_state["round_number"], 2)
@@ -182,7 +196,9 @@ class WebControllerTests(unittest.TestCase):
         for seed in range(10):
             random.seed(seed)
             controller = WebPokerController()
-            state = controller.start(["random", "random"], log_file=None, replay_dir=None, game_mode="cash")
+            state = controller.start(
+                ["random", "random"], log_file=None, replay_dir=None, game_mode="cash"
+            )
 
             self.assertEqual(sum(state["session"]["final_chips"].values()), 2000)
             self.assertEqual(sum(state["session"]["cumulative_profit"].values()), 0)
@@ -191,7 +207,13 @@ class WebControllerTests(unittest.TestCase):
         random.seed(22)
         controller = WebPokerController()
 
-        state = controller.start(["random", "random"], log_file=None, replay_dir=None, game_mode="ev", ante=1000)
+        state = controller.start(
+            ["random", "random"],
+            log_file=None,
+            replay_dir=None,
+            game_mode="ev",
+            ante=1000,
+        )
 
         self.assertEqual(state["ante"], 1000)
         self.assertEqual(state["effective_stack"], 1_000_000)

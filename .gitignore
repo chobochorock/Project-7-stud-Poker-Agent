@@ -6,3 +6,8 @@ web_state_log.txt
 web_server.pid
 replays/
 models/
+
+# Canonical generated artifacts after the 2026-09-17 layout migration.
+/data/
+/agents/**/data/
+/agents/**/bin/

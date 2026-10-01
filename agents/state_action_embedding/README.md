@@ -157,3 +157,40 @@ from perfect-recall information-set equality. No game rules or earlier runs chan
 [ADDITIVE_OBSERVATION.md](ADDITIVE_OBSERVATION.md) applies frozen atomic-action SGNS
 vectors to cumulative observation targets, fits a current-observation MLP, and
 checks positional controls, visible-information probes and same-endpoint consistency.
+
+## Directional Action Windows
+
+[ACTION_WINDOW.md](ACTION_WINDOW.md) starts with a child-friendly plan and gives
+the six left/right/symmetric window conditions, typed-field encoder, unmasked
+action-type validity metrics, shared frozen probes, and reproducible commands.
+It reuses the low-fold corpus and does not train a policy or regenerate data.
+
+## GRU And Legal Distributions
+
+[GRU_LEGALITY.md](GRU_LEGALITY.md) specifies legal-only KL to uniform, illegal-mass
+penalties, and frozen raw/random/skip-gram inputs to a causal GRU baseline.
+[GRU_EXPLAINED_KO.md](GRU_EXPLAINED_KO.md) explains GRU gates, equations and this
+experiment in Korean. This is rules-supervised prediction, not CFR or poker strength.
+
+## Matched Transformer Comparison
+
+[TRANSFORMER_LEGALITY.md](TRANSFORMER_LEGALITY.md) compares a small causal
+Transformer against the same GRU rules objective, frozen inputs, seeds and event
+budgets. It tests learned rule prediction, not theoretical capacity or poker strength.
+
+## Capacity And Overfitting
+
+[CAPACITY_LEGALITY.md](CAPACITY_LEGALITY.md) tests fourfold model width and
+64-hand overfitting with separate train/validation card-legality curves.
+It keeps the previous objective and frozen inputs, with no new data or policy training.
+
+## All Six Windows
+
+[ALL_WINDOWS_LEGALITY.md](ALL_WINDOWS_LEGALITY.md) extends the matched small/wide
+GRU/Transformer and overfit tests to L1/L2/R1/R2/S2, with preserved raw/S1 references.
+
+## Raw-Input Strategy Learning
+
+[RAW_CFR_PPO.md](RAW_CFR_PPO.md) reuses the 85D raw fields for fresh PPO and neural
+outcome-sampling MCCFR self-play. This is strategy learning, not next-event legality
+prediction; the protocol documents the changed sampler, masking, and evaluation.

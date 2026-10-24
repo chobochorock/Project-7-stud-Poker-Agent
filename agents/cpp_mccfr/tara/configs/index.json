@@ -1,0 +1,4 @@
+{
+  "description": "Weighting j*r for tree j (best weighting in the Leduc example).",
+  "weighting": "index"
+}

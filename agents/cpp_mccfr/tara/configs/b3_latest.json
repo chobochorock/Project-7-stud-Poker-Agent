@@ -1,0 +1,4 @@
+{
+  "description": "B3: only the newest tree (previous trees discarded at each boundary).",
+  "latest_only": true
+}

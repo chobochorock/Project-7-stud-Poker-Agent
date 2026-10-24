@@ -1,5 +1,12 @@
 # C++ MCCFR v3 experiment
 
+Hand-only k-means with remembered card-bucket history, a matched current-bucket
+control, per-hand Local BR-gap, and red/blue rolling bands:
+[`HAND_RECALL.md`](HAND_RECALL.md). The user's original run stopped at 2,439 hands
+on its 5M-state RAM safety limit. Use [`HAND_RECALL_DISK.md`](HAND_RECALL_DISK.md)
+for bounded-memory SQLite storage, lossless migration and automatic resume toward
+1M hands. The 1M run has not been completed.
+
 The 7-stud epoch-weighted LightGBM regret-ensemble comparison with hard-256
 MCCFR, per-hand Local BR-gap estimates, and lossless disk-backed residuals is
 kept separately in [`../lightgbm_regret_ensemble/`](../lightgbm_regret_ensemble/README.md).
@@ -837,3 +844,27 @@ environment/simulation path to reimplement yourself.
 
 See `REGRET_UPPER_BOUND.md` for the T=1 original-information-set
 counterfactual-regret upper-bound estimator and its Monte Carlo limitations.
+
+## Minimal Dynamic Decision Tree
+
+See [dynamic_tree/README.md](dynamic_tree/README.md) for signed MCCFR with
+incremental leaf splits, bounded per-hand regret samples, inherited statistics,
+resumable checkpoints and per-hand Local BR-gap against a fresh hard256 control.
+This heuristic is not the proved CFR+IRA algorithm. Its code is in
+`dynamic_tree/`; generated runs belong in `data/dynamic_tree/`.
+
+## DT Split Ablations
+
+See [dynamic_tree_validated/README.md](dynamic_tree_validated/README.md) for
+action-centered split labels, chronological held-out split validation, and
+matched raw/threshold controls. Training remains signed external MCCFR with
+unlimited splits by default; this is not a CFR+IRA convergence guarantee.
+Code, frozen LBR and recall audits stay in `dynamic_tree_validated/`; generated
+checkpoints, per-hand gaps and reports stay in `data/dynamic_tree_validated/`.
+
+## Initial Twelve-Action Learning
+
+See [h4_ablation/README.md](h4_ablation/README.md) for learning the initial four-card
+discard/reveal choices with frozen DT/k-means betting, a separate H4 Local BR-gap,
+and LBR with the learned initial-choice likelihood. This is H4-only self-play, not
+joint retraining of the full game. Outputs stay in `data/h4_ablation/`.

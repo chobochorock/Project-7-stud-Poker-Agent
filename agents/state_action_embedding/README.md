@@ -1,5 +1,8 @@
 # State-action embedding: forward Skip-gram vs CPC
 
+The raw event-history observation reconstruction / frozen-latent clustering pilot
+is documented in [OBSERVATION_RECONSTRUCTION.md](OBSERVATION_RECONSTRUCTION.md).
+
 The subsequent chance-event / player-only prediction experiment is documented in
 [ACTION2VEC.md](ACTION2VEC.md); its checkpoints and results are separate.
 
@@ -194,3 +197,8 @@ GRU/Transformer and overfit tests to L1/L2/R1/R2/S2, with preserved raw/S1 refer
 [RAW_CFR_PPO.md](RAW_CFR_PPO.md) reuses the 85D raw fields for fresh PPO and neural
 outcome-sampling MCCFR self-play. This is strategy learning, not next-event legality
 prediction; the protocol documents the changed sampler, masking, and evaluation.
+# Initial Card-Set Loss Comparison
+
+50k raw hands, BCE / pairwise ranking / soft-target CE, and matched 9k/45k
+training subsets: [CARD_SET_LOSS.md](CARD_SET_LOSS.md).
+

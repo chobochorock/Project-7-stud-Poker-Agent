@@ -1,0 +1,5 @@
+{
+  "description": "B2: fixed standardized k-means per street on the same 22 features, k=64 matched to the total TARA leaves at 127k (~11,600). Pass --b2-buffer <TARA run of the same seed>/buffer_1.bin.",
+  "mode": "fixed",
+  "clusters": 64
+}

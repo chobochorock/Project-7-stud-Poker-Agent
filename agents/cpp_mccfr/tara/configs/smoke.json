@@ -1,0 +1,9 @@
+{
+  "description": "Quick check (about a minute).",
+  "hands": 3000,
+  "panel_every": 1000,
+  "panel_roots": 16,
+  "checkpoint_every": 500,
+  "leaf_budget": 512,
+  "probe_episodes": 50
+}

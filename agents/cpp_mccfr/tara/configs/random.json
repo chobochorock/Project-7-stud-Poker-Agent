@@ -1,0 +1,4 @@
+{
+  "description": "Control: random splits with the same rows, schedule and leaf allocation (f-RCFR-like).",
+  "partition": "random"
+}

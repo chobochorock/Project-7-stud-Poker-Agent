@@ -1,0 +1,4 @@
+{
+  "description": "B0-sched: TARA's exact machinery (doubling boundaries, pow2 weights, per-forest RM+, sum average) but every forest is the k-means arm's partition. TARA vs B0-sched differs only in the partition.",
+  "mode": "kmeans_sched"
+}

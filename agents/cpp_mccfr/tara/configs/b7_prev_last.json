@@ -1,0 +1,4 @@
+{
+  "description": "prev_scope=last: only the previous tree keeps accumulating; older trees frozen.",
+  "prev_scope": "last"
+}

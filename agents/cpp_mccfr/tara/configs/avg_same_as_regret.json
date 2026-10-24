@@ -1,0 +1,4 @@
+{
+  "description": "Average increments with the regret weights instead of the iteration index.",
+  "avg_weight": "same_as_regret"
+}

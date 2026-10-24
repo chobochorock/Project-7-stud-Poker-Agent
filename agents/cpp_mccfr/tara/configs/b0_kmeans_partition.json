@@ -1,0 +1,4 @@
+{
+  "description": "B0-single: one forest = the co-trained k-means arm's exact partition (betting summary + seat + hard256 atlas cluster) trained with plain RM+ and linear average (no boundary discount). Separates the update rule from the abstraction against the k-means arm.",
+  "mode": "kmeans_partition"
+}

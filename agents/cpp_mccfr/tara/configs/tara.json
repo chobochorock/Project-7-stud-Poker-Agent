@@ -1,0 +1,3 @@
+{
+  "description": "Main TARA: doubling intervals (N0=1000), previous trees 2^(t-1), newest 2^t, all previous trees, linear average."
+}

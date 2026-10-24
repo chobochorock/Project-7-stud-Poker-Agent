@@ -1,0 +1,4 @@
+{
+  "description": "B2: one standardized k-means per street on the same 22 features, fixed from hand 1. Set clusters and b2_buffer (a TARA run's buffer_1.bin) on the command line.",
+  "mode": "fixed"
+}

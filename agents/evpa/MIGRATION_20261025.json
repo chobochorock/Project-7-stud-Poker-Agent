@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-25",
+  "scope": "EVPA mini-stud pilot and its environment/BR test dependencies only",
+  "canonical_workspace": "Project-7-stud-Poker-Agent",
+  "entries": [
+    {
+      "old": "Toy-Card-Game-Agent/agents/evpa",
+      "new": "Project-7-stud-Poker-Agent/agents/evpa",
+      "compatibility_link": "../../Project-7-stud-Poker-Agent/agents/evpa",
+      "files_verified_at_move_including_caches": 211,
+      "bytes_at_move_including_caches": 9539394
+    },
+    {
+      "old": "Toy-Card-Game-Agent/environments/mini_stud",
+      "new": "Project-7-stud-Poker-Agent/environments/mini_stud",
+      "compatibility_link": "../../Project-7-stud-Poker-Agent/environments/mini_stud",
+      "files_verified_at_move_including_caches": 8,
+      "bytes_at_move_including_caches": 123724
+    },
+    {
+      "old": "Toy-Card-Game-Agent/agents/adaptive_buckets/tree_best_response.py",
+      "new": "Project-7-stud-Poker-Agent/agents/adaptive_buckets/tree_best_response.py",
+      "compatibility_link": "../../../Project-7-stud-Poker-Agent/agents/adaptive_buckets/tree_best_response.py",
+      "files_verified_at_move_including_caches": 1,
+      "bytes_at_move_including_caches": 4986
+    }
+  ],
+  "integrity": "Every moved file's SHA256 matched before and after the move, before documentation and test-path edits.",
+  "published_runs": ["pilot_20261017", "smoke_20261017"],
+  "historical_artifact_files": 202,
+  "historical_artifact_bytes": 9426533,
+  "historical_records": "run.json paths/hashes and sources snapshots remain unchanged; .gitattributes disables newline conversion for data.",
+  "code_changes": "Usage/documentation paths and test_game.V3_ROOT only; no solver or game-rule changes.",
+  "checks": {
+    "before_move": "13 EVPA and mini-stud unittest tests passed",
+    "after_move": "The same 13 tests passed from the 7-stud project root",
+    "policy_reload": "168 policies: current/average exploitability and root gap match archived metrics exactly (maximum absolute difference 0.0)",
+    "network_reload": "All 10 EV ensemble members loaded and produced finite predictions",
+    "source_snapshots": "Archived source SHA256 values still match the historical run.json",
+    "isolated_staged_export": "5 EVPA tests passed using only staged runtime files in a separate directory without a neighboring Toy checkout",
+    "legacy_toy_path": "5 EVPA tests passed through the original Toy compatibility links",
+    "git_artifacts": "All 202 staged artifact files match local bytes exactly; new run directories and Python caches are ignored"
+  },
+  "notes": "Old relative links are local compatibility paths outside this Git repository. This repository does not depend on them. Python caches and future run directories are not published. No new research training was performed."
+}

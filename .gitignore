@@ -11,3 +11,9 @@ models/
 /data/
 /agents/**/data/
 /agents/**/bin/
+
+# Published EVPA pilot artifacts; new/large runs stay local by default.
+!/agents/evpa/data/
+/agents/evpa/data/*
+!/agents/evpa/data/pilot_20261017/
+!/agents/evpa/data/smoke_20261017/

@@ -1,0 +1,233 @@
+{
+  "output": "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\data\\pilot_20261017",
+  "teacher_iterations": 3000,
+  "iterations": 1000,
+  "steps": 1500,
+  "members": 10,
+  "hidden": 64,
+  "k": 4,
+  "seed": 17,
+  "cluster_seeds": [
+    11,
+    29,
+    47
+  ],
+  "test_roots": 12,
+  "train_roots": 36,
+  "validation_roots": 12,
+  "delta": 0.01,
+  "status": "completed",
+  "scope": "mini-stud small final street; forced CHECK prefix; full chance catalogue",
+  "algorithm": "simultaneous signed full CFR, uniform-time own-reach average",
+  "deviations": "2x64 MLP by default; no root pruning; bucket-union masks; full masked traversal",
+  "metrics": "original-action exact endgame NashConv/2 and root-actor conditional Local BR-gap in antes",
+  "memory": "raw per-type regrets and teacher labels are off-policy diagnostic/offline storage, counted separately",
+  "sources": {
+    "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\experiment.py": "8cf2b7eddab081b78d9e55eca40fe2831f159012a7a2080faa77a93662a28ef3",
+    "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\endgame.py": "8517e017ad2e361a05411ed0c07161213ca2042d4d9fc02256b40acbd360f88a",
+    "D:\\Experiment\\Toy-Card-Game-Agent\\environments\\mini_stud\\game.py": "413736309b9bed38afaf916a97733c84d99ad7ceadc788c2b7d9e70678965746"
+  },
+  "teacher_seconds": 102.84812699999748,
+  "split": {
+    "train": [
+      40,
+      59,
+      11,
+      43,
+      61,
+      22,
+      50,
+      35,
+      14,
+      69,
+      38,
+      34,
+      32,
+      51,
+      19,
+      46,
+      60,
+      20,
+      30,
+      17,
+      27,
+      26,
+      54,
+      52,
+      23,
+      5,
+      45,
+      66,
+      2,
+      56,
+      7,
+      13,
+      48,
+      28,
+      16,
+      12
+    ],
+    "valid": [
+      18,
+      67,
+      42,
+      36,
+      63,
+      6,
+      25,
+      3,
+      21,
+      9,
+      53,
+      24
+    ],
+    "test": [
+      0,
+      57,
+      37,
+      44,
+      58,
+      4,
+      29,
+      68,
+      70,
+      8,
+      10,
+      31
+    ]
+  },
+  "network_training_seconds": 17.041694599996845,
+  "network_training": [
+    {
+      "member": 0,
+      "seed": 17,
+      "validation_mse": 0.026100488379597664
+    },
+    {
+      "member": 1,
+      "seed": 18,
+      "validation_mse": 0.0333811417222023
+    },
+    {
+      "member": 2,
+      "seed": 19,
+      "validation_mse": 0.023604024201631546
+    },
+    {
+      "member": 3,
+      "seed": 20,
+      "validation_mse": 0.023181313648819923
+    },
+    {
+      "member": 4,
+      "seed": 21,
+      "validation_mse": 0.02943863533437252
+    },
+    {
+      "member": 5,
+      "seed": 22,
+      "validation_mse": 0.03246802091598511
+    },
+    {
+      "member": 6,
+      "seed": 23,
+      "validation_mse": 0.024374613538384438
+    },
+    {
+      "member": 7,
+      "seed": 24,
+      "validation_mse": 0.024337761104106903
+    },
+    {
+      "member": 8,
+      "seed": 25,
+      "validation_mse": 0.022550011053681374
+    },
+    {
+      "member": 9,
+      "seed": 26,
+      "validation_mse": 0.022767726331949234
+    }
+  ],
+  "ev_errors": {
+    "train": {
+      "rmse_pot_units": 0.07142565399457483,
+      "mae_pot_units": 0.036939873595034395,
+      "ensemble_range_coverage": 0.8580228274654267
+    },
+    "validation": {
+      "rmse_pot_units": 0.14188060244542336,
+      "mae_pot_units": 0.07885937853896968,
+      "ensemble_range_coverage": 0.8095571503588307
+    },
+    "test": {
+      "rmse_pot_units": 0.1629411406216934,
+      "mae_pot_units": 0.09540212719496464,
+      "ensemble_range_coverage": 0.7851851851851852
+    }
+  },
+  "summary": {
+    "card_kmeans": {
+      "average_exploitability": 0.05235654760574617,
+      "current_exploitability": 0.08310810694673999,
+      "average_root_local_gap": 0.009728686760817031,
+      "bucket_rows": 38.333333333333336,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 1717.3333333333333,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.6039001722088465
+    },
+    "ev_network": {
+      "average_exploitability": 0.020094752756969633,
+      "current_exploitability": 0.04135955120697595,
+      "average_root_local_gap": 0.005189302120480694,
+      "bucket_rows": 38.333333333333336,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 1717.3333333333333,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.5584955611076212
+    },
+    "ev_network_pruned": {
+      "average_exploitability": 0.02657152363617901,
+      "current_exploitability": 0.05629209774409939,
+      "average_root_local_gap": 0.010453805833694754,
+      "bucket_rows": 38.333333333333336,
+      "retained_fraction": 0.7625551922646995,
+      "policy_table_bytes": 1717.3333333333333,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.5581067805728203
+    },
+    "ev_oracle": {
+      "average_exploitability": 0.014020512110748581,
+      "current_exploitability": 0.05617037854364464,
+      "average_root_local_gap": 0.004138440247774742,
+      "bucket_rows": 36.97222222222222,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 1667.5555555555557,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.5727648833346595
+    },
+    "ev_prune_only": {
+      "average_exploitability": 0.005463008773500262,
+      "current_exploitability": 0.05554310286385895,
+      "average_root_local_gap": 0.0012813961416905393,
+      "bucket_rows": 56.75,
+      "retained_fraction": 0.7511851865159209,
+      "policy_table_bytes": 2528.0,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.539079499979683
+    },
+    "exact": {
+      "average_exploitability": 0.0023420746744813744,
+      "current_exploitability": 0.0367453890764451,
+      "average_root_local_gap": 0.0017092858658859505,
+      "bucket_rows": 56.75,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 2528.0,
+      "diagnostic_bytes": 1264.0,
+      "training_seconds": 0.5417400166813119
+    }
+  },
+  "elapsed_seconds": 234.22769600000174,
+  "root_mean_definition": "unweighted mean over held-out public roots and clustering seeds; not a confidence interval"
+}

@@ -1,0 +1,56 @@
+{
+  "exact": {
+    "paired_difference_vs_card_kmeans": -0.0500144729312648,
+    "paired_bootstrap_95_interval": [
+      -0.11045665977446356,
+      -0.007915193055846858
+    ],
+    "roots_better_than_card_kmeans": 5,
+    "roots": 12
+  },
+  "card_kmeans": {
+    "paired_difference_vs_card_kmeans": 0.0,
+    "paired_bootstrap_95_interval": [
+      0.0,
+      0.0
+    ],
+    "roots_better_than_card_kmeans": 0,
+    "roots": 12
+  },
+  "ev_oracle": {
+    "paired_difference_vs_card_kmeans": -0.038336035494997596,
+    "paired_bootstrap_95_interval": [
+      -0.08672522846513657,
+      -0.00579692415896034
+    ],
+    "roots_better_than_card_kmeans": 5,
+    "roots": 12
+  },
+  "ev_network": {
+    "paired_difference_vs_card_kmeans": -0.03226179484877653,
+    "paired_bootstrap_95_interval": [
+      -0.07876981162556472,
+      -0.004548627058025684
+    ],
+    "roots_better_than_card_kmeans": 5,
+    "roots": 12
+  },
+  "ev_network_pruned": {
+    "paired_difference_vs_card_kmeans": -0.025785023969567156,
+    "paired_bootstrap_95_interval": [
+      -0.07359780761212617,
+      0.0028768526288791684
+    ],
+    "roots_better_than_card_kmeans": 7,
+    "roots": 12
+  },
+  "ev_prune_only": {
+    "paired_difference_vs_card_kmeans": -0.046893538832245917,
+    "paired_bootstrap_95_interval": [
+      -0.10788415294038797,
+      -0.004036104915916995
+    ],
+    "roots_better_than_card_kmeans": 8,
+    "roots": 12
+  }
+}

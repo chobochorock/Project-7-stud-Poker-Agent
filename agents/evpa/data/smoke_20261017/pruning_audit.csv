@@ -1,0 +1,13 @@
+root,arm,seed,reference_best_excluded_fraction
+50,card_kmeans,11,0.0
+50,ev_oracle,11,0.0
+50,ev_network,11,0.0
+50,ev_network_pruned,11,0.022988505747126436
+50,exact,11,0.0
+50,ev_prune_only,11,0.10344827586206896
+35,card_kmeans,11,0.0
+35,ev_oracle,11,0.0
+35,ev_network,11,0.0
+35,ev_network_pruned,11,0.036036036036036036
+35,exact,11,0.0
+35,ev_prune_only,11,0.11711711711711711

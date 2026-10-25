@@ -1,0 +1,2 @@
+# Preserve experiment provenance hashes and exported artifacts byte-for-byte.
+agents/evpa/data/** -text

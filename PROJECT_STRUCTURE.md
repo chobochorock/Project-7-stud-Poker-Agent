@@ -7,6 +7,9 @@
 | 폴더 | 내용과 읽기 시작점 |
 |---|---|
 | `environments/seven_stud/` | Python `poker_env.py`, 공유 C++ `stud_rules.hpp` |
+| `environments/mini_stud/` | 정확한 열거가 가능한 축소 7-stud 환경 및 규칙 테스트 |
+| `agents/evpa/` | EVPA 구성 요소 mini-stud 실험. [실행법](agents/evpa/README.md), 모델·결과는 `data/` |
+| `agents/adaptive_buckets/tree_best_response.py` | mini-stud 테스트가 사용하는 NumPy exact 정보집합 BR 평가기 |
 | `agents/common/` | `base.py`, hand-range 계산 |
 | `agents/baselines/` | human, heuristic, HA1 |
 | `agents/tabular_rl/` | 기존 `learning_agent.py` 및 JSON checkpoint |
@@ -55,5 +58,7 @@ C++ 현재 소스 빌드 및 self-test:
 기존 바이너리는 보존했다. 새 검증 바이너리는 별도 이름이다. C++ 환경 header는 기존 상수/행동 ID 선언 뒤 namespace 안에 include하며, 기존 include 진입점은 링크로 유지한다. 대형 solver 전체를 새 클래스 체계로 재작성하지 않았다.
 
 ## 저장과 관리
+
+2026-10-25: Toy 작업 공간의 EVPA mini-stud 실험, 환경 및 필요한 BR 평가기를 이 저장소로 옮겼다. 기존 Toy 경로에는 로컬 상대 symbolic link를 남겼으며, 이 저장소 단독 checkout으로도 EVPA 실행 및 테스트가 가능하다. 상세 내역은 [이동 기록](agents/evpa/MIGRATION_20261025.json)에 있다. 완료된 EVPA pilot/smoke 두 실행만 코드와 함께 Git에 보관하며 다른 신규 `data/` 실행은 계속 무시한다.
 
 새 `data/`, `bin/`은 `.gitignore`에 추가했다. 파일을 Git에 대량 추가하기 전에 기존 dirty worktree 및 이동 내역을 직접 검토한다. 링크를 지원하지 않는 압축/복사/checkout에서는 호환 경로가 깨질 수 있으므로 symlink 지원을 확인한다. 새 환경/agent 작업은 정식 위치에 작성하고, 생성 결과는 소스와 섞지 않는다.

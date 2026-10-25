@@ -1,0 +1,139 @@
+{
+  "output": "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\data\\smoke_20261017",
+  "teacher_iterations": 100,
+  "iterations": 20,
+  "steps": 10,
+  "members": 2,
+  "hidden": 64,
+  "k": 2,
+  "seed": 17,
+  "cluster_seeds": [
+    11
+  ],
+  "test_roots": 2,
+  "train_roots": 4,
+  "validation_roots": 2,
+  "delta": 0.01,
+  "status": "completed",
+  "scope": "mini-stud small final street; forced CHECK prefix; full chance catalogue",
+  "algorithm": "simultaneous signed full CFR, uniform-time own-reach average",
+  "deviations": "2x64 MLP by default; no root pruning; bucket-union masks; full masked traversal",
+  "metrics": "original-action exact endgame NashConv/2 and root-actor conditional Local BR-gap in antes",
+  "memory": "raw per-type regrets and teacher labels are off-policy diagnostic/offline storage, counted separately",
+  "sources": {
+    "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\experiment.py": "8cf2b7eddab081b78d9e55eca40fe2831f159012a7a2080faa77a93662a28ef3",
+    "D:\\Experiment\\Toy-Card-Game-Agent\\agents\\evpa\\endgame.py": "8517e017ad2e361a05411ed0c07161213ca2042d4d9fc02256b40acbd360f88a",
+    "D:\\Experiment\\Toy-Card-Game-Agent\\environments\\mini_stud\\game.py": "413736309b9bed38afaf916a97733c84d99ad7ceadc788c2b7d9e70678965746"
+  },
+  "teacher_seconds": 0.7455981000020984,
+  "split": {
+    "train": [
+      40,
+      59,
+      11,
+      43
+    ],
+    "valid": [
+      61,
+      22
+    ],
+    "test": [
+      50,
+      35
+    ]
+  },
+  "network_training_seconds": 3.0306930000006105,
+  "network_training": [
+    {
+      "member": 0,
+      "seed": 17,
+      "validation_mse": 0.16902557015419006
+    },
+    {
+      "member": 1,
+      "seed": 18,
+      "validation_mse": 0.15981332957744598
+    }
+  ],
+  "ev_errors": {
+    "train": {
+      "rmse_pot_units": 0.37190163697828915,
+      "mae_pot_units": 0.33374917064111037,
+      "ensemble_range_coverage": 0.034482758620689655
+    },
+    "validation": {
+      "rmse_pot_units": 0.4031813783714011,
+      "mae_pot_units": 0.3641747480827002,
+      "ensemble_range_coverage": 0.0239880059970015
+    },
+    "test": {
+      "rmse_pot_units": 0.41010096052270184,
+      "mae_pot_units": 0.35980620127229207,
+      "ensemble_range_coverage": 0.02631578947368421
+    }
+  },
+  "summary": {
+    "card_kmeans": {
+      "average_exploitability": 0.3389735560923207,
+      "current_exploitability": 0.3327902820469847,
+      "average_root_local_gap": 0.24458191248553027,
+      "bucket_rows": 20.0,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 896.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.017018050002661766
+    },
+    "ev_network": {
+      "average_exploitability": 0.3705885174833812,
+      "current_exploitability": 0.38757497758504783,
+      "average_root_local_gap": 0.2980474614787095,
+      "bucket_rows": 20.0,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 896.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.01733779999995022
+    },
+    "ev_network_pruned": {
+      "average_exploitability": 0.3474076869102534,
+      "current_exploitability": 0.37974676761124937,
+      "average_root_local_gap": 0.23956266364581336,
+      "bucket_rows": 20.0,
+      "retained_fraction": 0.9025000000000001,
+      "policy_table_bytes": 896.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.013238300001830794
+    },
+    "ev_oracle": {
+      "average_exploitability": 0.2719397221893066,
+      "current_exploitability": 0.4703790055928956,
+      "average_root_local_gap": 0.14433747939318226,
+      "bucket_rows": 20.0,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 896.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.017407549999916228
+    },
+    "ev_prune_only": {
+      "average_exploitability": 0.1868784241994138,
+      "current_exploitability": 0.28994622896382394,
+      "average_root_local_gap": 0.0961255703410662,
+      "bucket_rows": 99.0,
+      "retained_fraction": 0.7845833333333334,
+      "policy_table_bytes": 4320.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.01186305001101573
+    },
+    "exact": {
+      "average_exploitability": 0.09670530612854925,
+      "current_exploitability": 0.14690672340399846,
+      "average_root_local_gap": 0.038667446978837235,
+      "bucket_rows": 99.0,
+      "retained_fraction": 1.0,
+      "policy_table_bytes": 4320.0,
+      "diagnostic_bytes": 2160.0,
+      "training_seconds": 0.01161989998217905
+    }
+  },
+  "elapsed_seconds": 6.262437299999874,
+  "root_mean_definition": "unweighted mean over held-out public roots and clustering seeds; not a confidence interval"
+}

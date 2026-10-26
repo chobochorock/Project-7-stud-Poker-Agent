@@ -46,7 +46,8 @@ vector<int32_t> players, info, degree, edges, counts, owner, bucket;
 vector<int64_t> start;
 vector<double> prob, util;
 int nI, B;
-vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp;
+vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
+double ex_weight = 0;
 mt19937_64 rng;
 
 inline void strategy(int b, int n, double* s) {
@@ -79,6 +80,33 @@ double full(int h, double p0, double p1, double pc, double weight) {
         S[b * W + a] += weight * own * s[a]; Strue[I * W + a] += weight * own * s[a];
     }
     mass[I] += cf;
+    return node;
+}
+
+// Diagnostic only (never used by the split rule): exact instantaneous counterfactual regrets of every original
+// infoset under the current lifted strategy, added to the window sums ExW (factor) and to the cumulative
+// linear-weighted sums ExC (wfactor). Called every --exact-every iterations, so window sums are time-subsampled.
+double exact(int h, double p0, double p1, double pc, double factor, double wfactor) {
+    int pl = players[h];
+    if (pl == TERMINAL) return util[h];
+    int64_t e = start[h]; int d = degree[h];
+    if (pl == CHANCE) {
+        double v = 0;
+        for (int k = 0; k < d; ++k) v += prob[e + k] * exact(edges[e + k], p0, p1, pc * prob[e + k], factor, wfactor);
+        return v;
+    }
+    int I = info[h];
+    double s[W], v[W], node = 0;
+    strategy(bucket[I], d, s);
+    for (int a = 0; a < d; ++a) {
+        v[a] = pl == 0 ? exact(edges[e + a], p0 * s[a], p1, pc, factor, wfactor) : exact(edges[e + a], p0, p1 * s[a], pc, factor, wfactor);
+        node += s[a] * v[a];
+    }
+    double sign = pl == 0 ? 1.0 : -1.0, cf = (pl == 0 ? p1 : p0) * pc;
+    for (int a = 0; a < d; ++a) {
+        double r = sign * (v[a] - node) * cf;
+        ExW[I * W + a] += factor * r; ExC[I * W + a] += wfactor * r;
+    }
     return node;
 }
 
@@ -140,7 +168,7 @@ inline double psi(const double* x, int n) {
 
 int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
-                            {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}};
+                            {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -154,15 +182,20 @@ int main(int argc, char** argv) {
     long long T = stoll(opt["--iters"]), L = stoll(opt["--epoch0"]);
     double tol = stod(opt["--tol"]), z = stod(opt["--z"]);
     bool split = opt["--split"] == "cum";
+    long long exact_every = stoll(opt["--exact-every"]);
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0);
-    Strue.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
+    Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
-    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds\n");
+    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl\n");
     auto t0 = chrono::steady_clock::now();
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
     while (t < T) {
         ++t;
         double weight = (double)t;  // linear averaging
+        if (exact_every > 0 && t % exact_every == 0) {
+            exact(0, 1, 1, 1, (double)exact_every, (double)exact_every * weight);
+            ex_weight += (double)exact_every * weight;
+        }
         if (mode == "full") { full(0, 1, 1, 1, weight); apply_regrets(); }
         else for (int p = 0; p < 2; ++p) { es(0, p, weight); apply_regrets(); }
         if (t != epoch_end && t != T) continue;
@@ -176,6 +209,19 @@ int main(int argc, char** argv) {
         vector<int> bcount(B, 0);
         for (int I = 0; I < nI; ++I) bcount[bucket[I]] = counts[I];
         for (int b = 0; b < B; ++b) Cw += psi(&bsum[(size_t)b * W], bcount[b]);
+        // exact (time-subsampled) window L/C/H on the partition used during this epoch, and the cumulative
+        // bound exploitability(linear average) <= sum_I psi(sum_t t r_t(I)) / (2 sum_t t)
+        double eL = 0, eC = 0, eCum = 0;
+        if (exact_every > 0) {
+            vector<double> esum((size_t)B * W, 0.0);
+            for (int I = 0; I < nI; ++I) {
+                eL += psi(&ExW[(size_t)I * W], counts[I]);
+                eCum += psi(&ExC[(size_t)I * W], counts[I]);
+                for (int a = 0; a < counts[I]; ++a) esum[(size_t)bucket[I] * W + a] += ExW[(size_t)I * W + a];
+            }
+            for (int b = 0; b < B; ++b) eC += psi(&esum[(size_t)b * W], bcount[b]);
+            fill(ExW.begin(), ExW.end(), 0);
+        }
         int splits = 0;
         if (split) {
             vector<int> label(nI, -1);
@@ -215,7 +261,8 @@ int main(int argc, char** argv) {
         save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
         double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
         double len = (double)(t - epoch_start);
-        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);
+        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
+                eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0);
         fflush(log);
         fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
                 k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);

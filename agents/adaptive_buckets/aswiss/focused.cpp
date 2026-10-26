@@ -4,7 +4,7 @@
 // Build: g++ -O3 -std=c++17 focused.cpp -o focused
 // Run:   ./focused --tree DIR --buckets FILE --iters T --epoch0 L0 --test normal|hoeffding|bernstein
 //                  [--z 2] [--delta 0.05] [--probe-prob 0.02] [--probe-m 4] [--reservoir 32] [--min-support 2]
-//                  [--audit 0.05] [--bottom-up 1] [--exact-every 100] [--seed 1] --out OUTDIR
+//                  [--audit 0.05] [--bottom-up 1] [--exact-every 100] [--inherit 0|1] [--seed 1] --out OUTDIR
 // Input/output formats are those of aswiss.cpp (export.py arrays; log.csv and policy_{bucket,true,current}_k.bin).
 //
 // Training is external-sampling MCCFR+ on bucket tables, exactly as in aswiss.cpp. Per bucket status:
@@ -172,9 +172,10 @@ int main(int argc, char** argv) {
     map<string, string> opt{{"--iters", "2560000"}, {"--epoch0", "10000"}, {"--test", "normal"}, {"--z", "2"},
                             {"--delta", "0.05"}, {"--probe-prob", "0.02"}, {"--probe-m", "4"}, {"--reservoir", "32"},
                             {"--min-support", "2"}, {"--audit", "0.05"}, {"--bottom-up", "1"}, {"--exact-every", "100"},
-                            {"--seed", "1"}};
+                            {"--seed", "1"}, {"--inherit", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), test = opt["--test"];
+    bool inherit = opt["--inherit"] == "1";  // children copy the parent's regrets and average numerators
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
     start = load<int64_t>(dir + "/start.bin"); degree = load<int32_t>(dir + "/degree.bin");
     edges = load<int32_t>(dir + "/edges.bin"); prob = load<double>(dir + "/prob.bin");
@@ -264,7 +265,7 @@ int main(int argc, char** argv) {
             for (int b = 0; b < B; ++b) if (flag[b] && bstreet[b] != deepest) flag[b] = 0;
         }
         // 3) split decide buckets by label; build new ids and statuses
-        map<pair<int, int>, int> child; vector<int> next(nI), keep, nstatus;
+        map<pair<int, int>, int> child; vector<int> next(nI), keep, parent, nstatus;
         int B2 = 0, splits = 0;
         for (int I = 0; I < nI; ++I) {
             int b = bucket[I], lab = (status[b] == 1 && seen[b].size() > 1) ? label[I] : -2;
@@ -272,7 +273,7 @@ int main(int argc, char** argv) {
             auto it = child.find(key);
             if (it == child.end()) {
                 it = child.emplace(key, B2++).first;
-                keep.push_back(lab == -2 ? b : -1);
+                keep.push_back(lab == -2 ? b : -1); parent.push_back(b);
                 nstatus.push_back(lab == -2 && status[b] == 0 && (flag[b] || aud[b]) ? 1 : 0);
             }
             next[I] = it->second;
@@ -284,8 +285,8 @@ int main(int argc, char** argv) {
         for (auto& r : reservoir) reservoir_entries += r.size();
         vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
         for (int nb = 0; nb < B2; ++nb)
-            if (keep[nb] >= 0)
-                for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+            if (keep[nb] >= 0 || inherit)
+                for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[parent[nb] * W + a]; S2[nb * W + a] = S[parent[nb] * W + a]; }
         bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0);
         status = nstatus; reservoir.assign(B, {}); reservoir_seen.assign(B, 0);
         for (int I : tracked) { Pn[I] = 0; for (int a = 0; a < W; ++a) { Ps[(size_t)I * W + a] = 0; Pq[(size_t)I * W + a] = 0; } }

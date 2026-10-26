@@ -49,6 +49,8 @@ int nI, B;
 vector<double> Q, S, Strue, Rtmp, Bw;          // bucket tables, per-traversal bucket regrets, window bucket sums
 vector<double> Rw, Sq, mass;                   // per-infoset window sums of sampled regrets (labels)
 vector<double> ExK, ExG, ExC;                  // exact diagnostics: since checkpoint, since window start, cumulative
+vector<int> touched;                           // buckets with pending regrets in Rtmp (apply_regrets visits only these)
+vector<char> dirty;
 double ex_weight = 0;
 mt19937_64 rng;
 uniform_real_distribution<double> U(0, 1);
@@ -58,6 +60,7 @@ inline void strategy(int b, int n, double* s) {
     for (int a = 0; a < n; ++a) total += max(Q[b * W + a], 0.0);
     for (int a = 0; a < n; ++a) s[a] = total > 0 ? max(Q[b * W + a], 0.0) / total : 1.0 / n;
 }
+inline void touch(int b) { if (!dirty[b]) { dirty[b] = 1; touched.push_back(b); } }
 inline int sample(const double* p, int d) {
     double x = U(rng), acc = 0;
     int k = 0;
@@ -75,6 +78,7 @@ double es(int h, int p, double weight) {
     if (pl == p) {
         double v[W], node = 0;
         for (int a = 0; a < d; ++a) { v[a] = es(edges[e + a], p, weight); node += s[a] * v[a]; }
+        touch(b);
         for (int a = 0; a < d; ++a) {
             double r = v[a] - node;
             Rtmp[b * W + a] += r; Rw[I * W + a] += r; Sq[I * W + a] += r * r;
@@ -108,8 +112,13 @@ double exact(int h, double p0, double p1, double pc, double factor, double wfact
     }
     return node;
 }
+// Untouched buckets have Rtmp = 0 and Q >= 0, so skipping them leaves every table bit-identical.
 void apply_regrets() {
-    for (int i = 0; i < B * W; ++i) { Bw[i] += Rtmp[i]; Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
+    for (int b : touched) {
+        for (int i = b * W; i < (b + 1) * W; ++i) { Bw[i] += Rtmp[i]; Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
+        dirty[b] = 0;
+    }
+    touched.clear();
 }
 vector<double> policy(const vector<double>& num, bool lifted) {
     vector<double> out((size_t)nI * W, 0.0);
@@ -157,7 +166,7 @@ int main(int argc, char** argv) {
     long long exact_every = stoll(opt["--exact-every"]), next_ckpt = stoll(opt["--checkpoint0"]), ckpt_len = next_ckpt;
     double eps = stod(opt["--eps"]), z = stod(opt["--z"]), delta0 = stod(opt["--delta"]);
     bool inherit = opt["--inherit"] == "1";
-    Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); Bw.assign((size_t)B * W, 0);
+    Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); Bw.assign((size_t)B * W, 0); dirty.assign(B, 0);
     Strue.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     ExK.assign((size_t)nI * W, 0); ExG.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0);
     FILE* logf = fopen((out + "/log.csv").c_str(), "w");
@@ -219,7 +228,7 @@ int main(int argc, char** argv) {
                     for (int nb = 0; nb < B2; ++nb)
                         if (keep[nb] >= 0 || inherit)
                             for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[parent[nb] * W + a]; S2[nb * W + a] = S[parent[nb] * W + a]; }
-                    bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); Bw.assign((size_t)B * W, 0);
+                    bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); Bw.assign((size_t)B * W, 0); dirty.assign(B, 0);
                     fill(Rw.begin(), Rw.end(), 0); fill(Sq.begin(), Sq.end(), 0); fill(mass.begin(), mass.end(), 0);
                     fill(ExG.begin(), ExG.end(), 0);
                     window_start = t; splits_total += splits;

@@ -47,6 +47,8 @@ vector<int64_t> start;
 vector<double> prob, util, delta_range;
 int nI, B;
 vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
+vector<int> touched;                           // buckets with pending regrets in Rtmp (apply_regrets visits only these)
+vector<char> dirty;
 double ex_weight = 0;
 mt19937_64 rng;
 
@@ -55,6 +57,7 @@ inline void strategy(int b, int n, double* s) {
     for (int a = 0; a < n; ++a) total += max(Q[b * W + a], 0.0);
     for (int a = 0; a < n; ++a) s[a] = total > 0 ? max(Q[b * W + a], 0.0) / total : 1.0 / n;
 }
+inline void touch(int b) { if (!dirty[b]) { dirty[b] = 1; touched.push_back(b); } }
 
 // Simultaneous full-tree CFR+: returns player-0 value; p0/p1 own reaches, pc chance reach.
 double full(int h, double p0, double p1, double pc, double weight) {
@@ -74,6 +77,7 @@ double full(int h, double p0, double p1, double pc, double weight) {
         node += s[a] * v[a];
     }
     double sign = pl == 0 ? 1.0 : -1.0, cf = (pl == 0 ? p1 : p0) * pc, own = pl == 0 ? p0 : p1;
+    touch(b);
     for (int a = 0; a < d; ++a) {
         double r = sign * (v[a] - node) * cf;
         Rtmp[b * W + a] += r; Rw[I * W + a] += r;
@@ -127,6 +131,7 @@ double es(int h, int p, double weight) {
     if (pl == p) {
         double v[W], node = 0;
         for (int a = 0; a < d; ++a) { v[a] = es(edges[e + a], p, weight); node += s[a] * v[a]; }
+        touch(b);
         for (int a = 0; a < d; ++a) {
             double r = v[a] - node;
             Rtmp[b * W + a] += r; Rw[I * W + a] += r; Sq[I * W + a] += r * r;
@@ -141,8 +146,13 @@ double es(int h, int p, double weight) {
     return es(edges[e + k], p, weight);
 }
 
+// Untouched buckets have Rtmp = 0 and Q >= 0, so skipping them leaves every table bit-identical.
 void apply_regrets() {
-    for (int i = 0; i < B * W; ++i) { Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
+    for (int b : touched) {
+        for (int i = b * W; i < (b + 1) * W; ++i) { Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
+        dirty[b] = 0;
+    }
+    touched.clear();
 }
 
 vector<double> policy(const vector<double>& num, bool lifted) {
@@ -187,7 +197,7 @@ int main(int argc, char** argv) {
     string test = opt["--test"];
     double delta0 = stod(opt["--delta"]);
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
-    Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0);
+    Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
     fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl\n");
@@ -274,7 +284,7 @@ int main(int argc, char** argv) {
             // checkpoint policies BEFORE applying the split (they describe the epoch just finished)
             save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
             save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
-            bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0);
+            bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
         } else {
             save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
             save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());

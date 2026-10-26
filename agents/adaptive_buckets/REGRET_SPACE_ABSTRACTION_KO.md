@@ -22,6 +22,7 @@
    - 같은 Lloyd 반복을 이 공간과 D_ψ로 하면 목적함수가 정확히 H가 된다.
 3. 분할만 하는 epoch 방식을 쓴다. 추적 표본으로 H를 추정하고, 추정값이 역치를 넘으면 분할한다. 그러면 거리 학습의 품질과 무관하게 거의 확실히 수렴한다. **[스케치]**
    - 거리 학습은 정확성을 정하지 않는다. 효율(최종 bucket 수, 마지막 분할 시점)을 정한다.
+   - **선행 연구와 겹침:** 샘플링 없이 전체 순회하는 경우(p = 1)는 CFR+IRA(Čermák et al. 2020)의 refinement 수렴 보장과 본질적으로 같다. CFR+IRA는 감시 정보집합별 regret 역치로 판정하고, 여기서는 bucket 단위 H로 판정한다는 차이만 있다. 새로 주장할 수 있는 부분은 샘플링·추적 표본 판정, H의 정확한 기하, 학습 사상을 통한 일반화이며, 이것도 체계적인 문헌 조사 전에는 확정하지 않는다.
 4. 학습 거리의 목표는 feature에서 ρ로 가는 예측기 f다. 예측 오차가 H를 늘리는 양은 최대 `4 Σ_I W_I ‖ρ̂_I − ρ_I‖∞`다. **[증명]** 이 식이 "regret을 보고 거리를 역전파로 조정"할 때의 손실을 정해 준다.
 5. bucket 표에 저장된 평균전략은 일반적으로 이론의 σ̄와 다르다. 자기 abstract 경로를 기억하는 조건이 있으면 같아진다. **[증명]**
 6. `H/T → 0`은 수렴의 충분조건이지 필요조건이 아니다. **[증명, 반례 수치 확인]**
@@ -231,7 +232,7 @@ H_B ≤ Σ W_I ‖ρ_I − ρ̄_B‖∞ ≤ W_B max_{I,J∈B} ‖ρ_I − ρ_J�
   NashConv(σ̄^{(k)}) ≤ Σ_i [ N_i Δ̃ √(|A|(t_k+L_k)) + ‖M‖ + H_i^{(k)} ] / L_k → 0
   ```
 
-- **특수한 경우:** p = 1이고 샘플링이 없으면 결정론적 결과가 되고, Paley–Zygmund가 필요 없다.
+- **특수한 경우:** p = 1이고 샘플링이 없으면 결정론적 결과가 되고, Paley–Zygmund가 필요 없다. 이 경우는 CFR+IRA(Čermák et al. 2020)의 결과와 본질적으로 같다(§0 참고).
 
 주의:
 - **속도:** 마지막 분할 시점 t*에 대한 상계가 없다. 그래서 수렴 속도를 보장하지 못한다.
@@ -353,3 +354,6 @@ Theorem 4.2의 수렴은 거리의 품질과 무관하다. 거리가 정하는 �
 - Brown, Sandholm. Regret Transfer and Parameter Optimization. AAAI 2014. / Simultaneous Abstraction and Equilibrium Finding in Games. IJCAI 2015.
 - Tammelin. Solving Large Imperfect Information Games Using CFR+. 2014.
 - Banerjee, Merugu, Dhillon, Ghosh. Clustering with Bregman Divergences. JMLR 2005.
+- Čermák, Lisý, Bošanský. Automated Construction of Bounded-Loss Imperfect-Recall Abstractions in Extensive-Form Games. IJCAI 2020 / arXiv 1803.05392 (FPIRA, CFR+IRA).
+- Waugh, Morrill, Bagnell, Bowling. Solving Games with Functional Regret Estimation. AAAI 2015 (RCFR).
+- Embedding CFR (arXiv 2511.12083, AAAI 2026): 사전학습한 정보집합 임베딩 공간에서 regret과 전략을 갱신한다. 원문 세부 내용은 아직 확인하지 않았다.

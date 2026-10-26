@@ -29,6 +29,7 @@ groups, prevs = {}, {}
 steps = [time_step(i) for i in range(len(t.keys))]
 coarse = np.array([groups.setdefault(s, len(groups)) for s, _ in steps], dtype=np.int32)
 coarse.tofile(f"{out}/bucket_timestep.bin")
+np.array([s[1] for s, _ in steps], dtype=np.int32).tofile(f"{out}/street.bin")  # betting street, -1 for choices
 for i in range(len(t.keys)):
     assert counts[i] == counts[np.flatnonzero(coarse == coarse[i])[0]]
 # card features for the k-means baseline: own known ranks, own public ranks, opponent public ranks, previous-street betting

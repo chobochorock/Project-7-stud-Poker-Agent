@@ -52,6 +52,21 @@ for i, key in enumerate(t.keys):
     prev_onehot[prev_ids.setdefault(steps[i][1], len(prev_ids)) % 10] = 1
     feats.append(rank_counts(own_all) + rank_counts(own_pub) + rank_counts(opp_pub) + prev_onehot)
 np.array(feats, dtype=np.float64).tofile(f"{out}/features.bin")
+# payoff range per information set: max over its histories of (max - min terminal utility below the node).
+# Preorder puts children after their parent, so one reverse sweep gives subtree min/max.
+players_a = np.frombuffer(t.players, dtype=np.int32); start_a = np.frombuffer(t.edge_start, dtype=np.int64)
+deg_a = np.frombuffer(t.degree, dtype=np.int32); edges_a = np.frombuffer(t.edges, dtype=np.int32)
+util_a = np.frombuffer(t.utility, dtype=np.float64)
+lo = util_a.copy(); hi = util_a.copy()
+for node in range(len(players_a) - 1, -1, -1):
+    if deg_a[node]:
+        kids = edges_a[start_a[node]:start_a[node] + deg_a[node]]
+        lo[node] = lo[kids].min(); hi[node] = hi[kids].max()
+info_a = np.frombuffer(t.information, dtype=np.int32)
+delta = np.zeros(len(t.keys))
+dec = np.flatnonzero(info_a >= 0)
+np.maximum.at(delta, info_a[dec], hi[dec] - lo[dec])
+delta.tofile(f"{out}/delta.bin")
 meta = dict(preset=preset, nodes=len(t.players), edges=len(t.edges), infosets=len(t.keys), width=t.max_children,
-            timestep_buckets=len(groups), feature_dim=len(feats[0]), previous_histories=len(prev_ids))
+            timestep_buckets=len(groups), feature_dim=len(feats[0]), previous_histories=len(prev_ids), delta_range=[float(delta.min()), float(delta.max())])
 json.dump(meta, open(f"{out}/meta.json", "w"), indent=1); print(meta)

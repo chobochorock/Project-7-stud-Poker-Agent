@@ -44,7 +44,7 @@ template <class T> void save(const string& path, const vector<T>& data) {
 constexpr int W = 4, TERMINAL = -2, CHANCE = -1;
 vector<int32_t> players, info, degree, edges, counts, owner, bucket;
 vector<int64_t> start;
-vector<double> prob, util;
+vector<double> prob, util, delta_range;
 int nI, B;
 vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
 double ex_weight = 0;
@@ -168,7 +168,8 @@ inline double psi(const double* x, int n) {
 
 int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
-                            {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"}};
+                            {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
+                            {"--test", "normal"}, {"--delta", "0.05"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -183,6 +184,9 @@ int main(int argc, char** argv) {
     double tol = stod(opt["--tol"]), z = stod(opt["--z"]);
     bool split = opt["--split"] == "cum";
     long long exact_every = stoll(opt["--exact-every"]);
+    string test = opt["--test"];
+    double delta0 = stod(opt["--delta"]);
+    if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0);
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
@@ -229,7 +233,24 @@ int main(int argc, char** argv) {
                 if (mass[I] <= 0) continue;
                 const double* r = &Rw[(size_t)I * W]; int n = counts[I], best = 0;
                 for (int a = 1; a < n; ++a) if (r[a] > r[best]) best = a;
-                bool positive = mode == "full" ? r[best] / mass[I] > tol : r[best] - z * sqrt(Sq[(size_t)I * W + best]) > 0;
+                // es label tests on the window sum of sampled regrets for action `best` (n = visits this epoch):
+                //   normal:    R > z * sqrt(sum r^2)                                  (CLT approximation)
+                //   hoeffding: R > Delta_I * sqrt(2 n ln(1/d_k))                      (Azuma, increments in [-Delta_I, Delta_I])
+                //   bernstein: R > sqrt(2 n V ln(2/d_k)) + 7 w n ln(2/d_k) / (3(n-1)) (empirical Bernstein, w = 2 Delta_I)
+                // with d_k = delta / (k+1)^2, summable over epochs.
+                bool positive;
+                if (mode == "full") positive = r[best] / mass[I] > tol;
+                else if (test == "normal") positive = r[best] - z * sqrt(Sq[(size_t)I * W + best]) > 0;
+                else {
+                    double n = mass[I], dk = delta0 / ((k + 1.0) * (k + 1.0)), thr;
+                    if (test == "hoeffding") thr = delta_range[I] * sqrt(2 * n * std::log(1 / dk));
+                    else {
+                        if (n < 2) continue;
+                        double mean = r[best] / n, var = max(0.0, (Sq[(size_t)I * W + best] - n * mean * mean) / (n - 1));
+                        thr = sqrt(2 * n * var * std::log(2 / dk)) + 7 * (2 * delta_range[I]) * n * std::log(2 / dk) / (3 * (n - 1));
+                    }
+                    positive = r[best] > thr;
+                }
                 if (positive) label[I] = best;
             }
             vector<map<int, int>> seen(B);

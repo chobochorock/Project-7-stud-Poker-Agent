@@ -187,6 +187,12 @@ Bernstein 역치는 원래 독립 표본용이다. 마팅게일 표본에 쓰려
 - **H가 다시 커진다:** 분할 직후에는 정확 H가 떨어진다. 그러나 다음 판정까지 수렴하는 동안 다시 커진다(예: ε=0.1에서 분할 직후 1.99, 다음 판정 전 4.41). 분할 직후 같은 쪽에 묶인 멤버들이 이후 학습에서 다시 갈라지는 것으로 보인다.
 - **ε=0.1의 비단조성:** ε=0.1이 0.05보다 나쁘게 나온 것은 seed 하나의 변동일 가능성이 있다.
 
+![학습 곡선과 H](results_gated_small_seed1_curves.png)
+
+![bucket 수 대비 exploitability, 샘플 C와 정확 C](results_gated_small_seed1_frontier.png)
+
+그림은 `python plot_gated.py RUNS_DIR results_gated_small_seed1`로 다시 그린다.
+
 ## 비교 조건과 남은 차이
 
 - **평가:** 모든 방식은 같은 정확한 BR 평가기, 같은 seed, 같은 반복 수로 평가했다. LBR이나 Local BR-gap이 아니다.

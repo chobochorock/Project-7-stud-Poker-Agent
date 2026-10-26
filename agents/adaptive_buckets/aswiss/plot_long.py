@@ -3,7 +3,7 @@
 Usage: python plot_long.py RUNS_DIR OUT_PREFIX [OLD_RUNS_DIR]
 Writes OUT_PREFIX_curves.png (average/current exact exploitability, ratios to the card k-means baseline at the
 shared checkpoints, exact H, bucket counts; all log-log) and OUT_PREFIX_frontier.png (exploitability vs buckets at
-2.55M and 40.95M iterations; sampled vs exact C at every gate pass). OLD_RUNS_DIR supplies the 2.55M-only
+2.55M and 40.95M iterations; sampled/exact C at the gate passes that split). OLD_RUNS_DIR supplies the 2.55M-only
 focused-probing reference, which was not rerun.
 """
 import csv, os, sys
@@ -101,12 +101,10 @@ for run, label, colour, marker, ls, _, kind in SERIES:
         continue
     x[0] = 1e4  # start of the log axis
     ax.step(x, y, where="post", color=colour, lw=2, ls=ls)
-    ax.plot(x[1:-1] if kind == "gate" else x[1:], y[1:-1] if kind == "gate" else y[1:], ls="none", marker=marker, ms=6,
-            color=colour, mec=SURFACE, mew=1.2)
 for value, text in ((51114, "perfect recall 51,114"), (7051, "k-means 7,051"), (40, "time step 40")):
     ax.axhline(value, color=MUTED, lw=1, ls=(0, (4, 3)))
     ax.text(1.1e4, value * 1.08, text, color=MUTED, fontsize=8, va="bottom")
-style(ax, "Bucket count (markers: gate splits / epoch ends)", XLABEL, "buckets")
+style(ax, "Bucket count (each step: a gate split or an epoch-end split)", XLABEL, "buckets")
 ax.set_xlim(8e3, 6e7); ax.set_ylim(25, 2e5)
 fig.suptitle(f"mini-stud small, seed 1, exact evaluation on the full tree (not LBR, not sampled). {M(LAST + 10000)} iterations; "
              "the truncated last 10k epoch is excluded. k-means K fixed in hindsight (matched to the 2.55M ungated run, capped at 7,051 distinct card features).",
@@ -149,20 +147,18 @@ if OLD and os.path.exists(f"{OLD}/fc_normal_inherit_nobu_s1/exploitability.csv")
     note = f"\nnot rerun: focused probing, normal (2.55M only: {fb:,} b, {fe:.3f})"
 fig.text(0.02, 0.015, "\n".join(key) + note, fontsize=7.6, color=INK, va="bottom", ha="left", family="monospace")
 ax = axes[1]
-lo, hi = 1.0, 0.0
 for e, colour in [*EPS_RAMP.items(), ("bern", GATED_BERN)]:
     run = f"gt_normal_eps{e}_s1" if e != "bern" else "gt_bernstein_eps0.1_s1"
-    d = table(run, "decisions.csv")
-    xs, ys = [float(r["exact_C_per_iter"]) for r in d], [float(r["sampled_C_per_iter"]) for r in d]
-    lo, hi = min([lo] + xs + ys), max([hi] + xs + ys)
+    d = table(run, "decisions.csv"); s = [r for r in d if int(r["splits"]) > 0]
+    xs, ys = [int(r["buckets_before"]) for r in s], [float(r["sampled_C_per_iter"]) / float(r["exact_C_per_iter"]) for r in s]
     name = f"normal {e}" if e != "bern" else "Bernstein 0.1"
-    ax.scatter(xs, ys, s=36, color=colour, marker="^" if e != "bern" else "v", edgecolors=SURFACE, linewidths=0.6, alpha=0.85, zorder=3,
-               label=f"gated, {name} ({len(d)} gate pass{'es' if len(d) != 1 else ''}, {sum(int(r['splits']) > 0 for r in d)} with splits)")
-lo, hi = lo / 1.2, hi * 1.2
-ax.plot([lo, hi], [lo, hi], color=MUTED, lw=1, ls=(0, (4, 3)), label="sampled = exact")
-style(ax, "Bucket-level C at gate passes", "exact C per iteration (diagnostic full traversal)", "sampled C per iteration (used by the gate)")
-ax.set_xlim(lo, hi); ax.set_ylim(lo, hi); ax.legend(frameon=False, fontsize=8, loc="upper left")
+    ax.scatter(xs, ys, s=40, color=colour, marker="^" if e != "bern" else "v", edgecolors=SURFACE, linewidths=1, zorder=3,
+               label=f"gated, {name} ({len(s)} of {len(d)} gate passes split)")
+ax.axhline(1, color=MUTED, lw=1, ls=(0, (4, 3)), label="sampled = exact")
+style(ax, "Sampled / exact bucket-level C at gate passes that split", "buckets at the gate pass",
+      "sampled C / exact C (same window)")
+ax.set_yscale("linear"); ax.set_xlim(25, 6e4); ax.legend(frameon=False, fontsize=8, loc="lower right")
 fig.suptitle(f"mini-stud small, seed 1. Left: hollow = {M(MID)}, filled = {M(LAST)} iterations, same run joined by a line. "
-             "Right: every gate pass of the gated runs.", color=MUTED, fontsize=8.5, x=0.01, ha="left")
+             "Right: exact C from the diagnostic full traversal every 100 iterations.", color=MUTED, fontsize=8.5, x=0.01, ha="left")
 fig.tight_layout(rect=(0, 0.24, 1, 0.95)); fig.savefig(f"{OUT}_frontier.png", dpi=150)
 print("saved")

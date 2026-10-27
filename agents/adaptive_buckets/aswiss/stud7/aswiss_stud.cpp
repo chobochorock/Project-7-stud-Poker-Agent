@@ -2,7 +2,8 @@
 //
 // Build: g++ -O3 -std=c++17 aswiss_stud.cpp -o aswiss_stud
 // Train: ./aswiss_stud train --partition aswiss|atom|context [--atlas ATLAS] --roots N [--epoch0 10000]
-//                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] --out DIR
+//                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] [--checkpoint-every 1000000]
+//                            [--snapshot-every 0] [--curve-every 10000] --out DIR      (rerun to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
@@ -21,7 +22,11 @@
 //            from a copy of the parent's regret and average tables); no merges.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
-// Each epoch end writes snapshot_k.bin (partition + tables used during that epoch, before any split).
+// Each epoch end writes snapshot_k.bin (partition + tables used during that epoch, before any split);
+// --snapshot-every adds snapshot_rN.bin; snapshots.csv indexes both. curve.csv records the sampled BR-gap proxy of
+// the current policy on the training deals (free by-product of the traversal) every --curve-every roots.
+// Resumable: checkpoint.bin (full training state, RNGs, output lengths) is written every --checkpoint-every roots,
+// at epoch ends, on Ctrl+C/SIGTERM and when OUT/STOP appears; rerunning the same command resumes bit-exactly.
 // Eval: paired Policy-LBR (the engine's approximate exploitability lower bound, ante/hand; same deals,
 // LBR seed and particles for every snapshot) and the sampled BR-gap proxy on fixed deals (sum over the
 // traverser's visited information states of max_a Q - sum_a pi Q under external sampling, mean of both
@@ -29,6 +34,8 @@
 #define STUD_MCCFR_NO_MAIN
 #include "../../../cpp_mccfr/stud_mccfr.cpp"
 
+#include <csignal>
+#include <filesystem>
 #include <map>
 #include <set>
 
@@ -187,15 +194,20 @@ public:
         Bucket& bucket = buckets_[b];  // re-read: the recursion may have grown buckets_
         if (!bucket.dirty) { bucket.dirty = true; touched_.push_back(b); }
         AtomStats* st = track ? &atoms_[atom] : nullptr;
+        double best = -std::numeric_limits<double>::infinity();
         for (int a = 0; a < A; ++a) {
             if (!(mask & (1u << a))) continue;
             const double r = v[a] - node;
             bucket.pending[a] += r;
+            best = std::max(best, r);
             if (st) { st->r[a] += r; st->sq[a] += r * r; }
         }
         if (st) st->visits += 1;
+        traversal_gap_ += best;  // diagnostic only: sampled BR-gap proxy of the current policy on training deals
         return node;
     }
+    // sum of max_a Q - E_sigma Q over the traverser's nodes since the last call (ante units)
+    double take_traversal_gap() { const double g = traversal_gap_; traversal_gap_ = 0; return g; }
     // Untouched buckets have no pending regret, so only touched ones are updated (RM+).
     void apply_regrets() {
         for (uint32_t b : touched_) {
@@ -273,6 +285,46 @@ public:
         return splits;
     }
     void clear_window() { atoms_.clear(); }
+
+    // Full training state for checkpoints: every bucket record (ids unchanged), the partition and the atom window.
+    // Pending regrets are always zero between roots, so they are not stored.
+    void save_state(std::ofstream& out) const {
+        put(out, static_cast<uint8_t>(partition_));
+        put(out, static_cast<uint64_t>(contexts_.size()));
+        for (const auto& [ctx, c] : contexts_) {
+            put_key(out, ctx); put(out, c.rest);
+            put(out, static_cast<uint32_t>(c.member.size()));
+            for (const auto& [cluster, b] : c.member) { put(out, cluster); put(out, b); }
+        }
+        put(out, static_cast<uint64_t>(buckets_.size()));
+        for (const auto& b : buckets_) { put(out, b.q); put(out, b.s); }
+        put(out, static_cast<uint64_t>(atoms_.size()));
+        for (const auto& [atom, st] : atoms_) { put_key(out, atom); put(out, st.r); put(out, st.sq); put(out, st.visits); }
+    }
+    void load_state(std::ifstream& in) {
+        uint8_t partition; get(in, partition);
+        if (partition != static_cast<uint8_t>(partition_)) throw std::runtime_error("checkpoint partition differs");
+        uint64_t n; get(in, n);
+        contexts_.clear();
+        for (uint64_t i = 0; i < n; ++i) {
+            const InfoKey ctx = get_key(in);
+            Context c; get(in, c.rest);
+            uint32_t m; get(in, m);
+            for (uint32_t j = 0; j < m; ++j) { uint16_t cluster; uint32_t b; get(in, cluster); get(in, b); c.member[cluster] = b; }
+            contexts_[ctx] = std::move(c);
+        }
+        get(in, n);
+        buckets_.assign(n, Bucket{});
+        for (auto& b : buckets_) { get(in, b.q); get(in, b.s); }
+        get(in, n);
+        atoms_.clear();
+        for (uint64_t i = 0; i < n; ++i) {
+            const InfoKey atom = get_key(in);
+            AtomStats st; get(in, st.r); get(in, st.sq); get(in, st.visits);
+            atoms_[atom] = st;
+        }
+        touched_.clear();
+    }
 
     // live buckets (referenced by a partition) per street 5/6/7
     std::array<size_t, 3> live_buckets() const {
@@ -366,6 +418,7 @@ private:
     std::vector<Bucket> buckets_;
     std::vector<uint32_t> touched_;
     std::unordered_map<InfoKey, AtomStats, InfoKeyHash> atoms_;
+    double traversal_gap_ = 0;
 };
 
 // frozen snapshot as a PolicyLBR target
@@ -433,51 +486,180 @@ double peak_rss_mb() {  // VmHWM of this process (Linux); -1 elsewhere
     return -1;
 }
 
+volatile std::sig_atomic_t g_stop = 0;
+void request_stop(int) { g_stop = 1; }
+
+uint64_t file_size_or_zero(const std::string& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    return ec ? 0 : static_cast<uint64_t>(size);
+}
+void put_string(std::ofstream& out, const std::string& s) { put(out, static_cast<uint64_t>(s.size())); out.write(s.data(), s.size()); }
+std::string get_string(std::ifstream& in) { uint64_t n; get(in, n); std::string s(n, '\0'); in.read(s.data(), n); return s; }
+template <class R> std::string rng_text(const R& r) { std::ostringstream o; o << r; return o.str(); }
+template <class R> void rng_load(R& r, const std::string& text) { std::istringstream i(text); i >> r; }
+
+// Loop counters, RNG states and output-file lengths stored with every checkpoint.
+struct LoopState {
+    uint64_t t = 0, k = 0, L = 0, epoch_start = 0, curve_roots = 0;
+    double seconds = 0, curve_sum = 0, curve_sq = 0;
+    std::string deal_rng, rng;
+    uint64_t log_bytes = 0, index_bytes = 0, curve_bytes = 0;
+};
+
+// Checkpoint = config line + loop state + model state, written to checkpoint.tmp and renamed over checkpoint.bin.
+// On load, checkpoint.bin is preferred; a complete checkpoint.tmp left by an interrupted rename is also accepted.
+void write_checkpoint(const std::string& out, const std::string& config, const LoopState& s, const Model& model) {
+    const std::string tmp = out + "/checkpoint.tmp", path = out + "/checkpoint.bin";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        f.write("ASWCKPT1", 8);
+        put_string(f, config);
+        for (uint64_t v : {s.t, s.k, s.L, s.epoch_start, s.curve_roots, s.log_bytes, s.index_bytes, s.curve_bytes}) put(f, v);
+        for (double v : {s.seconds, s.curve_sum, s.curve_sq}) put(f, v);
+        put_string(f, s.deal_rng); put_string(f, s.rng);
+        model.save_state(f);
+        f.write("ASWEND01", 8);
+        if (!f) throw std::runtime_error("failed to write " + tmp);
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {  // Windows cannot rename over an existing file
+        std::filesystem::remove(path, ec);
+        std::filesystem::rename(tmp, path);
+    }
+}
+bool read_checkpoint(const std::string& file, const std::string& config, LoopState& s, Model& model) {
+    std::ifstream f(file, std::ios::binary);
+    if (!f) return false;
+    char magic[8];
+    f.read(magic, 8);
+    if (!f || std::string(magic, 8) != "ASWCKPT1") return false;
+    const std::string stored = get_string(f);
+    if (stored != config)
+        throw std::runtime_error("checkpoint was written with different settings:\n  " + stored + "\nnow:\n  " + config);
+    for (uint64_t* v : {&s.t, &s.k, &s.L, &s.epoch_start, &s.curve_roots, &s.log_bytes, &s.index_bytes, &s.curve_bytes}) get(f, *v);
+    for (double* v : {&s.seconds, &s.curve_sum, &s.curve_sq}) get(f, *v);
+    s.deal_rng = get_string(f); s.rng = get_string(f);
+    model.load_state(f);
+    f.read(magic, 8);
+    return f && std::string(magic, 8) == "ASWEND01";
+}
+
 int train(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
-                                {"--inherit", "0"}});
+                                {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
+                                {"--curve-every", "10000"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     Model model(partition, atlas.get());
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
-    const uint64_t T = std::stoull(o["--roots"]);
-    uint64_t L = std::stoull(o["--epoch0"]);
+    std::filesystem::create_directories(out);
+    const uint64_t T = std::stoull(o["--roots"]), epoch0 = std::stoull(o["--epoch0"]);
+    const uint64_t checkpoint_every = std::stoull(o["--checkpoint-every"]), snapshot_every = std::stoull(o["--snapshot-every"]);
+    const uint64_t curve_every = std::stoull(o["--curve-every"]);
     const double z = std::stod(o["--z"]);
+    const bool inherit = o["--inherit"] == "1";
+    // settings that must match on resume (--roots may grow; output cadences may change)
+    std::ostringstream cfg;
+    cfg << "partition=" << o["--partition"] << ";atlas=" << std::filesystem::path(o["--atlas"]).filename().string() << ":"
+        << file_size_or_zero(o["--atlas"]) << ";epoch0=" << epoch0 << ";z=" << o["--z"] << ";inherit=" << o["--inherit"]
+        << ";seed=" << o["--seed"];
+    const std::string config = cfg.str();
+
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
-    std::ofstream log(out + "/log.csv");
-    log << "epoch,roots,contexts,buckets_after,buckets5,buckets6,buckets7,splits,atoms,L_per_root,C_per_root,H_per_root,"
-           "seconds,power_cache_hits,power_cache_misses,bucket_records,bucket_mb,atom_window_mb,partition_mb,"
-           "peak_rss_mb\n";
+    const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
+    LoopState s;
+    s.L = epoch0;
+    const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model) ||
+                         read_checkpoint(out + "/checkpoint.tmp", config, s, model);
+    if (resumed) {
+        rng_load(deal_rng, s.deal_rng); rng_load(rng, s.rng);
+        // drop rows written after the checkpoint; they are reproduced exactly by the replay
+        std::filesystem::resize_file(log_path, s.log_bytes);
+        std::filesystem::resize_file(index_path, s.index_bytes);
+        std::filesystem::resize_file(curve_path, s.curve_bytes);
+        std::cerr << "resumed at root " << s.t << " (epoch " << s.k << ")\n";
+    } else {
+        if (std::filesystem::exists(log_path))
+            throw std::runtime_error(out + " already has log.csv but no usable checkpoint; use a new --out");
+        std::ofstream(log_path) << "epoch,roots,contexts,buckets_after,buckets5,buckets6,buckets7,splits,atoms,L_per_root,"
+                                   "C_per_root,H_per_root,seconds,power_cache_hits,power_cache_misses,bucket_records,"
+                                   "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb\n";
+        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
+    }
+    std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
+    // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
+    const std::string stop_file = out + "/STOP";
+    std::filesystem::remove(stop_file);
+    std::signal(SIGINT, request_stop);
+    std::signal(SIGTERM, request_stop);
+#ifdef SIGBREAK
+    std::signal(SIGBREAK, request_stop);
+#endif
     const auto t0 = std::chrono::steady_clock::now();
-    uint64_t t = 0, epoch_end = L, epoch_start = 0;
-    int k = 0;
+    const double base_seconds = s.seconds;
+    auto elapsed = [&] { return base_seconds + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+    auto live_total = [&] { const auto l = model.live_buckets(); return l[0] + l[1] + l[2]; };
+    auto checkpoint = [&] {
+        log.flush(); index.flush(); curve.flush();
+        s.seconds = elapsed(); s.deal_rng = rng_text(deal_rng); s.rng = rng_text(rng);
+        s.log_bytes = file_size_or_zero(log_path); s.index_bytes = file_size_or_zero(index_path);
+        s.curve_bytes = file_size_or_zero(curve_path);
+        write_checkpoint(out, config, s, model);
+    };
     const bool track = partition == Partition::Aswiss;
-    while (t < T) {
-        ++t;
+    uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
+    while (s.t < T) {
+        ++s.t;
         auto deck = fresh_deck();
         std::shuffle(deck.begin(), deck.end(), deal_rng);
         const State root = sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte);
-        for (int p = 0; p < 2; ++p) { model.traverse(root, p, static_cast<double>(t), rng, track); model.apply_regrets(); }
-        if (t != epoch_end && t != T) continue;
-        model.save(out + "/snapshot_" + std::to_string(k) + ".bin");
-        const auto w = model.window();
-        const auto mb = model.table_megabytes();  // measured before the window is cleared
-        const int splits = partition == Partition::Aswiss ? model.split(z, o["--inherit"] == "1") : 0;
-        model.clear_window();
-        const auto live = model.live_buckets();
-        const double len = static_cast<double>(t - epoch_start), secs =
-            std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-        const auto cache = atlas ? atlas->assignment_cache_stats() : PowerCacheStats{};
-        log << k << ',' << t << ',' << model.contexts() << ',' << live[0] + live[1] + live[2] << ',' << live[0] << ','
-            << live[1] << ',' << live[2] << ',' << splits << ',' << w.atoms << ',' << w.L / len << ',' << w.C / len << ','
-            << (w.L - w.C) / len << ',' << secs << ',' << cache.hits << ',' << cache.misses << ','
-            << model.bucket_records() << ',' << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << peak_rss_mb() << '\n'
-            << std::flush;
-        std::cerr << "epoch " << k << " roots=" << t << " buckets_after=" << live[0] + live[1] + live[2]
-                  << " splits=" << splits << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
-        epoch_start = t; ++k; L *= 2; epoch_end = std::min(T, t + L);
+        for (int p = 0; p < 2; ++p) { model.traverse(root, p, static_cast<double>(s.t), rng, track); model.apply_regrets(); }
+        const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root
+        s.curve_sum += gap; s.curve_sq += gap * gap; ++s.curve_roots;
+        if (curve_every && s.t % curve_every == 0) {
+            const double n = s.curve_roots, mean = s.curve_sum / n;
+            const double se = n > 1 ? std::sqrt(std::max(0.0, (s.curve_sq - n * mean * mean) / (n - 1) / n)) : 0.0;
+            curve << s.t << ',' << elapsed() << ',' << s.curve_roots << ',' << mean << ',' << se << ',' << live_total() << ','
+                  << peak_rss_mb() << '\n';
+            s.curve_sum = s.curve_sq = 0; s.curve_roots = 0;
+        }
+        const bool epoch_done = s.t == epoch_end;
+        if (snapshot_every && s.t % snapshot_every == 0 && !epoch_done) {
+            const std::string file = "snapshot_r" + std::to_string(s.t) + ".bin";
+            model.save(out + "/" + file);
+            index << file << ',' << s.t << ",periodic," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
+        }
+        if (epoch_done) {
+            const std::string file = "snapshot_" + std::to_string(s.k) + ".bin";
+            model.save(out + "/" + file);
+            index << file << ',' << s.t << ",epoch," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
+            const auto w = model.window();
+            const auto mb = model.table_megabytes();  // measured before the window is cleared
+            const int splits = partition == Partition::Aswiss ? model.split(z, inherit) : 0;
+            model.clear_window();
+            const auto live = model.live_buckets();
+            const double len = static_cast<double>(s.t - s.epoch_start), secs = elapsed();
+            const auto cache = atlas ? atlas->assignment_cache_stats() : PowerCacheStats{};
+            log << s.k << ',' << s.t << ',' << model.contexts() << ',' << live[0] + live[1] + live[2] << ',' << live[0] << ','
+                << live[1] << ',' << live[2] << ',' << splits << ',' << w.atoms << ',' << w.L / len << ',' << w.C / len << ','
+                << (w.L - w.C) / len << ',' << secs << ',' << cache.hits << ',' << cache.misses << ','
+                << model.bucket_records() << ',' << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << peak_rss_mb() << '\n';
+            std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
+                      << " splits=" << splits << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
+            s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = std::min(T, s.t + s.L);
+        }
+        if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();
+        if (s.t % 1000 == 0 && std::filesystem::exists(stop_file)) g_stop = 1;
+        if (g_stop) {
+            checkpoint();
+            std::cerr << "stopped at root " << s.t << "; checkpoint saved, rerun the same command to resume\n";
+            return 130;
+        }
     }
     return 0;
 }

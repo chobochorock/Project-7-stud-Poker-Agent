@@ -159,6 +159,59 @@ ASWISS에서 각 비교군을 뺀 차이다(같은 deal로 짝지은 95% 구간)
 - **축과 지표:** LBR은 음수가 될 수 있어 선형 축에 그렸다. BR-gap 근사치만 log 축이다. 어느 것도 exploitability와 같은 것으로 다루지 않았다.
 - **외삽:** 교차점이나 기울기로 외삽하지 않았다.
 
+## 100M 실행 (중단 후 재개 가능)
+
+`run_100m.ps1`(Windows)와 `run_100m.sh`(Linux/WSL)는 비교군을 하나씩 별도 프로세스(코어 1개)로 돌린다.
+- 기본 비교군은 ASWISS와 k-means 256 / 341 / 512 / 1024다.
+- k-means 341은 10M에서 맞춘 K다. 100M에서 ASWISS의 bucket 수가 어디까지 늘지 모르므로 512로 범위를 넓혀 두었다.
+- atlas 네 개는 `atlas/`에 들어 있다. 모두 heuristic ε=0.2 self-play 10만 핸드, seed 37301로 만들었다.
+
+```powershell
+# 저장소 루트에서 실행
+$s = "agents\adaptive_buckets\aswiss\stud7\run_100m.ps1"
+powershell -ExecutionPolicy Bypass -File $s                  # 시작 (멈춘 뒤 같은 명령을 다시 실행하면 이어서 진행)
+powershell -ExecutionPolicy Bypass -File $s -Action status   # 진행 상황
+powershell -ExecutionPolicy Bypass -File $s -Action stop     # checkpoint 저장 후 종료
+powershell -ExecutionPolicy Bypass -File $s -Action eval     # 새 스냅숏 평가 (LBR 2,000 pair, 이미 한 것은 건너뜀)
+powershell -ExecutionPolicy Bypass -File $s -Action final    # 가장 최근 스냅숏, LBR 20,000 pair
+powershell -ExecutionPolicy Bypass -File $s -Action plot     # 그림
+# 옵션: -Roots 100000000 -Seed 1 -Arms aswiss,k256,k341,k512,k1024 -Workers 4 -Out <폴더> -Python python
+```
+
+```bash
+bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop | eval | final | plot
+# 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON
+```
+
+**중단과 재개**
+- **checkpoint 저장 시점:** 다음 네 경우에 학습 상태 전체를 `checkpoint.bin`에 원자적으로 저장한다.
+  - 1M roots마다
+  - epoch 끝마다
+  - Ctrl+C나 종료 신호를 받았을 때
+  - 출력 폴더에 `STOP` 파일이 생겼을 때 (`-Action stop`이 만든다)
+- **저장 내용:** bucket 표, 분할 지도, 원자 구간 통계, 두 RNG 상태, 출력 파일 길이다.
+- **재개:** 같은 명령을 다시 실행하면 checkpoint 이후 출력 줄을 잘라 내고 그 시점부터 이어 간다.
+- **재현성 확인:** SIGINT, `kill -9`, STOP으로 끊고 이어 간 실행의 스냅숏이 끊지 않은 실행과 비트 단위로 같았다. 끊지 않은 실행은 10M 원래 실행의 스냅숏과도 같았다.
+- **강제 종료:** 작업 관리자 강제 종료나 정전이면 마지막 checkpoint 이후(최대 1M roots)만 다시 계산한다.
+- **이미 끝난 비교군:** 다시 실행해도 바로 끝난다.
+- **실행 중인 비교군:** `.pid`로 확인해 건너뛴다.
+- **학습량 늘리기:** `--roots`를 늘려 재개할 수 있다. 다만 마지막 epoch가 잘린 지점에서 이미 분할했다면, 처음부터 더 길게 돌린 실행과 epoch 경계가 다르다.
+
+**저장되는 그래프용 자료** (비교군 폴더마다)
+
+| 파일 | 내용 |
+|---|---|
+| `log.csv` | epoch마다: bucket 수(street별), 분할 수, 원자 수, 샘플 L/C/H, 시간, 메모리(최대 RSS, 표 크기) |
+| `curve.csv` | 10만 roots마다: 학습 deal에서 잰 현재 정책의 샘플 BR-gap 근사치(평균, 표준오차), bucket 수, 최대 RSS. 학습 순회의 부산물이라 추가 계산이 없다 |
+| `snapshots.csv`, `snapshot_*.bin` | epoch 끝과 500만 roots마다의 정책 스냅숏(현재 표 + 평균 표 + 분할) |
+| `eval.jsonl`, `lbr_pairs_*.csv` | `eval`/`final` 결과. 스냅숏 × 평균/현재 정책의 LBR(평균, 표준오차)과 BR-gap 근사치, 그리고 pair별 원자료(짝지은 차이 계산용) |
+| `results_100m_s1_*.png` | `plot`이 그리는 그림: LBR과 근사치 학습 곡선, k-means 256 대비 차이와 비율, bucket 수, `curve.csv` 곡선, bucket 수 대비 LBR |
+
+**규모 추정** (이 환경 기준: 4개 병렬, 10M에 2–2.5시간)
+- **시간:** 100M에 비교군당 약 22–25시간이다. 평가는 2,000 pair에 약 2분, 20,000 pair에 약 20분이다.
+- **디스크:** 스냅숏이 비교군당 약 27개라 전체 약 1.5 GB다(k-means 1024는 개당 약 20 MB). checkpoint는 비교군당 수십 MB이고 덮어쓴다.
+- **메모리:** 비교군당 약 110–160 MB(10M 측정값)다. 100M에서는 bucket 기록이 늘어나는 만큼 조금 커진다.
+
 ## 실행
 
 ```bash

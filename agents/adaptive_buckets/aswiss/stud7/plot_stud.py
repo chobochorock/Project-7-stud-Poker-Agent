@@ -75,6 +75,7 @@ def paired(run, row, base_row, tag=""):
 data = {run: load(run, "eval.jsonl") for run, *_ in SERIES}
 final = {run: load(run, "eval_final.jsonl") for run, *_ in SERIES}
 off_scale = {run for run, *_ in SERIES if data[run] and max(data[run].values(), key=lambda r: r["roots"])["lbr_ante"] > OFF_SCALE_LBR}
+learned_h4 = any(r.get("h4") == "learned" for rows in data.values() for r in rows.values())
 base_by_roots = {(r["roots"], r["policy"]): r for r in data.get(BASELINE, {}).values()}
 final_base = {(r["roots"], r["policy"]): r for r in final.get(BASELINE, {}).values()}
 
@@ -136,7 +137,9 @@ for run, label, colour, marker, ls in SERIES:
     log = list(csv.DictReader(open(f"{R}/{run}/log.csv")))
     ax.step([1e4] + [int(r["roots"]) for r in log], [int(log[0]["contexts"])] + [int(r["buckets_after"]) for r in log],
             where="post", color=colour, lw=2, ls=ls)
-styled(ax, "Live buckets (steps: epoch ends)", "buckets (log)", True)
+    if learned_h4 and "h4_buckets_after" in log[0]:  # thin: the 4th-street (12-action) table
+        ax.step([int(r["roots"]) for r in log], [int(r["h4_buckets_after"]) for r in log], where="post", color=colour, lw=1, ls=":")
+styled(ax, "Live buckets (steps: epoch ends)" + ("; thin dotted: 4th-street table" if learned_h4 else ""), "buckets (log)", True)
 ax = axes[2, 2]
 have_curve = False
 for run, label, colour, marker, ls in SERIES:
@@ -152,8 +155,10 @@ if have_curve:
 else:
     ax.axis("off")
 notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for run in sorted(off_scale)] + [
-    "Heads-up 7-stud, rules v3, 5th-7th street, heuristic H4, ante 1000. Same trainer for every arm "
-    "(external-sampling MCCFR+, linear averaging).",
+    ("Heads-up 7-stud, rules v3, 5th-7th street with the 4th-street discard/reveal (12 actions) learned by both seats, "
+     "ante 1000; the LBR attacker keeps the heuristic H4 and its hidden-card prior uses the target's learned H4."
+     if learned_h4 else "Heads-up 7-stud, rules v3, 5th-7th street, heuristic H4, ante 1000.")
+    + " Same trainer for every arm (external-sampling MCCFR+, linear averaging).",
     "LBR: engine PolicyLBR, same deals / LBR seed / 64 particles for every snapshot; an approximate exploitability "
     "LOWER bound. Hollow circles: newest snapshot re-evaluated with more pairs.",
     "Gap proxy: sum over the traverser's visited states of max_a Q - E_pi Q under external sampling, mean of both seats "
@@ -174,12 +179,12 @@ for ax, key, title, logy in ((axes[0], "lbr_ante", "Newest average policy: Polic
         rows = {k: v for k, v in (final[run] or data[run]).items() if k[1] == "average"}
         r = max(rows.values(), key=lambda r: r["roots"])
         err = 1.96 * r["lbr_se"] if key == "lbr_ante" else None
-        ax.errorbar([r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=9, mec=SURFACE, mew=1.2, capsize=3,
+        ax.errorbar([r["buckets"] + r.get("h4_buckets", 0) if learned_h4 else r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=9, mec=SURFACE, mew=1.2, capsize=3,
                     ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots, {r['pairs']:,} pairs)")
     ax.set_xscale("log")
     if logy: ax.set_yscale("log")
     ax.grid(True, color=GRID, lw=0.8); ax.set_axisbelow(True)
-    ax.set_title(title, color=INK, loc="left"); ax.set_xlabel("buckets in the evaluated partition"); ax.set_ylabel("ante/hand")
+    ax.set_title(title, color=INK, loc="left"); ax.set_xlabel("buckets in the evaluated partition" + (" (betting + 4th-street)" if learned_h4 else "")); ax.set_ylabel("ante/hand")
     for side in ("top", "right"): ax.spines[side].set_visible(False)
 axes[0].axhline(0, color=MUTED, lw=1)
 axes[0].legend(frameon=False, fontsize=8, loc="best")

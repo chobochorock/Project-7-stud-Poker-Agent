@@ -1,7 +1,7 @@
 """Figures for the 7-stud ASWISS comparison (heads-up, 5th-7th street, seed 1).
 
 Usage: python plot_stud.py RUNS_DIR OUT_PREFIX
-Reads RUNS_DIR/NAME/{log.csv,eval.jsonl}. Writes OUT_PREFIX_curves.png (Policy-LBR with 95% intervals and the
+Reads RUNS_DIR/NAME/{log.csv,eval.jsonl} and, when present, eval_final.jsonl (more LBR pairs on the last snapshot). Writes OUT_PREFIX_curves.png (Policy-LBR with 95% intervals and the
 sampled BR-gap proxy against training roots, average and current policy separately; ratios / differences to the
 k-means 256 baseline at shared budgets; bucket counts) and OUT_PREFIX_frontier.png (final LBR and gap vs buckets).
 LBR is an approximate exploitability lower bound and can be negative, so it stays on a linear axis.
@@ -25,10 +25,11 @@ SERIES = [
 ]
 SERIES = [s for s in SERIES if os.path.exists(f"{R}/{s[0]}/eval.jsonl")]
 
-def load(run, prev):
+def load(run, prev, name="eval.jsonl"):
     log = list(csv.DictReader(open(f"{R}/{run}/log.csv")))
     rows = {}
-    for r in map(json.loads, open(f"{R}/{run}/eval.jsonl")):
+    if not os.path.exists(f"{R}/{run}/{name}"): return log, rows
+    for r in map(json.loads, open(f"{R}/{run}/{name}")):
         k = r["epoch"]
         r["roots"] = int(log[k]["roots"])
         r["buckets"] = int(log[k - 1]["buckets_after"]) if prev and k > 0 else int(log[k]["buckets_after"])
@@ -49,10 +50,16 @@ def line(ax, x, y, colour, marker, ls, label=None, err=None):
     ax.errorbar(x, y, yerr=err, color=colour, lw=2, ls=ls, marker=marker, ms=6, mec=SURFACE, mew=1.2, capsize=3,
                 label=label)
 
-def pairs(run, epoch, policy):
-    return np.loadtxt(f"{R}/{run}/lbr_pairs_{epoch}_{policy}.csv", delimiter=",", skiprows=1, usecols=1)
+def pairs(run, epoch, policy, tag=""):
+    return np.loadtxt(f"{R}/{run}/lbr_pairs{tag}_{epoch}_{policy}.csv", delimiter=",", skiprows=1, usecols=1)
+
+def paired(run, epoch, policy, tag=""):
+    d = pairs(run, epoch, policy, tag) - pairs(BASELINE, epoch, policy, tag)
+    return float(d.mean()), 1.96 * float(d.std(ddof=1)) / len(d) ** 0.5
 
 data = {run: load(run, prev) for run, *_, prev in SERIES}
+final = {run: load(run, prev, "eval_final.jsonl")[1] for run, *_, prev in SERIES}
+FINAL_LABEL = "last snapshot, 20,000 pairs (hollow)"
 base = data[BASELINE][1] if BASELINE in data else {}
 fig, axes = plt.subplots(3, 3, figsize=(17, 14))
 for col, policy in enumerate(("average", "current")):
@@ -65,11 +72,15 @@ for col, policy in enumerate(("average", "current")):
         if run != BASELINE and base:
             shared = [(r, base[(r["epoch"], policy)]) for r in rows if (r["epoch"], policy) in base]
             sx = [r["roots"] for r, _ in shared]
-            diff, se = [], []
-            for r, b in shared:  # paired over the same deals
-                d = pairs(run, r["epoch"], policy) - pairs(BASELINE, b["epoch"], policy)
-                diff.append(float(d.mean())); se.append(1.96 * float(d.std(ddof=1)) / len(d) ** 0.5)
+            diff, se = zip(*[paired(run, r["epoch"], policy) for r, _ in shared]) if shared else ([], [])
             line(axes[2, col], sx, diff, colour, marker, ls, err=se)
+        for (k, p), r in final[run].items():
+            if p != policy: continue
+            hollow = dict(color=colour, marker="o", ms=11, mfc=SURFACE, mew=2, capsize=4, ls="none")
+            axes[0, col].errorbar([r["roots"] * 1.12], [r["lbr_ante"]], yerr=[1.96 * r["lbr_se"]], **hollow)
+            if run != BASELINE and (k, p) in final.get(BASELINE, {}):
+                m, e = paired(run, k, p, "_final")
+                axes[2, col].errorbar([r["roots"] * 1.12], [m], yerr=[e], **hollow)
     style(axes[0, col], f"{policy.capitalize()} policy: Policy-LBR (95% interval)", "LBR winnings, ante/hand", False)
     axes[0, col].axhline(0, color=MUTED, lw=1)
     style(axes[1, col], f"{policy.capitalize()} policy: sampled BR-gap proxy", "proxy, ante/hand (log)", True)
@@ -103,7 +114,9 @@ axes[2, 2].text(0, 1, "\n".join([
     "Atoms = K=1024 power cluster x betting summary x legal mask.",
     "Matched K chosen in hindsight from ASWISS's final bucket count.",
 ]), va="top", fontsize=8.5, color=INK, family="monospace", transform=axes[2, 2].transAxes)
-fig.legend(*axes[0, 0].get_legend_handles_labels(), frameon=False, fontsize=9, loc="lower center", ncol=3)
+handles, labels = axes[0, 0].get_legend_handles_labels()
+handles.append(plt.Line2D([], [], color=MUTED, marker="o", ms=11, mfc=SURFACE, mew=2, ls="none")); labels.append(FINAL_LABEL)
+fig.legend(handles, labels, frameon=False, fontsize=9, loc="lower center", ncol=3)
 fig.suptitle("ASWISS on 7-stud: one training seed; intervals are deal-sampling intervals only.", color=MUTED,
              fontsize=9, x=0.01, ha="left")
 fig.tight_layout(rect=(0, 0.04, 1, 0.97)); fig.savefig(f"{OUT}_curves.png", dpi=140)
@@ -112,12 +125,12 @@ fig, axes = plt.subplots(1, 2, figsize=(14, 5.6))
 for ax, key, title, logy in ((axes[0], "lbr_ante", "Final average policy: Policy-LBR vs buckets", False),
                              (axes[1], "gap_proxy_ante", "Final average policy: gap proxy vs buckets", True)):
     for run, label, colour, marker, ls, prev in SERIES:
-        rows = data[run][1]
+        rows = final[run] or data[run][1]
         last = max(k for k, p in rows if p == "average")
         r = rows[(last, "average")]
         err = 1.96 * r["lbr_se"] if key == "lbr_ante" else None
         ax.errorbar([r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=9, mec=SURFACE, mew=1.2,
-                    capsize=3, ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots)")
+                    capsize=3, ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots, {r['pairs']:,} pairs)")
     ax.set_xscale("log")
     if logy: ax.set_yscale("log")
     ax.grid(True, color=GRID, lw=0.8); ax.set_axisbelow(True)

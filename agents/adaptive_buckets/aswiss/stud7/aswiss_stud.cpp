@@ -280,6 +280,17 @@ public:
         return {live[0].size(), live[1].size(), live[2].size()};
     }
     size_t contexts() const { return contexts_.size(); }
+    size_t bucket_records() const { return buckets_.size(); }  // live + retired (split parents are never freed)
+    // approximate bytes of the training tables: bucket records, the atom window and the partition maps
+    std::array<double, 3> table_megabytes() const {
+        size_t members = 0;
+        for (const auto& [ctx, c] : contexts_) members += c.member.size();
+        constexpr double node = 2 * sizeof(void*);  // hash-node link and cached hash
+        return {buckets_.capacity() * sizeof(Bucket) / 1e6,
+                atoms_.size() * (sizeof(InfoKey) + sizeof(AtomStats) + node) / 1e6,
+                (contexts_.size() * (sizeof(InfoKey) + sizeof(Context) + node) +
+                 members * (sizeof(uint16_t) + sizeof(uint32_t) + node)) / 1e6};
+    }
 
     void save(const std::string& path) const {
         std::ofstream out(path, std::ios::binary);
@@ -409,6 +420,14 @@ std::unique_ptr<PowerAtlas> load_atlas(const std::string& path, size_t cache) {
 }
 constexpr int kAnte = 1000;
 
+double peak_rss_mb() {  // VmHWM of this process (Linux); -1 elsewhere
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    while (std::getline(status, line))
+        if (line.rfind("VmHWM:", 0) == 0) return std::stod(line.substr(6)) / 1024.0;
+    return -1;
+}
+
 int train(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""}});
@@ -423,7 +442,8 @@ int train(int argc, char** argv) {
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
     std::ofstream log(out + "/log.csv");
     log << "epoch,roots,contexts,buckets_after,buckets5,buckets6,buckets7,splits,atoms,L_per_root,C_per_root,H_per_root,"
-           "seconds,power_cache_hits,power_cache_misses\n";
+           "seconds,power_cache_hits,power_cache_misses,bucket_records,bucket_mb,atom_window_mb,partition_mb,"
+           "peak_rss_mb\n";
     const auto t0 = std::chrono::steady_clock::now();
     uint64_t t = 0, epoch_end = L, epoch_start = 0;
     int k = 0;
@@ -437,6 +457,7 @@ int train(int argc, char** argv) {
         if (t != epoch_end && t != T) continue;
         model.save(out + "/snapshot_" + std::to_string(k) + ".bin");
         const auto w = model.window();
+        const auto mb = model.table_megabytes();  // measured before the window is cleared
         const int splits = partition == Partition::Aswiss ? model.split(z) : 0;
         model.clear_window();
         const auto live = model.live_buckets();
@@ -445,7 +466,9 @@ int train(int argc, char** argv) {
         const auto cache = atlas ? atlas->assignment_cache_stats() : PowerCacheStats{};
         log << k << ',' << t << ',' << model.contexts() << ',' << live[0] + live[1] + live[2] << ',' << live[0] << ','
             << live[1] << ',' << live[2] << ',' << splits << ',' << w.atoms << ',' << w.L / len << ',' << w.C / len << ','
-            << (w.L - w.C) / len << ',' << secs << ',' << cache.hits << ',' << cache.misses << '\n' << std::flush;
+            << (w.L - w.C) / len << ',' << secs << ',' << cache.hits << ',' << cache.misses << ','
+            << model.bucket_records() << ',' << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << peak_rss_mb() << '\n'
+            << std::flush;
         std::cerr << "epoch " << k << " roots=" << t << " buckets_after=" << live[0] + live[1] + live[2]
                   << " splits=" << splits << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
         epoch_start = t; ++k; L *= 2; epoch_end = std::min(T, t + L);

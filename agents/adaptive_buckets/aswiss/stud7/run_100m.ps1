@@ -14,7 +14,11 @@ param(
     [string[]]$Arms = @("aswiss", "k256", "k341", "k512", "k1024"),
     [string]$Out = "agents\adaptive_buckets\aswiss\stud7\data\runs_100m",
     [int]$Workers = 4,
-    [string]$Python = "python"
+    [string]$Python = "python",
+    [ValidateSet("heuristic", "learn")] [string]$H4 = "heuristic",   # learn: 12-action 4th-street discard/reveal; names get _h4
+    [long]$SnapshotEvery = 5000000,
+    [long]$CheckpointEvery = 1000000,
+    [long]$CurveEvery = 100000
 )
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -28,7 +32,8 @@ $Arm = @{   # name, partition, atlas K, label
     k1024  = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly")
 }
 function AtlasPath($k) { Join-Path $Atlas "atlas_power${k}_heur_eps20_seed37301.bin" }
-function RunName($a) { "$($Arm[$a][0])_s$Seed" }
+$Suffix = if ($H4 -eq "learn") { "_h4_s$Seed" } else { "_s$Seed" }
+function RunName($a) { "$($Arm[$a][0])$Suffix" }
 New-Item -ItemType Directory -Force $Out | Out-Null
 
 if ($Action -eq "run") {
@@ -44,8 +49,8 @@ if ($Action -eq "run") {
             Write-Host "$name is already running (pid $(Get-Content $pidFile)); skipped"; continue
         }
         $argv = @("train", "--partition", $Arm[$a][1], "--atlas", (AtlasPath $Arm[$a][2]), "--z", "2", "--seed", $Seed,
-                  "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", "1000000", "--snapshot-every", "5000000",
-                  "--curve-every", "100000", "--out", $dir)
+                  "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", $CheckpointEvery,
+                  "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
         $p = Start-Process -FilePath $Exe -ArgumentList $argv -RedirectStandardError $log -WindowStyle Hidden -PassThru
         Set-Content $pidFile $p.Id
@@ -75,5 +80,5 @@ elseif ($Action -in @("eval", "final")) {
 }
 elseif ($Action -eq "plot") {
     $specs = $Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" }
-    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results_100m_s$Seed") --runs @specs --baseline (RunName "k256")
+    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName "k256")
 }

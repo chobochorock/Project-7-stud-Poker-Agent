@@ -159,6 +159,43 @@ ASWISS에서 각 비교군을 뺀 차이다(같은 deal로 짝지은 95% 구간)
 - **축과 지표:** LBR은 음수가 될 수 있어 선형 축에 그렸다. BR-gap 근사치만 log 축이다. 어느 것도 exploitability와 같은 것으로 다루지 않았다.
 - **외삽:** 교차점이나 기울기로 외삽하지 않았다.
 
+## 4구 12액션 학습 (`--h4 learn`, 실행 중)
+
+4구에서 4장 중 버릴 카드 1장과 공개할 카드 1장을 고르는 결정(12액션)을 5–7구 베팅과 함께 학습한다.
+
+- **정보 상태:** (좌석, 자기 4장). 문양 재배치에 대해 정규화한 엔진 key(`make_h4_view`)를 쓴다.
+  - 카드 추상화가 없는 원 정보집합이다. 좌석당 약 1.6만 개다.
+  - 12액션은 엔진의 정규 순서 (`h4_positions`, `h4_choice`)를 따른다.
+- **학습 방법:** external sampling을 쓴다.
+  - 상대의 버림/공개는 현재 전략에서 표본화하고, 상대의 평균 전략은 선형 가중으로 쌓는다.
+  - traverser는 12가지를 모두 펼친다. 각 갈래 뒤에 같은 카드로 베팅 순회를 한다.
+  - 4구 regret은 베팅 regret과 함께 순회가 끝난 뒤 RM+로 갱신한다.
+  - 그래서 root 하나의 비용이 약 12–20배다. 이 환경에서 초당 약 50 roots였다.
+- **4구 분할:** `--partition` 규칙을 따른다.
+
+  | partition | 4구 표 |
+  |---|---|
+  | context | 좌석당 bucket 하나 |
+  | atom | 4장 key마다 bucket 하나. 정확한 표이며 k-means 비교군에 해당 |
+  | aswiss | 좌석당 하나에서 시작해 같은 라벨 규칙으로 분할 |
+
+  4구에서는 원자가 곧 원 정보집합이다. 그래서 mini-stud와 같은 조건(정리 1)이 그대로 적용되는 결정이다.
+- **평가:** `H4PolicyLBR`을 쓴다.
+  - 이것은 `make_h4_lbr.py`가 엔진의 `PolicyLBR`에서 기계적으로 만든다. `cpp_mccfr/h4_ablation`과 같은 치환이다.
+  - 상대 카드 추정(particle)의 사전확률로 학습된 4구 정책의 likelihood(24 × 확률)를 쓴다.
+  - target은 자기 4구 선택을 학습된 정책에서 표본화한다.
+  - LBR 공격자는 기존 heuristic 4구를 그대로 쓴다. 공격자의 12액션에 대한 BR이 아니다.
+  - BR-gap 근사치는 양쪽 4구 선택을 평가 정책에서 표본화한 뒤 5–7구 베팅의 gap만 잰다.
+- **검증:**
+  - 학습된 4구 루트에 heuristic 선택을 넣으면 엔진의 5구 루트와 같다.
+  - 4구 표가 스냅숏 저장/복원에서 보존된다.
+  - 학습 전(균등) likelihood는 2(= 24/12)다.
+  - 4구 모드도 SIGINT와 `kill -9` 뒤 재개한 스냅숏이 비트 단위로 같다.
+  - heuristic 모드는 이전 실행과 같다(스냅숏 버전 바이트만 다름).
+- **실행 중인 비교:** ASWISS(4구도 분할), k-means 256 / 341 / 1024(4구는 정확한 표)를 2.55M roots까지 돌린다. 스냅숏은 25만 roots마다 남긴다.
+  - 이 환경에서 약 10–14시간 걸린다.
+  - 더 길게 돌리려면 `run_100m.*`에 `-H4 learn`(`H4=learn`)을 준다.
+
 ## 100M 실행 (중단 후 재개 가능)
 
 `run_100m.ps1`(Windows)와 `run_100m.sh`(Linux/WSL)는 비교군을 하나씩 별도 프로세스(코어 1개)로 돌린다.
@@ -176,11 +213,12 @@ powershell -ExecutionPolicy Bypass -File $s -Action eval     # 새 스냅숏 평
 powershell -ExecutionPolicy Bypass -File $s -Action final    # 가장 최근 스냅숏, LBR 20,000 pair
 powershell -ExecutionPolicy Bypass -File $s -Action plot     # 그림
 # 옵션: -Roots 100000000 -Seed 1 -Arms aswiss,k256,k341,k512,k1024 -Workers 4 -Out <폴더> -Python python
+#       -H4 learn (4구 12액션 학습) -SnapshotEvery 5000000 -CheckpointEvery 1000000 -CurveEvery 100000
 ```
 
 ```bash
 bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop | eval | final | plot
-# 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON
+# 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON H4 SNAPSHOT_EVERY CHECKPOINT_EVERY CURVE_EVERY
 ```
 
 **중단과 재개**
@@ -205,7 +243,7 @@ bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop |
 | `curve.csv` | 10만 roots마다: 학습 deal에서 잰 현재 정책의 샘플 BR-gap 근사치(평균, 표준오차), bucket 수, 최대 RSS. 학습 순회의 부산물이라 추가 계산이 없다 |
 | `snapshots.csv`, `snapshot_*.bin` | epoch 끝과 500만 roots마다의 정책 스냅숏(현재 표 + 평균 표 + 분할) |
 | `eval.jsonl`, `lbr_pairs_*.csv` | `eval`/`final` 결과. 스냅숏 × 평균/현재 정책의 LBR(평균, 표준오차)과 BR-gap 근사치, 그리고 pair별 원자료(짝지은 차이 계산용) |
-| `results_100m_s1_*.png` | `plot`이 그리는 그림: LBR과 근사치 학습 곡선, k-means 256 대비 차이와 비율, bucket 수, `curve.csv` 곡선, bucket 수 대비 LBR |
+| `results_s1_*.png` (12액션은 `results_h4_s1_*.png`) | `plot`이 그리는 그림: LBR과 근사치 학습 곡선, k-means 256 대비 차이와 비율, bucket 수, `curve.csv` 곡선, bucket 수 대비 LBR |
 
 **규모 추정** (이 환경 기준: 4개 병렬, 10M에 2–2.5시간)
 - **시간:** 100M에 비교군당 약 22–25시간이다. 평가는 2,000 pair에 약 2분, 20,000 pair에 약 20분이다.

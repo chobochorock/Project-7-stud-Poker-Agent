@@ -178,6 +178,8 @@ H_B ≤ Σ W_I ‖ρ_I − ρ̄_B‖∞ ≤ W_B max_{I,J∈B} ‖ρ_I − ρ_J�
 
 ## 4. 적응 분할과 수렴
 
+> 2026-10-27: 이 절의 Theorem 4.2는 "H 역치 + 추적 표본" 규칙에 대한 것이다. 실제로 구현하고 실험한 **누적 regret 라벨 분할** 규칙의 증명과 한계는 [ASWISS_CONVERGENCE_KO.md](ASWISS_CONVERGENCE_KO.md)에 따로 정리했다.
+
 ### 알고리즘 (epoch 분할 방식)
 
 1. **epoch:** epoch k는 구간 `[t_k, t_k + L_k)`이다. 길이는 `L_k ≥ c·t_k`로 둔다(예: 매번 두 배).

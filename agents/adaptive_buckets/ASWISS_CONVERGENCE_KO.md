@@ -25,6 +25,7 @@
 | 분할 유한성 (Lemma 6) | 분할은 모든 표본 경로에서 많아야 $N-\lvert\mathcal P_0\rvert$번이다 | 증명 |
 | 정리 1 (epoch 방식) | 분할이 없었던 epoch마다 $\mathrm{NashConv}(\bar\sigma^{(k)}) = O\big(\sqrt{\log(kN_A/\delta)/L_k}\big)$가 확률 $1-\delta$로 성립한다. 따라서 마지막 분할 이후 거의 확실히 0으로 수렴한다 | 증명 (동시 갱신, epoch 균등 평균 기준) |
 | 정리 2 (수렴 조건부 방식) | 임의의 $\varepsilon_g>0$에 대해 같은 결론이다 | 증명 |
+| 정리 2′ (ε 정지 인증) | 분할 없이 게이트를 통과하면 그 시점에 $\mathrm{NashConv}\le\varepsilon_g+(\text{검정 역치 항})+(\text{샘플 오차 항})$이다. 샘플링 버전의 정지 규칙이며, $t^\*$를 몰라도 쓸 수 있다 | 증명. 단 엄밀한 오차 항은 수치적으로 공허함 |
 | 정리 3 (원자 일반화, 7-stud) | 원자 내부의 상쇄량 $H_{\mathcal A}$를 뺀 나머지 오차만 0으로 간다 | 증명 |
 | 마지막 분할 시점 $t^\*$의 상계 | 없음 | 미해결 |
 | 교대 갱신, 선형 평균 (실제 구현) | 정리의 가정 밖 | 미해결 |
@@ -209,6 +210,50 @@ $$\mathrm{NashConv}(\bar\sigma^{(s^\*,t]})\le\frac{\sum_BD_B\sqrt{\lvert A_B\rve
 증명은 정리 1과 같다. 판정 구간의 끝이 정지시간이어도 Lemma 4가 시간 균일이므로 그대로 성립한다.
 - Hoeffding과 Bernstein의 판정 번호 $d$는 많아야 $t/g$다. 그래서 $\ln((d+1)^2/\delta)=O(\log t)$이고 조건 (T)가 유지된다. □
 
+### 4.1 ε 정지 인증: 게이트의 ε가 정하는 보장 수준
+
+정리 2는 "언젠가 0으로 간다"는 말이다. 하지만 게이트에는 더 직접적인 쓸모가 있다. **분할 없이 통과한 판정 시점마다 그 시점의 정밀도를 인증한다.** CFR+IRA는 목표 정밀도 ε를 입력으로 받고, 정확한 best response로 원게임 exploitability를 계산해 멈춘다. 샘플링 버전에서는 이 정지 판정을 "게이트 통과 + 라벨 일치"가 대신한다.
+
+**Theorem 2′ (ε 정지 인증) [증명].** (S1)–(S3), 방식 G를 가정한다. $\mathcal E_\delta$ 위에서, 판정 구간 $W=(s,t]$의 게이트 통과에서 **어떤 bucket도 분할되지 않았다면** 다음이 성립한다.
+$$\mathrm{NashConv}(\bar\sigma^W)\ \le\ \frac{\tilde C^W}{\lvert W\rvert}+\frac1{\lvert W\rvert}\sum_{I}\big(\theta_I^W+6\varepsilon_I(t)\big)\ \le\ \varepsilon_g+\underbrace{\frac{\sum_I\theta_I^W}{\lvert W\rvert}}_{\text{검정 역치 항}}+\underbrace{\frac{6\sum_I\varepsilon_I(t)}{\lvert W\rvert}}_{\text{샘플 오차 항}}.$$
+일부 bucket $S$가 분할된 통과에서는 다음 항이 더해진다.
+$$\frac1{\lvert W\rvert}\sum_{B\in S}\min_\ell\sum_{I\in B}e_I(\ell).$$
+
+*증명.*
+- $C^W\le\tilde C^W+2\sum_I\varepsilon_I(t)$이다(Lemma 4).
+- 게이트 통과이므로 $\tilde C^W\le\varepsilon_g\lvert W\rvert$이다.
+- $H^W$는 Lemma 5로 묶는다. Lemma 1로 합친다. □
+
+**뜻: 판정 시점의 보장 수준(정밀도 바닥)은 두 손잡이가 정한다.**
+- **ε:** bucket 게임 자체의 수렴 정도($C$ 항)를 정한다.
+- **검정 역치 θ:** 라벨이 일치할 때 bucket 안 상쇄($H$ 항)가 얼마나 남을 수 있는지를 정한다.
+  - 정규 검정은 $\theta\approx z\sqrt{\sum\tilde r^2}$로 작다. 그래서 라벨이 일치하면 $H$가 작다.
+  - Hoeffding과 Bernstein은 θ가 보상 폭 $\Delta_I$와 로그 인자에 비례해 크다. 그래서 라벨이 모두 "없음"으로 일치해도 $H$가 크게 남을 수 있다.
+- 구간이 길어지면 두 역치 항은 $O(1/\sqrt{\lvert W\rvert})$로 줄어든다. ε 자리에 실제로 측정한 $\tilde C^W/\lvert W\rvert$를 넣으면 바닥은 ε보다 아래로도 내려간다.
+- **사용법:** "분할 없는 통과가 나오면 $\bar\sigma^W$를 인증과 함께 출력하고 멈춘다." 이것이 샘플링 버전의 정지 규칙이다. 마지막 분할 시점 $t^\*$를 몰라도 쓸 수 있다.
+
+**41M 실험에서 확인한 것** (`decisions.csv`의 정확 진단, mini-stud small, seed 1)
+
+| 실행 | 게이트 통과 | 분할 없는 통과 | 분할 없는 통과의 정확 $C/\lvert W\rvert$ | 같은 시점의 정확 $H/\lvert W\rvert$ |
+|---|---:|---:|---:|---:|
+| 정규 ε=0.05 / 0.1 / 0.2 / 0.4 | 4 / 6 / 11 / 40 | **0** | – | – |
+| Bernstein ε=0.1 | 34,495 | 34,397 | 0.019–0.107 (평균 0.044) | 2.23–2.76 (평균 2.54) |
+
+- **정규 검정 실행:** 게이트를 통과할 때마다 항상 분할이 일어났다. 즉 41M 동안 인증 조건이 한 번도 성립하지 않았다($t^\*$ 이전이라는 것과 같은 말이다).
+  - 다만 ε=0.4의 마지막 판정들에서 정확 $H/\lvert W\rvert$는 0.0008까지 내려갔다. 남은 것은 거의 $C$ 항(약 0.35)이었다.
+- **Bernstein 실행:** 인증 조건은 자주 성립했다. 하지만 라벨이 대부분 "없음"으로 일치한 것이고, 엄격한 역치 때문에 $H/\lvert W\rvert\approx2.5$가 남았다.
+  - 마지막 통과의 정확 상계는 $(C+H)/(2\lvert W\rvert)=1.30$ ante였다(exploitability 단위, 구간 균등 평균 $\bar\sigma^W$ 기준).
+  - 실측 exploitability는 0.467이었다. 다만 이 값은 실행 전체의 선형 평균 bucket 정책에서 잰 것이라 같은 대상은 아니다.
+  - 위 식의 "검정 역치 항"이 바닥을 정한 사례다. Bernstein이 정체한 이유를 정량적으로 설명한다.
+
+**한계: 엄밀한 인증은 수치적으로 공허하다.** 샘플 오차 항을 mini-stud small(정보집합 51,114개, $\sum\Delta_I=566{,}366$, $N_A=142{,}428$, $\delta=0.05$)에 넣어 계산했다. $t=4.1\times10^7$, $\lvert W\rvert=5.35\times10^5$일 때 $6\sum\varepsilon_I/\lvert W\rvert\approx7.7\times10^5$이다. 실제 NashConv(약 1) 대비 수십만 배 느슨하다.
+- 원인 1: 모든 정보집합에 대한 합이다.
+- 원인 2: 최악의 경우 Azuma 상계다.
+- 실용적인 인증은 다음 둘 중 하나가 필요하다.
+  - 방문 확률에 비례하는 분산을 쓰는 Freedman형 상계: $\sum_I\sqrt{n_I}\le\sqrt{N\sum_In_I}$ 덕분에 크게 줄지만, 여전히 큰 게임에서는 크다.
+  - 판정 표본과 평가 표본을 나눈 교차 적합으로 $\sum_B\min_\ell\sum\hat e_I(\ell)$을 직접 추정하는 플러그인 인증(편향 있음).
+- 이것은 [미해결]이다.
+
 **Remark 4.1 (게이트가 실제로 보장하는 것).**
 - $\mathcal E_\delta$ 위에서 판정 통과는 정확한 bucket regret에 대해 $C^W\le\varepsilon_g\lvert W\rvert+2\sum_I\varepsilon_I(t)$를 뜻한다.
 - 반대로 $\mathbb E\,\psi(\tilde R_B)\ge\psi(R_B)$(Jensen)이므로 샘플 $C$는 위로 편향된다. 실험에서 bucket 2만 개 이상일 때 최대 1.18배였다.
@@ -269,6 +314,8 @@ $$\sum_I\psi(R_I)=\sum_\alpha\psi(R_\alpha)+H_{\mathcal A}=C+\sum_BH_{B\mid\math
 ### 7.1 정리가 보장하지 않는 것
 
 1. **마지막 분할 시점 $t^\*$에 상계가 없다. [미해결]**
+   - CFR+IRA도 이 시점을 직접 구하지 못했다. 원문의 $T_{lim}$은 확률적 최악 경우 논증이고 $\lvert\mathcal I\rvert$에 지수적이다.
+   - 이 문서는 $t^\*$를 구하는 대신 정지 규칙(정리 2′)으로 우회한다.
    - 속도 보장은 $t^\*$ 이후에만 있다.
    - 실험과 연결하면 다음과 같다. mini-stud 41M 실행은 모두 $t^\*$ 이전이었다. 조건 없는 정규 방식은 마지막 epoch 끝(40.95M)에도 bucket 2,333개를 분할했고, ε=0.4도 마지막 판정에서 28개를 분할했다.
    - 따라서 **관찰된 수렴 곡선의 속도는 정리 1이 설명하지 않는다.** 분할 시기의 상계는 Proposition 3.2뿐이다.
@@ -320,9 +367,15 @@ $$\sum_I\psi(R_I)=\sum_\alpha\psi(R_\alpha)+H_{\mathcal A}=C+\sum_BH_{B\mid\math
 
 1. **이론에 맞춘 재실험 (mini-stud):** 동시 갱신 + epoch 균등 평균 + Azuma 역치로 돌린다. 정리 1의 우변을 실제로 계산해 정확 NashConv와 함께 그린다. 상계가 얼마나 느슨한지도 보고한다.
 2. **분할 시기 진단:** 정확 regret으로 Proposition 3.2의 "소수파 regret" $\sum_{B\in S_k}\min_\ell\sum e_I(\ell)$을 기록한다. 실험 곡선의 속도를 설명하는지 본다.
-3. **$t^\*$ 상계:** margin 조건 아래의 증명을 시도한다. [미해결]
-4. **부분 추적:** $p<1$에서 확률적 탐지 논증(이전 Theorem 4.2의 Paley–Zygmund 방향)을 라벨 규칙에 맞게 다시 세운다. [미해결]
-5. **배포:** 반복 혼합 배포의 checkpoint 수와 exploitability 관계를 정리한다.
+3. **정지 인증 기록:** `gated.cpp`의 판정마다 세 값을 함께 기록한다.
+   - 정리 2′의 우변: 플러그인 버전과 엄밀 버전
+   - 정확 $(C+H)/\lvert W\rvert$
+   - 구간 균등 평균의 실제 NashConv
+
+   그다음 실용적인 인증(Freedman형 또는 교차 적합)이 얼마나 조여지는지 본다.
+4. **$t^\*$ 상계:** margin 조건 아래의 증명을 시도한다. [미해결]
+5. **부분 추적:** $p<1$에서 확률적 탐지 논증(이전 Theorem 4.2의 Paley–Zygmund 방향)을 라벨 규칙에 맞게 다시 세운다. [미해결]
+6. **배포:** 반복 혼합 배포의 checkpoint 수와 exploitability 관계를 정리한다.
 
 ## 참고문헌
 

@@ -24,6 +24,7 @@ SERIES = [
     ("context_s1", "context only, no card information", MUTED, "X", (0, (1, 2)), False),
 ]
 SERIES = [s for s in SERIES if os.path.exists(f"{R}/{s[0]}/eval.jsonl")]
+OFF_SCALE = {"context_s1"}  # value panels would be unreadable (LBR ~64); its numbers go in the note instead
 
 def load(run, prev, name="eval.jsonl"):
     log = list(csv.DictReader(open(f"{R}/{run}/log.csv")))
@@ -64,6 +65,7 @@ base = data[BASELINE][1] if BASELINE in data else {}
 fig, axes = plt.subplots(3, 3, figsize=(17, 14))
 for col, policy in enumerate(("average", "current")):
     for run, label, colour, marker, ls, prev in SERIES:
+        if run in OFF_SCALE: continue
         rows = sorted((v for (k, p), v in data[run][1].items() if p == policy), key=lambda r: r["roots"])
         x = [r["roots"] for r in rows]
         line(axes[0, col], x, [r["lbr_ante"] for r in rows], colour, marker, ls, label,
@@ -88,7 +90,7 @@ for col, policy in enumerate(("average", "current")):
     axes[2, col].axhline(0, color=INK, lw=1.2)
 ax = axes[0, 2]
 for run, label, colour, marker, ls, prev in SERIES:
-    if run == BASELINE or not base: continue
+    if run == BASELINE or run in OFF_SCALE or not base: continue
     rows = sorted((v for (k, p), v in data[run][1].items() if p == "average"), key=lambda r: r["roots"])
     shared = [(r, base[(r["epoch"], "average")]) for r in rows if (r["epoch"], "average") in base]
     line(ax, [r["roots"] for r, _ in shared], [r["gap_proxy_ante"] / b["gap_proxy_ante"] for r, b in shared], colour, marker, ls)
@@ -101,7 +103,13 @@ for run, label, colour, marker, ls, prev in SERIES:
             where="post", color=colour, lw=2, ls=ls)
 style(ax, "Live buckets (steps: epoch ends)", "buckets (log)", True)
 axes[2, 2].axis("off")
-axes[2, 2].text(0, 1, "\n".join([
+off = []
+for run in OFF_SCALE & set(data):
+    for policy in ("average", "current"):
+        rows = final[run] or data[run][1]
+        r = rows[(max(k for k, p in rows if p == policy), policy)]
+        off.append(f"{run}: {policy} LBR {r['lbr_ante']:.1f}, gap {r['gap_proxy_ante']:.0f} (off scale, not drawn)")
+axes[2, 2].text(0, 1, "\n".join(off + [
     "Heads-up 7-stud, rules v3, 5th-7th street, heuristic H4, ante 1000.",
     "Training: external-sampling MCCFR+ (same trainer for every arm), seed 1.",
     "LBR: engine PolicyLBR, same deals / LBR seed / 64 particles for every",
@@ -125,6 +133,7 @@ fig, axes = plt.subplots(1, 2, figsize=(14, 5.6))
 for ax, key, title, logy in ((axes[0], "lbr_ante", "Final average policy: Policy-LBR vs buckets", False),
                              (axes[1], "gap_proxy_ante", "Final average policy: gap proxy vs buckets", True)):
     for run, label, colour, marker, ls, prev in SERIES:
+        if run in OFF_SCALE: continue
         rows = final[run] or data[run][1]
         last = max(k for k, p in rows if p == "average")
         r = rows[(last, "average")]

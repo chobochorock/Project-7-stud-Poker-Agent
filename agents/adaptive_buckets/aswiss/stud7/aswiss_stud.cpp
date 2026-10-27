@@ -2,7 +2,7 @@
 //
 // Build: g++ -O3 -std=c++17 aswiss_stud.cpp -o aswiss_stud
 // Train: ./aswiss_stud train --partition aswiss|atom|context [--atlas ATLAS] --roots N [--epoch0 10000]
-//                            [--z 2] [--seed 1] [--power-cache 1000000] --out DIR
+//                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] --out DIR
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
@@ -17,7 +17,8 @@
 //   aswiss:  starts as context; at every doubling epoch end each atom visited in the epoch gets label
 //            argmax_a R(a) when R(a) > z sqrt(sum r(a)^2) over the epoch's sampled regrets, else none.
 //            Unvisited members (for a rest bucket: unseen clusters) count as none. A bucket carrying two
-//            or more labels is split by label; children restart their tables; no merges.
+//            or more labels is split by label; children restart their tables (--inherit 1: each child starts
+//            from a copy of the parent's regret and average tables); no merges.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // Each epoch end writes snapshot_k.bin (partition + tables used during that epoch, before any split).
@@ -222,7 +223,7 @@ public:
         return w;
     }
     // ASWISS refinement from the window's atom labels; returns the number of buckets split
-    int split(double z) {
+    int split(double z, bool inherit = false) {
         std::map<InfoKey, std::vector<std::pair<uint16_t, int>>, KeyLess> by_context;  // ordered: reproducible ids
         for (const auto& [atom, st] : atoms_) {
             int best = -1;
@@ -247,7 +248,11 @@ public:
             for (const auto& [b, set] : labels) {
                 if (set.size() < 2) continue;
                 ++splits;
-                for (int label : set) child[b][label] = new_bucket();
+                for (int label : set) {
+                    const uint32_t c = new_bucket();
+                    if (inherit) { buckets_[c].q = buckets_[b].q; buckets_[c].s = buckets_[b].s; }
+                    child[b][label] = c;
+                }
             }
             if (child.empty()) continue;
             std::vector<std::pair<uint16_t, uint32_t>> members(c.member.begin(), c.member.end());
@@ -430,7 +435,8 @@ double peak_rss_mb() {  // VmHWM of this process (Linux); -1 elsewhere
 
 int train(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
-                                {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""}});
+                                {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
+                                {"--inherit", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     Model model(partition, atlas.get());
@@ -458,7 +464,7 @@ int train(int argc, char** argv) {
         model.save(out + "/snapshot_" + std::to_string(k) + ".bin");
         const auto w = model.window();
         const auto mb = model.table_megabytes();  // measured before the window is cleared
-        const int splits = partition == Partition::Aswiss ? model.split(z) : 0;
+        const int splits = partition == Partition::Aswiss ? model.split(z, o["--inherit"] == "1") : 0;
         model.clear_window();
         const auto live = model.live_buckets();
         const double len = static_cast<double>(t - epoch_start), secs =

@@ -1,0 +1,141 @@
+# ASWISS on 7-stud (heads-up, 5–7구)
+
+작성 2026-10-27. 학습 seed 1의 결과다(완료된 실험). 추가 seed와 상속 변형은 실행 중이고, 결과가 나오면 이 문서에 더한다.
+
+## 무엇을 비교했나
+
+**게임**
+- 엔진은 `../../../cpp_mccfr/stud_mccfr.cpp`를 수정 없이 include해서 쓴다.
+- 규칙은 v3다. heads-up이고, ante 1000, stack 1000 ante다.
+- 학습과 평가 모두 5구 루트에서 시작한다. 4구의 버림/공개 선택(12액션)은 두 player 모두 기존 heuristic(`discard_reveal`)으로 고정했다.
+- 따라서 실제로 푸는 게임은 "4구 heuristic을 고정한 5–7구 베팅 게임"이다.
+
+**원자(atom)**
+- 원자 = K=1024 power 클러스터 × 베팅 요약 × 합법 행동 집합이다. 엔진의 `--bucket power` key와 같다.
+- 원 정보집합은 학습 중 거의 한 번씩만 나와서 정보집합별 라벨이 유의해질 수 없다. 그래서 라벨 단위를 원자로 바꿨다.
+- 이 바꿈의 이론적 의미는 [수렴 증명 문서](../../ASWISS_CONVERGENCE_KO.md) 정리 3에 있다. ASWISS가 0으로 보내는 것은 bucket과 원자 사이의 상쇄까지다. 원자 안의 상쇄는 남는다.
+
+**비교군**
+- 모두 같은 학습기를 쓴다: external-sampling MCCFR+(RM+), 순회 뒤 bucket 일괄 갱신, 선형 평균.
+- 학습량은 10.23M roots, seed 1이다.
+
+| 비교군 | 분할 | atlas |
+|---|---|---|
+| context | context당 bucket 하나. 카드 정보 없음(mini-stud의 time step에 해당) | 없음 |
+| k-means 256 | 원자 = bucket. 프로젝트 표준 K | K=256 |
+| k-means 341 (bucket 수 맞춤) | 원자 = bucket. ASWISS의 최종 bucket 수에 맞춰 K를 **사후에** 정함 | K=341 |
+| ASWISS | context에서 시작. 두 배 epoch마다 원자 라벨(누적 샘플 regret, z=2)로 분할. 자식 표는 0에서 다시 시작 | K=1024 |
+| k-means 1024 | 원자 = bucket. mini-stud의 "완전 기억"에 해당 | K=1024 |
+
+- **atlas 생성:** 세 atlas 모두 여기서 같은 자료로 새로 만들었다(heuristic ε=0.2 self-play 10만 핸드, seed 37301).
+- **이전 자료:** 저장소의 이전 atlas와 LBR 결과 파일은 이 환경에 없어서 쓰지 못했다(`data/`가 로컬에만 있음).
+
+**평가**
+- **Policy-LBR:** 엔진의 `PolicyLBR`를 쓴다. exploitability의 근사 **하한**이며 단위는 ante/hand다.
+  - 모든 스냅숏에 같은 deal, 같은 LBR seed, particle 64를 쓴다.
+  - 학습 곡선은 2,000 pair로 평가했다. 마지막 스냅숏은 20,000 pair로 다시 평가했다.
+  - LBR 한 pair의 표준편차는 약 17.5 ante이고 최대 482 ante까지 꼬리가 길다. 그래서 2,000 pair로는 구간이 넓다.
+- **샘플 BR-gap 근사치:** 고정 deal 4,000개에서 external sampling 순회로 잰다. traverser가 방문한 모든 상태의 $\max_aQ-\sum\pi Q$를 더한 값이다.
+  - 상계도 하한도 아니다.
+  - 단위는 ante다. 기존 `agents/evaluation/br_gap`는 ante로 한 번 더 나눈다.
+- 평균 정책과 현재 정책을 따로 잰다.
+
+## 결과 (seed 1, 마지막 스냅숏, 20,000 pair)
+
+| 비교군 | bucket 수 | 평균 정책 LBR (95%) | 현재 정책 LBR (95%) | BR-gap 근사치 (평균/현재) |
+|---|---:|---:|---:|---:|
+| context | 146 | 63.66 ± 2.56 | 65.97 ± 2.59 | 70,848 / 70,808 |
+| k-means 256 | 37,060 | 1.520 ± 0.136 | 1.506 ± 0.157 | 653 / 623 |
+| **k-means 341 (bucket 수 맞춤)** | 49,182 | **1.206 ± 0.111** | **1.373 ± 0.127** | 721 / 699 |
+| ASWISS | 49,384 | 1.335 ± 0.133 | 1.461 ± 0.138 | 1,037 / 805 |
+| k-means 1024 (원자) | 142,761 | 1.200 ± 0.143 | 1.500 ± 0.151 | 813 / 701 |
+
+ASWISS에서 각 비교군을 뺀 차이다(같은 deal로 짝지은 95% 구간).
+
+| ASWISS − | 평균 정책 | 현재 정책 |
+|---|---:|---:|
+| k-means 256 | −0.186 [−0.364, −0.007] | −0.045 [−0.227, +0.138] |
+| **k-means 341 (bucket 수 맞춤)** | **+0.128 [−0.033, +0.290]** | +0.088 [−0.092, +0.269] |
+| k-means 1024 | +0.135 [−0.050, +0.320] | −0.039 [−0.222, +0.144] |
+
+![학습 곡선, k-means 256 대비 차이와 비율, bucket 수](results_stud_seed1_curves.png)
+
+![마지막 평균 정책의 LBR과 BR-gap 근사치 대 bucket 수](results_stud_seed1_frontier.png)
+
+## 해석 (seed 1 기준)
+
+1. **bucket 수를 맞추면 ASWISS가 k-means보다 낫지 않다.**
+   - 점추정은 0.13 ante 나쁘다. 구간은 0을 포함한다.
+   - k-means 256 대비 우위(−0.19)는 bucket이 33% 더 많은 데서 온 것으로 보는 것이 맞다.
+2. **이 게임에서는 카드 분할 해상도가 이미 포화로 보인다.**
+   - k-means 341(4.9만 bucket)과 k-means 1024(14.3만 bucket)의 평균 정책 LBR이 같다(1.206 대 1.200).
+   - 원자(1024) 수준을 넘어서는 이득이 원리적으로 없다(정리 3). 그래서 ASWISS가 이길 여지가 거의 없는 설정이었다.
+   - 남은 오차는 카드 클러스터가 아니라 다른 곳에서 온다고 볼 수 있다. 후보는 베팅 요약 key(이력을 잃는 imperfect recall), 고정 H4, 학습량이다.
+3. **분할된 자식은 표를 0에서 다시 시작한다.**
+   - 마지막 epoch에도 6,655개 bucket이 분할되었다. 그래서 최종 분할의 많은 bucket은 5.12M roots만 학습했다. 반면 k-means 표는 10.23M roots를 모두 학습했다.
+   - mini-stud에서도 같은 손해를 가설로 적었다. 확인하기 위해 상속 변형(`--inherit 1`, 자식이 부모 표를 복사)을 실행 중이다.
+4. **context(카드 정보 없음)는 LBR 64 ante다.** 카드 정보가 결정적이라는 점은 분명하다.
+5. **BR-gap 근사치는 LBR과 순위가 다르다.**
+   - LBR이 가장 나쁜 k-means 256이 근사치는 가장 작다. ASWISS는 근사치가 가장 크다.
+   - 이 근사치는 7구의 큰 팟 갈래 합이 지배하는 것으로 보인다. 그래서 이 문서의 결론에는 쓰지 않는다.
+6. **이전 프로젝트 최고치와의 비교:** 사용자 기록상 이전 최고치는 LBR 1.7–1.8이다. 이 실험의 모든 카드 기반 비교군(1.20–1.52)이 그보다 낮다.
+   - 평가 deal, pair 수, atlas가 달라 직접 비교는 아니다.
+   - 낮아진 몫은 ASWISS가 아니라 학습기(MCCFR+, 선형 평균, 일괄 갱신) 쪽일 가능성이 크다.
+
+## 메모리
+
+**최종 정책 파일:** 스냅숏 = 현재 표 + 평균 표, 행동 8개 × double. ASWISS는 분할 지도도 포함한다.
+
+| context | k-means 256 | k-means 341 | ASWISS | k-means 1024 |
+|---:|---:|---:|---:|---:|
+| 24 KB | 5.0 MB | 6.6 MB | 6.9 MB | 19.1 MB |
+
+**프로세스 메모리** (실제 상주 메모리)
+- 평가 프로세스(k-means 1024)는 138 MB다. 대부분은 카드 → 클러스터 배정 캐시(최대 100만 항목)다.
+- context 학습은 14 MB다.
+- ASWISS 학습(seed 2, 메모리 기록판)은 1.27M roots 시점에 최대 139 MB였다. 구성은 다음과 같다.
+  - bucket 기록 49,596개: 13.1 MB (분할 때 남은 부모 포함)
+  - 원자 구간 통계: 21.5 MB
+  - 분할 지도: 1.6 MB
+  - 나머지는 대부분 배정 캐시다.
+- 10M 전체 값은 그 실행이 끝나면 적는다.
+
+**이론 문서의 한계와 일치하는 점**
+- 학습 메모리는 k-means 1024와 같은 차수다. 라벨을 붙이려면 원자 통계가 필요하기 때문이다.
+- 최종 정책은 k-means 1024의 약 1/2.8이다. 다만 bucket 수를 맞춘 k-means와는 크기도 성능도 비슷하다.
+
+## AGENTS.md 점검 항목
+
+- **k-means 기준선:** 같은 학습기로 새로 학습한 k-means 256을 모든 곡선에 겹쳐 그렸다. bucket 수를 맞춘 k-means 341도 함께 그렸다.
+  - 이전에 기록된 hard256 결과(`curve_hard_10m.json`)는 이 환경에 없다. 조건도 달라서(이전 학습기, 다른 평가 seed) 겹쳐 그리지 않았다.
+- **평가 조건:** 모든 비교군이 같은 평가 deal, LBR seed, particle 수, gap deal을 쓴다. 학습 seed도 같다(1).
+- **남은 차이:**
+  - 학습 deal 경로는 전략이 달라지는 순간부터 갈라진다.
+  - k-means K=341은 ASWISS 결과를 보고 사후에 정했다.
+  - ASWISS의 분할은 자기 실행의 샘플 regret으로 정해진다.
+  - k-means는 카드 feature만 쓴다. 배팅 요약 key는 모든 비교군에 공통이다.
+- **축과 지표:** LBR은 음수가 될 수 있어 선형 축에 그렸다. BR-gap 근사치만 log 축이다. 어느 것도 exploitability와 같은 것으로 다루지 않았다.
+- **외삽:** 교차점이나 기울기로 외삽하지 않았다.
+
+## 실행
+
+```bash
+g++ -O3 -std=c++17 aswiss_stud.cpp -o aswiss_stud
+./aswiss_stud self-test --atlas ATLAS_K1024
+./aswiss_stud train --partition aswiss --atlas ATLAS_K1024 --roots 10230000 --z 2 --seed 1 --out runs/aswiss_k1024_z2_s1
+./aswiss_stud train --partition atom --atlas ATLAS_K --roots 10230000 --seed 1 --out runs/atom_kK_s1
+./aswiss_stud train --partition context --roots 10230000 --seed 1 --out runs/context_s1
+python evaluate.py ./aswiss_stud runs --runs aswiss_k1024_z2_s1:aswiss:ATLAS_K1024 atom_k256_s1:atom:ATLAS_K256 ...
+python evaluate.py ./aswiss_stud runs --runs ... --epochs 9 --pairs 20000 --tag final
+python plot_stud.py runs results_stud_seed1
+```
+
+atlas는 엔진으로 만든다. 예:
+
+```bash
+stud_mccfr --bucket power --fit-hands 100000 --clusters K --power-samples 128 --fit-sample-cap 50000 \
+  --fit-policy-epsilon 0.2 --save-atlas ATLAS --start-street 5 --algorithm mccfr --ante 1000 \
+  --hands 2 --iterations 0 --seed 37301
+```
+
+**실행 시간:** 4개 병렬 기준으로 원자 기반 학습은 비교군당 약 2–2.5시간, context는 약 5.5시간이었다. 평가는 2,000 pair에 약 2분, 20,000 pair에 약 20분이었다.

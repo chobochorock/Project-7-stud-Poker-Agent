@@ -1,13 +1,13 @@
 # ASWISS 수렴 증명 정리 (초안 v1)
 
-작성: 2026-10-27
+작성: 2026-10-27 (§9 추가: 2026-10-28)
 
 **이 문서의 위치**
 - [REGRET_SPACE_ABSTRACTION_KO.md](REGRET_SPACE_ABSTRACTION_KO.md) §4의 Theorem 4.2는 "H 역치 + 추적 표본" 분할 규칙에 대한 것이다.
 - 실제로 구현하고 실험한 규칙은 이와 다른 **누적 regret 라벨 분할**이다(`aswiss/aswiss.cpp`, `aswiss/gated.cpp`, `aswiss/stud7/aswiss_stud.cpp`).
 - 이 문서는 실험에 쓴 규칙 그대로를 대상으로 증명을 다시 세우고, 한계를 함께 적는다.
 - 기호와 기본 보조정리는 이전 문서를 따른다.
-- 수치 확인은 [test_aswiss_convergence.py](test_aswiss_convergence.py)에 있다(§2의 결정론적 보조정리 세 개).
+- 수치 확인은 [test_aswiss_convergence.py](test_aswiss_convergence.py)에 있다. §2의 결정론적 보조정리 세 개와 §9의 정확 분해, 단일 프로필 인증, 두 반례, 여유 라벨 집합을 작은 게임에서 정확히 계산해 확인한다.
 
 **상태 표기**
 - **[증명]** 이 문서 안에서 증명을 완결함
@@ -27,6 +27,11 @@
 | 정리 2 (수렴 조건부 방식) | 임의의 $\varepsilon_g>0$에 대해 같은 결론이다 | 증명 |
 | 정리 2′ (ε 정지 인증) | 분할 없이 게이트를 통과하면 그 시점에 $\mathrm{NashConv}\le\varepsilon_g+(\text{검정 역치 항})+(\text{샘플 오차 항})$이다. 샘플링 버전의 정지 규칙이며, $t^\*$를 몰라도 쓸 수 있다 | 증명. 단 엄밀한 오차 항은 수치적으로 공허함 |
 | 정리 3 (원자 일반화, 7-stud) | 원자 내부의 상쇄량 $H_{\mathcal A}$를 뺀 나머지 오차만 0으로 간다 | 증명 |
+| Lemma 7 (NashConv 정확 분해, §9) | NashConv는 최선 응답의 자기 도달확률로 가중한 정보집합 regret의 합과 **같다**. Lemma 1은 그 상계다 | 증명, 수치 확인 |
+| Lemma 9 (여유 라벨 집합, §9) | 추정 오차 η 안에서는 일치하는 bucket을 나누지 않는다. 잘못 배치되어도 손실은 4η 이내다 | 증명, 수치 확인 |
+| 정리 A (저장한 순간 전략 재생, §9) | 정리 1과 같은 꼴이다. 학습 중 멤버별 추적 없이 미방문 정보집합까지 라벨을 붙인다 | 증명 |
+| 정리 B1 (단일 프로필 인증, §9) | 모든 bucket이 일치하면 $\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)$. 출력할 전략 자체에 대한 인증이다 | 증명, 수치 확인 |
+| 정리 B3 (분할 시점 평균 전략, §9) | 경로 밖까지 순간 regret이 ε 이하인 프로필을 주는 학습기가 있으면 유한 라운드 안에 $\mathrm{NashConv}\le\varepsilon$, ε=0이면 정확한 균형 | 증명. 단 CFR 평균은 이 조건을 만족하지 않는다(명제 B4, 반례) |
 | 마지막 분할 시점 $t^\*$의 상계 | 없음 | 미해결 |
 | 교대 갱신, 선형 평균 (실제 구현) | 정리의 가정 밖 | 미해결 |
 | 학습 메모리 절감, 압축된 배포 정책 | 보장하지 않음 | 한계 |
@@ -324,10 +329,12 @@ $$\sum_I\psi(R_I)=\sum_\alpha\psi(R_\alpha)+H_{\mathcal A}=C+\sum_BH_{B\mid\math
    - 최악의 경우 완전 기억(정보집합마다 bucket 하나)까지 간다.
    - 고정 수준의 정규 $z$ 검정은 가짜 라벨이 무한히 자주 나올 수 있다. 그래서 원리적으로 완전 기억까지 쪼개질 수 있다. 수렴은 유지되지만 압축 이득은 사라진다.
    - 누적 오경보율이 유한한 검정(아래 7.2의 엄밀한 버전)을 쓰면 가짜 분할은 확률 $1-\delta$로 멈춘다. 대신 탐지가 느려진다(실험의 엄격 검정 정체와 같은 현상).
+   - §9.2 Lemma 9의 여유 라벨 집합은 좋은 사건 위에서 가짜 분할을 아예 없앤다.
 3. **학습 메모리를 줄이지 않는다.**
    - 라벨 계산을 위해 모든 멤버의 구간 합 $\tilde R_I$(정규 검정이면 $\sum\tilde r^2$도)를 저장한다. 이는 $\lvert\mathcal I\rvert\cdot\lvert A\rvert$ 규모로, 완전 기억 CFR의 regret 표와 같은 차수다.
    - 부분 추적($p<1$)에서는 Lemma 5의 전제("모든 멤버의 라벨이 같다")를 확인할 수 없다. 그래서 증명이 성립하지 않는다. 이전의 집중 순회 실험도 성능이 낮았다.
    - 7-stud는 원자가 정보집합보다 훨씬 거칠어서 추적 메모리가 원자 수 규모다. 실용적이지만 정리 3의 한계가 따라온다.
+   - §9.3의 방법 A(저장한 순간 전략 재생)는 이 추적을 bucket 표 $K_k$개로 바꾼다. 대가는 $H$ 항의 속도다.
 4. **보장 대상 $\bar\sigma$는 정보집합별 평균이라 압축되지 않는다.**
    - $\bar\sigma$는 자기 도달확률로 가중하므로, 저장하려면 $\lvert\mathcal I\rvert$ 규모가 필요하다.
    - bucket 표의 평균 $\tilde\sigma$는 멤버들이 자기 abstract 경로를 공유하지 않으면 $\bar\sigma$와 다르다(이전 문서 Prop 5.1). 따라서 **압축된 배포 정책에는 보장이 없다.**
@@ -376,6 +383,245 @@ $$\sum_I\psi(R_I)=\sum_\alpha\psi(R_\alpha)+H_{\mathcal A}=C+\sum_BH_{B\mid\math
 4. **$t^\*$ 상계:** margin 조건 아래의 증명을 시도한다. [미해결]
 5. **부분 추적:** $p<1$에서 확률적 탐지 논증(이전 Theorem 4.2의 Paley–Zygmund 방향)을 라벨 규칙에 맞게 다시 세운다. [미해결]
 6. **배포:** 반복 혼합 배포의 checkpoint 수와 exploitability 관계를 정리한다.
+7. **방법 A·B 실험 (mini-stud):** 정확 재생으로 세 규칙을 비교한다. 기존 구간 라벨, 방법 A(저장한 순간 전략), 방법 B(분할 시점 평균 전략), 그리고 기존 규칙 + 방법 B 분할의 결합이다. 정확 NashConv 대 bucket 수, 분할 횟수, 재시작으로 버린 학습량, 정리 B1의 $\rho_{\mathcal P}(\bar\sigma)$를 기록한다.
+8. **방법 B의 오라클:** 경로 밖까지 순간 regret을 줄이는 학습기(마지막 반복 수렴 학습기, 떨림 섭동 CFR)를 찾고, 명제 B4(b)의 반례에서 확인한다. [미해결]
+
+## 9. 고정 전략 판정: 저장한 순간 전략(방법 A)과 분할 시점 평균 전략(방법 B)
+
+작성 2026-10-28. 사용자가 제안한 두 판정 방식을 이 문서의 틀로 옮겨 증명한다.
+- 공통점: 판정 시점에 저장해 둔 전략으로 각 정보집합의 순간 regret을 다시 계산해 라벨을 붙인다. 그래서 학습 중에 방문하지 않은 정보집합에도 라벨이 붙는다.
+- 차이점: 다시 계산에 쓰는 전략이 다르다.
+
+| | 방법 A | 방법 B |
+|---|---|---|
+| 판정에 쓰는 전략 | 판정 구간 $W$의 반복 전략 $\sigma_t$ 중 무작위 시점 $K$개를 저장한 것 | 판정 시점의 평균 전략 $\bar\sigma$ 하나 |
+| 라벨이 겨냥하는 양 | 구간 누적 regret $R_I^W=\sum_{t\in W}r_t(I)$ | 단일 프로필의 순간 regret $r^{\bar\sigma}(I)$ |
+| 결과 | 정리 A: 정리 1과 같은 꼴이고, 같은 학습기(CFR+, ES)로 성립 | 정리 B1(인증), 정리 B3(오라클 조건 아래 유한 종료와 정확 수렴). 표준 CFR 평균은 그 조건을 만족하지 않음(명제 B4) |
+
+### 9.1 추가 기호와 가정
+
+- **단일 프로필 순간 regret:** 프로필 σ를 고정하면 $r^\sigma(I,a)=\pi^\sigma_{-i}(I)\big(q^\sigma(I,a)-\sum_b\sigma(I,b)\,q^\sigma(I,b)\big)$이다. 반복 $t$의 $r_t(I,a)$는 $r^{\sigma_t}(I,a)$다.
+- **bucket 합과 진단량:**
+  $$r^\sigma(B)=\sum_{I\in B}r^\sigma(I),\quad\rho(\sigma)=\sum_I\psi(r^\sigma(I)),\quad\rho_{\mathcal P}(\sigma)=\sum_B\psi(r^\sigma(B)),\quad H_B^\sigma=\sum_{I\in B}\psi(r^\sigma(I))-\psi(r^\sigma(B)).$$
+  - $\rho_{\mathcal P}$는 bucket들이 스스로 느끼는 순간 regret의 합이다. 구간 버전 $C^W$의 단일 프로필 판이다.
+- **최대 라벨 집합과 일치:** $M^\sigma(I)=\arg\max_{\ell\in A(I)\cup\{\varnothing\}}r^\sigma(I,\ell)$다. 동률이면 원소가 여러 개다.
+  - bucket $B$가 **σ-일치**한다는 것은 $\bigcap_{I\in B}M^\sigma(I)\ne\emptyset$이라는 뜻이다. 모든 멤버가 함께 최대로 하는 라벨이 있다는 말이다.
+  - 구간 버전도 $R_I^W$로 같게 정의한다.
+- **(A1) 경로 분리:** 같은 bucket의 두 멤버는 한 경로 위에 있지 않다. 한쪽이 다른 쪽의 선행 정보집합이 아니라는 뜻이다.
+  - 정리 B3의 (iii)(존재)에만 쓴다.
+  - time step과 context 분할은 한 street 안에서 같은 player의 연속 결정이 베팅 수나 체크 여부로 구별되므로 만족한다고 본다. 코드로 확인하지는 않았다.
+- **최선 응답:** $\beta_i$는 원게임 $G$에서 상대 전략에 대한 순수 최선 응답이다. $\pi_i^{\beta}(I)\in\{0,1\}$은 β를 따를 때 $I$에 이르는 자기 도달확률이다.
+
+### 9.2 공통 보조정리
+
+**Lemma 7 (NashConv의 정확한 분해) [증명, 수치 확인].** $\bar\sigma^W$를 구간 $W$의 sequence-form 평균, $\beta_i$를 $\bar\sigma^W_{-i}$에 대한 원게임 순수 최선 응답이라 하자. 그러면 다음이 성립한다.
+$$\mathrm{NashConv}(\bar\sigma^W)=\frac1{\lvert W\rvert}\sum_i\sum_{I\in\mathcal I_i}\pi_i^{\beta_i}(I)\,R_I^W\big(\beta_i(I)\big).$$
+특히 단일 프로필($\lvert W\rvert=1$)이면 다음과 같다.
+$$\mathrm{NashConv}(\sigma)=\sum_i\sum_{I\in\mathcal I_i}\pi_i^{\beta_i}(I)\,r^\sigma\big(I,\beta_i(I)\big)\le\rho(\sigma).$$
+
+*증명.*
+1. **성능 차이 항등식:** 고정된 σ와 player $i$의 순수 전략 β에 대해 $u_i(\beta,\sigma_{-i})-u_i(\sigma)=\sum_{I\in\mathcal I_i}\pi_i^\beta(I)\,r^\sigma(I,\beta(I))$이다.
+   - player $i$의 정보집합을 자기 깊이 $d$(그 정보집합 전에 자기가 둔 수의 개수)로 나눈다. perfect recall이므로 잘 정의된다.
+   - $\sigma^{(d)}$를 "깊이 $<d$에서는 β, $\ge d$에서는 $\sigma_i$"로 둔다. $\sigma^{(0)}=\sigma_i$이고, 깊이의 최댓값을 $D$라 하면 $\sigma^{(D+1)}=\beta$다.
+   - $\sigma^{(d+1)}$과 $\sigma^{(d)}$는 깊이 $d$ 정보집합에서만 다르다. 그런 $I$의 history $h$에는 확률 $\pi_i^\beta(I)\,\pi_{-i}(h)$로 도달하고, 그 뒤로는 둘 다 σ를 따른다.
+   - 그래서 효용 차이는 다음과 같다.
+     $$\sum_{I:\,\text{깊이 }d}\pi_i^\beta(I)\sum_{h\in I}\pi_{-i}(h)\Big(q(h,\beta(I))-\sum_b\sigma(I,b)\,q(h,b)\Big)=\sum_{I:\,\text{깊이 }d}\pi_i^\beta(I)\,r^\sigma(I,\beta(I)).$$
+   - $d$에 대해 더하면 된다.
+2. 영합이므로 $\mathrm{NashConv}(\bar\sigma)=\sum_i\max_\beta u_i(\beta,\bar\sigma_{-i})$이다.
+3. $\bar\sigma^W_{-i}$는 상대 실현계획의 평균이고, $u_i(\beta,\cdot)$는 그에 대해 선형이다. 그래서 $u_i(\beta,\bar\sigma_{-i})=\frac1{\lvert W\rvert}\sum_{t\in W}u_i(\beta,\sigma_{t,-i})$이다.
+4. $\sum_iu_i(\sigma_t)=0$을 빼서 넣으면 $\mathrm{NashConv}(\bar\sigma^W)=\frac1{\lvert W\rvert}\sum_t\sum_i\big[u_i(\beta_i,\sigma_{t,-i})-u_i(\sigma_t)\big]$이다. 각 $t$에 1을 쓰고 더하면 식이 된다.
+5. 부등식은 $\pi\le1$과 $R(\beta(I))\le\psi(R)$에서 나온다. □
+
+- Lemma 1은 이 항등식의 상계 쪽이다.
+- 등식에는 최선 응답의 자기 도달확률 $\pi^{\beta}$가 가중치로 붙는다. 그래서 최선 응답이 가지 않는 정보집합의 regret은 NashConv에 들어가지 않는다. §7.1-7의 "충분조건일 뿐"이 정확히 이 차이다.
+
+**Lemma 8 (단일 프로필 라벨 항등식) [증명; Lemma 2의 $\lvert W\rvert=1$].** 임의의 σ와 분할 $\mathcal P$에 대해 다음이 성립한다.
+$$\rho(\sigma)=\rho_{\mathcal P}(\sigma)+\sum_BH_B^\sigma,\qquad H_B^\sigma=\min_\ell\sum_{I\in B}\Big(\psi(r^\sigma(I))-r^\sigma(I,\ell)\Big).$$
+그리고 $H_B^\sigma=0$일 필요충분조건은 $B$가 σ-일치하는 것이다.
+
+*증명.*
+- 앞의 두 식은 Lemma 2의 대수 그대로다. 구간 합 자리에 $r^\sigma$를 넣는다.
+- 각 항이 0 이상이므로 $H_B^\sigma=0\iff\exists\ell\ \forall I:\ r^\sigma(I,\ell)=\psi(r^\sigma(I))\iff\bigcap_IM^\sigma(I)\ne\emptyset$이다. □
+
+**Lemma 9 (여유 라벨 집합: 노이즈가 있어도 거짓 분할이 없다) [증명, 수치 확인].**
+
+설정은 다음과 같다.
+- 라벨이 겨냥하는 참 벡터를 $x_I$라 한다. 방법 A에서는 $R_I^W$, 방법 B에서는 $r^{\bar\sigma}(I)$다.
+- 추정치 $\hat x_I$는 $\lVert\hat x_I-x_I\rVert_\infty\le\eta_I$를 만족한다. $\varnothing$ 성분은 둘 다 0이다.
+- **여유 라벨 집합:** $\hat M(I)=\{\ell:\hat x_I(\ell)\ge\max_{\ell'}\hat x_I(\ell')-2\eta_I\}$로 둔다.
+- **분할 규칙:** $\bigcap_{I\in B}\hat M(I)=\emptyset$이면 나눈다. 나눌 때는 각 멤버를 $\hat M(I)$의 대표 라벨(고정 순서의 첫 원소)별로 모은다.
+- $e_I(\ell)=\psi(x_I)-x_I(\ell)$로 둔다.
+
+그러면 다음이 성립한다.
+1. **(i)** 참 최대 라벨은 늘 들어 있다: $M(I)\subseteq\hat M(I)$.
+2. **(ii)** $\ell\in\hat M(I)$이면 $e_I(\ell)\le4\eta_I$이다.
+3. **(iii) 거짓 분할이 없다:** 참으로 일치하는 bucket($\bigcap M\ne\emptyset$)은 나뉘지 않는다.
+4. **(iv)** 나뉘지 않은 bucket은 $H_B\le4\sum_{I\in B}\eta_I$이다.
+5. **(v) 잘못 배치되어도 손실은 4η 이내다:** 나뉠 때 각 멤버가 들어가는 자식의 라벨 $\hat c$에 대해 $e_I(\hat c)\le4\eta_I$이다.
+
+*증명.* $\max_{\ell'}\hat x_I(\ell')\le\psi(x_I)+\eta_I$이다. 참 최대 라벨 $\ell^\*$에 대해서는 $\hat x_I(\ell^\*)\ge\psi(x_I)-\eta_I$이다.
+- (i): $\ell\in M(I)$이면 $\hat x_I(\ell)\ge\psi(x_I)-\eta_I\ge\max\hat x_I-2\eta_I$다.
+- (ii): $\ell\in\hat M(I)$이면 $x_I(\ell)\ge\hat x_I(\ell)-\eta_I\ge\max\hat x_I-3\eta_I\ge\hat x_I(\ell^\*)-3\eta_I\ge\psi(x_I)-4\eta_I$다.
+- (iii)은 (i)에서, (iv)는 (ii)와 Lemma 2(또는 8)에서, (v)는 (ii)에서 나온다. □
+
+- **현재 구현(argmax + 역치 θ)에는 (iii)이 없다.**
+  - 동률이나 근소한 차이에서 argmax가 노이즈로 뒤집히면, 참으로 일치하는 bucket도 나뉜다.
+  - §7.1-2의 "가짜 라벨이 무한히 자주 나올 수 있다"의 원인이다.
+- 여유 라벨 집합을 쓰면 좋은 사건 위에서는 가짜 분할이 생기지 않는다. 이 개선은 방법 A·B뿐 아니라 기존 규칙에도 그대로 쓸 수 있다.
+
+### 9.3 방법 A: 저장한 순간 전략 재생 [증명]
+
+**알고리즘 (이론 버전)**
+1. 학습은 §1.3 그대로다(ES + RM+, 방식 E). 다만 **멤버별 구간 합을 학습 중에 쌓지 않는다.**
+2. epoch $k$를 시작할 때 시점 $\tau_{k,1},\dots,\tau_{k,K_k}$를 $W_k$에서 독립·균등하게 뽑아 둔다. 학습의 무작위성과는 독립이다. 그 시점이 오면 bucket 전략표(lifting된 $\sigma_\tau$)만 저장한다.
+3. epoch 끝에서 저장한 전략마다 원게임을 한 번 정확히 순회해(작은 게임) 모든 정보집합의 $r_\tau(I)$를 계산한다. 그리고 $\hat R_I^{(k)}=\frac{L_k}{K_k}\sum_jr_{\tau_{k,j}}(I)$로 둔다. 학습 중 방문하지 않은 정보집합도 실제 값을 얻는다.
+4. 라벨과 분할은 Lemma 9의 여유 라벨 집합으로 한다($\eta=\eta_I^{(k)}$, 아래).
+- 방식 G처럼 구간 끝을 미리 모르면 저수지 표집(reservoir sampling)으로 $K$개를 비복원 균등 추출한다. Hoeffding 부등식은 비복원 추출에도 그대로 성립한다(Hoeffding 1963).
+
+**Lemma 10 (재생 추정의 집중) [증명].** 다음과 같이 두자.
+$$\eta_I^{(k)}:=L_k\Delta_I\sqrt{\frac2{K_k}\ln\frac{\pi^2N_A(k+1)^2}{3\delta}}.$$
+사건 $\mathcal E'_\delta$ = {모든 $k,I,a$에서 $\lvert\hat R_I^{(k)}(a)-R_I^{(k)}(a)\rvert\le\eta_I^{(k)}$}의 확률은 $1-\delta$ 이상이다.
+
+*증명.*
+- 학습 궤적 전체를 조건으로 두면 $\tau$들은 독립·균등이다. 그래서 $X_j=L_k\,r_{\tau_j}(I,a)$는 평균이 $R_I^{(k)}(a)$인 독립 표본이고 $\lvert X_j\rvert\le L_k\Delta_I$다.
+- Hoeffding 부등식으로 다음을 얻는다.
+  $$\Pr\big(\lvert\hat R-R\rvert>\eta\big)\le2\exp\!\Big(-\frac{K_k\eta^2}{2L_k^2\Delta_I^2}\Big)=\frac{6\delta}{\pi^2N_A(k+1)^2}.$$
+- $(I,a)$와 $k$에 대해 합집합 상계를 쓰면 $\sum_k6\delta/(\pi^2(k+1)^2)=\delta$다. □
+
+**Theorem A [증명].** (S1)–(S3), 방식 E, 재생 라벨(Lemma 9, $\eta=\eta^{(k)}$)을 가정한다. $\mathcal E_\delta\cap\mathcal E'_\delta$ 위에서(확률 $\ge1-2\delta$) 다음이 성립한다.
+1. 참으로 일치하는 bucket은 나뉘지 않는다.
+2. 분할은 많아야 $N-\lvert\mathcal P_0\rvert$번이다(Lemma 6).
+3. 끝에서 분할이 없었던 모든 epoch $k$에 대해 다음이 성립한다.
+$$\mathrm{NashConv}(\bar\sigma^{(k)})\le\frac1{L_k}\Big[\sum_BD_B\sqrt{\lvert A_B\rvert\,t_{k+1}}+2\sum_I\varepsilon_I(t_{k+1})\Big]+4\sum_I\Delta_I\sqrt{\frac2{K_k}\ln\frac{\pi^2N_A(k+1)^2}{3\delta}}.$$
+
+*증명.*
+- Lemma 1로 $C$와 $H$로 나눈다. $C$ 항은 정리 1과 같다(Lemma 3, 4).
+- 분할이 없었으므로 모든 bucket이 여유 라벨로 일치했다. Lemma 9(iv)와 Lemma 10으로 $H^{(k)}\le4\sum_I\eta_I^{(k)}$다.
+- $L_k$로 나누면 식이 된다. 1은 Lemma 9(iii)이다. □
+
+**뜻**
+- **수렴 조건:** $K_k/\log k\to\infty$이면 마지막 분할 이후 $\mathrm{NashConv}\to0$이다.
+  - $K_k\propto L_k$이면 정리 1과 같은 차수 $O(\sqrt{\log(kN_A/\delta)/L_k})$다.
+  - $K_k$가 이보다 작으면 $H$ 항의 속도가 $\sqrt{\log k/K_k}$로 느려진다.
+- **정리 1보다 나은 점:**
+  - 학습 중 멤버별 구간 합(정보집합 × 행동 규모)을 저장하지 않는다. 대신 bucket 표 $K_k$개를 저장한다. $K_k\lvert\mathcal P\rvert\ll N$이면 §7.1-3(학습 메모리)의 한계가 풀린다. 다만 그러면 위 속도 대가가 따른다.
+  - $H$ 항에 게임 샘플링 노이즈가 없다(정확 재생). 시간 표집 노이즈만 남는다.
+  - 방문하지 않은 정보집합도 실제 regret으로 라벨을 받는다. "미방문 = 없음" 규칙이 필요 없다.
+  - 여유 라벨을 쓰므로 좋은 사건 위에서 가짜 분할이 없다.
+- **같은 점:** 마지막 분할 시점 $t^\*$의 상계는 여전히 없다. 학습기가 CFR 계열이면 정리 1과 같다.
+- **큰 게임(7-stud):** 정확 순회 대신 저장한 전략마다 ES 순회 $m$번으로 재생하면, 같은 Hoeffding 논증에서 $K_k$ 자리가 $K_km$이 된다. 원자 단위로 하면 정리 3과 같이 $H_{\mathcal A}$가 남는다.
+
+### 9.4 방법 B: 분할 시점 평균 전략 [인증과 종료는 증명, 학습기 조건은 미해결]
+
+**알고리즘 (이론 버전, 라운드 방식)**
+1. 현재 분할 $\mathcal P_j$를 게이트를 통과할 때까지 학습해 평균 전략 $\bar\sigma_j$를 얻는다.
+2. 모든 정보집합의 $r^{\bar\sigma_j}(I)$를 계산한다. 작은 게임은 정확히, 큰 게임은 별도 평가 순회로 추정한다.
+3. 모든 bucket이 일치하면 $\bar\sigma_j$를 출력하고 멈춘다. 아니면 일치하지 않는 bucket을 대표 라벨별로 나누고 1로 돌아간다.
+
+**Theorem B1 (단일 프로필 인증) [증명, 수치 확인].** 임의의 lifting된 프로필 σ(분할 시점의 평균 전략 포함)에 대해 다음이 성립한다.
+$$\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)+\sum_BH_B^\sigma.$$
+- 모든 bucket이 σ-일치하면 $\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)$이다.
+- 추정 라벨(Lemma 9)로 판정해 나뉘지 않았으면 $\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)+4\sum_I\eta_I$이다.
+
+*증명.* Lemma 7(단일 프로필), Lemma 8, Lemma 9(iv)를 차례로 쓴다. □
+
+- 정리 2′와 달리 **실제로 내놓을 전략 σ 자체**에 대한 인증이다. 구간 평균이 아니고, 언제든 쓸 수 있다.
+- $\rho_{\mathcal P}(\sigma)$는 bucket 단위로 모으는 양이다(bucket별 순간 regret의 양수 부분 합).
+
+**Proposition B2 (bucket-행위자 균형의 존재) [증명].** (A1) 아래 모든 분할 $\mathcal P$에 대해 $\rho_{\mathcal P}(\sigma^\*)=0$인 lifting된 프로필 $\sigma^\*$가 존재한다.
+
+*증명.*
+- bucket 하나를 행위자 하나로 보고, 행위자 $B$의 보수를 $U_B(\sigma)=\sum_{I\in B}\pi_{-i}(I)\sum_b\sigma(B,b)\,q^\sigma(I,b)$로 둔다.
+- (A1)이면 $\sigma(B)$는 멤버들의 하위 트리에도, $\pi_{-i}$에도 나타나지 않는다. 그래서 $U_B=\sum_b\sigma(B,b)\,c_B(b)$이고, $c_B(b)=\sum_{I\in B}\pi_{-i}(I)\,q(I,b)$는 $\sigma(B)$와 무관하다.
+- 각 단말까지의 경로에서 한 행위자는 많아야 한 번 나타난다(두 player의 bucket 모두 (A1)). 그래서 $U_B$는 모든 행위자의 혼합전략에 대해 다중선형이고, 이것은 유한 게임이다. Nash 정리로 균형 $\sigma^\*$가 존재한다.
+- 균형에서 $\sigma^\*(B)$는 $c_B$를 최대화한다. 그런데 $r^{\sigma}(B,a)=c_B(a)-\sum_b\sigma(B,b)\,c_B(b)$이므로 $\psi(r^{\sigma^\*}(B))=0$이다. □
+
+- imperfect recall 추상 게임에는 behavioral 전략의 Nash 균형이 없을 수도 있다. 하지만 이 "bucket-행위자 균형"은 항상 있다.
+
+**Theorem B3 (오라클 조건 아래 유한 종료와 정확 수렴) [증명].** 매 라운드 학습기가 $\rho_{\mathcal P_j}(\sigma_j)\le\varepsilon$인 lifting된 프로필 $\sigma_j$를 내놓는다고 하자(ε-오라클). 라벨은 정확히 계산한다.
+1. **(i)** 분할이 일어나는 라운드는 많아야 $N-\lvert\mathcal P_0\rvert$번이다. 즉 알고리즘은 유한 라운드 안에 멈춘다.
+2. **(ii)** 멈춘 라운드의 출력은 $\mathrm{NashConv}\le\varepsilon$을 만족한다. ε=0 오라클이면 **원게임의 정확한 Nash 균형**이다.
+3. **(iii)** (A1) 아래 ε=0 오라클이 내놓을 프로필은 늘 존재한다(Prop B2). 그러므로 조건 자체는 공허하지 않다.
+- 라벨을 추정하면(Lemma 9, 매 라운드 좋은 사건) (ii)는 $\varepsilon+4\sum_I\eta_I$가 된다.
+
+*증명.*
+- (i): 일치하지 않는 bucket을 대표 라벨로 나누면 자식이 둘 이상이다. 모든 대표 라벨이 같은 $c$라면 $c\in\bigcap M$이 되어 일치에 모순이기 때문이다. 그래서 Lemma 6이 적용된다.
+- (ii): 멈춘다는 것은 모든 bucket이 일치한다는 뜻이므로 정리 B1이다. □
+
+- 정리 1·A보다 강한 꼴이다. 마지막 분할까지의 **라운드 수**가 유한하게 묶이고, ε=0이면 정확한 균형이다.
+- 다만 비용은 오라클 안에 숨어 있다. 한 라운드에 걸리는 학습 반복 수는 오라클이 ρ를 ε 아래로 만드는 데 걸리는 시간이다.
+
+**Proposition B4 (오라클 조건이 왜 필요한가: 두 반례) [증명, 수치 확인].**
+
+**(a) "추상 게임이 수렴했다"는 게이트로는 부족하다.**
+- **게임:** player는 하나이고 상대는 수가 없다.
+  - chance가 ½씩 L 또는 R을 고른다. L 뒤 정보집합이 $I_1$, R 뒤가 $I_2$이고, 둘은 bucket $B$를 공유한다(행동 a, b).
+  - $I_1$: a → 1, b → $K_2$(두 행동 모두 −10).
+  - $I_2$: a → 0, b → $K_4$(c → 2, d → −10).
+  - $K_2$, $K_4$는 각자 bucket이다.
+- **$\bar\sigma$:** $B$는 a, 경로 밖의 $K_4$는 d.
+  - 추상 게임의 최적값은 $B$=a일 때 0.5다($B$=b면 −4). 그래서 $\bar\sigma$는 추상 게임의 **정확한 최적**이고, 추상 exploitability는 0이다.
+  - 원게임의 최선은 $I_1$에서 a, $I_2$에서 b 다음 c로 1.5다. 그래서 $\mathrm{NashConv}(\bar\sigma)=1$이다.
+  - $\bar\sigma$ 아래 순간 regret은 $I_1=(0,-5.5)$, $I_2=(0,-5)$이다. 둘 다 {a, 없음}을 최대로 하므로 $B$는 **일치**하고 나뉘지 않는다.
+  - 정리 B1은 맞게 성립한다. $\rho_{\mathcal P}(\bar\sigma)=6$이기 때문이다. 경로 밖 $K_4$가 나빠서 c 쪽 regret이 6이다.
+- **오라클 프로필**($K_4$=c)에서는 $I_2$의 regret이 $(0,1)$이 되어 라벨이 {b}로 바뀐다. 그러면 $B$가 일치하지 않아 나뉘고, 다음 라운드에 정확한 균형이 된다.
+- **결론:** 방법 B의 게이트는 "추상 exploitability ≤ ε"이 아니라 "$\rho_{\mathcal P}(\bar\sigma)\le\varepsilon$"이어야 한다.
+
+**(b) CFR/CFR+의 평균 전략은 오라클이 아니다.**
+- **게임:** player 하나. $J$에서 L → 1, R → $K$. $K$에서 c → 0, d → 0.5. 완전 기억이다(추상화 없음).
+- RM이든 RM+든 $t\ge2$부터 $J$는 L만 둔다. 그래서 $K$의 평균 전략은 자기 도달확률이 양수였던 첫 반복의 균등 전략에 고정된다.
+- 그래서 모든 $T$에서 $\rho(\bar\sigma_T)\ge r^{\bar\sigma_T}(K,d)=0.25$다. 반면 $\mathrm{NashConv}(\bar\sigma_T)\to0$이다(균등 평균이면 $0.375/T$).
+- **결론:** CFR 평균은 자기가 가지 않는 곳의 전략을 고치지 않는다. 그래서 $\rho_{\mathcal P}(\bar\sigma)\le\varepsilon$ 게이트는 ε < 0.25에서 영원히 통과하지 못한다. 전략은 이미 최적인데도 그렇다.
+
+**뜻: 방법 B의 "더 좋은 조건"은 학습기 쪽 조건으로 옮겨진다.**
+- 필요한 학습기는 경로 밖까지 포함해 모든 bucket의 순간 regret을 0으로 만드는 프로필을 내놓아야 한다. bucket-행위자 균형이 그것이다.
+- 표준 CFR 평균은 그렇지 않다(B4(b)).
+- CFR이 보장하는 것은 **반복들의 시간 평균 regret**이 모든 bucket에서 작다는 것이다. 그 양을 직접 쓰는 것이 방법 A(그리고 기존 구간 규칙)다.
+- 오라클 후보는 다음과 같다. 모두 [미해결]이다.
+  - 마지막 반복이 수렴하는 학습기의 현재 전략. RM+는 일반적으로 보장이 없다.
+  - 경로 밖 정보집합에도 작은 확률을 강제하는 떨림(tremble) 섭동 CFR. 균형 정제 문헌의 방법이며 원문 확인이 필요하다.
+  - 작은 게임에서는 선형계획으로 직접 계산.
+- (A1)의 bucket-행위자 게임은 행위자마다 보수가 다른 일반합 게임이다. 그래서 그 균형 계산은 일반적으로 어려울 수 있다.
+
+### 9.5 노이즈와 잘못된 배치 [증명]
+
+사용자 논증을 방법 A·B 공통으로 정식화한다. 논증의 요지는 "노이즈로 다른 bucket에 들어가도, 그 bucket의 분할에 영향을 줬다면 그럴 만한 이유가 있으므로 문제없다"이다.
+
+**Proposition N [증명].** 판정 $d$마다 좋은 사건 $\mathcal E^{(d)}$(Lemma 9의 $\lVert\hat x-x\rVert_\infty\le\eta$)가 확률 $1-\delta_d$ 이상이고, 여유 라벨 집합으로 판정한다고 하자.
+1. **좋은 사건 위:**
+   - 일치하는 bucket은 나뉘지 않는다.
+   - 나뉠 때 잘못 배치되는 것은 참 최선과 $4\eta$ 이내로 차이 나는 "거의 동률" 라벨 사이뿐이다. 손실은 멤버마다 $4\eta_I$ 이하다(Lemma 9).
+2. **나쁜 사건 위(확률 $\le\delta_d$):**
+   - 임의로 잘못 나뉘거나 배치될 수 있다. 그래도 분할 총수는 $N-\lvert\mathcal P_0\rvert$ 이하다(Lemma 6).
+   - 잘못 들어간 멤버 $I$는 자식 $B'$의 라벨 $\ell'$에 대해 $e_I(\ell')$이 클 수 있다. 그 크기가 곧 $H_{B'}$의 증가분이다.
+   - 다음 판정 시점에도 $I$의 참 방향이 $\ell'$과 달라 그 시점의 $H_{B'}$가 $4\sum_{I\in B'}\eta_I$보다 크다고 하자. 그 판정이 좋은 사건 위에 있으면 $B'$는 일치하지 않으므로 다시 나뉜다(Lemma 9(iv)의 대우). 그래서 $I$는 떨어져 나간다.
+3. **결국 맞아진다:**
+   - $\sum_d\delta_d<\infty$이면 Borel–Cantelli 보조정리로 나쁜 판정은 거의 확실히 유한 번이다.
+   - 분할도 유한하므로, 어느 판정 이후로는 모든 판정이 좋은 사건 위에 있다.
+   - 그 뒤로는 분할 없는 판정마다 정리 A(또는 B1)의 인증이 성립한다.
+
+**사용자 논증의 판정**
+- **결론은 맞다.** 노이즈가 수렴을 깨지 않는다.
+- **이유는 두 가지로 고쳐야 한다.**
+  1. 좋은 사건 위에서 잘못 배치가 무해한 이유는 "그 bucket에 들어갈 만해서"가 아니다. 거의 동률(여유 4η 이내)인 라벨 사이에서만 일어나기 때문이다.
+  2. 나쁜 사건에서 잘못 들어간 멤버는 그 bucket을 향상시키지 않는다. 상쇄 $H$를 늘려 오염시키고, 바로 그 오염 때문에 다음 판정에서 다시 분리된다.
+- 수렴을 지키는 것은 "반복 판정 + 분할만 함"이다. 대가는 추가 분할과 자식 재시작 학습량이다.
+- **필요조건 하나:** 라벨은 판정마다 한 번 정해 다음 판정까지 고정해야 한다. 방문할 때마다 다시 표집하면 같은 정보집합이 매번 다른 bucket 전략을 쓰게 된다. 그것은 분할이 아니므로 위 정리 밖이다.
+
+### 9.6 요약: 더 좋은 조건으로 수렴하는가
+
+| 항목 | 기존 (구간 누적 라벨) | 방법 A (저장한 순간 전략) | 방법 B (분할 시점 평균 전략) |
+|---|---|---|---|
+| 표준 학습기(CFR+, ES)로 증명 | 정리 1 | 정리 A | 인증(정리 B1)만. 수렴은 오라클 조건 필요 |
+| 마지막 분할 이후 속도 | $O(\sqrt{\log k/L_k})$ | $K_k\propto L_k$면 같음. 아니면 $H$ 항이 $\sqrt{\log k/K_k}$ | 오라클 조건 아래 라운드 수 $\le N-\lvert\mathcal P_0\rvert$ |
+| 마지막 분할 시점 | 미해결 | 미해결 | 라운드 수로는 유한. 반복 수는 오라클 비용에 달림 |
+| 극한 | $\mathrm{NashConv}\to0$ | 같음 | ε-오라클이면 ε, 0-오라클이면 정확한 균형 |
+| 미방문 정보집합 | "없음"으로 처리 | 재생으로 실제 라벨 | 재생으로 실제 라벨 |
+| 학습 중 추적 메모리 | 정보집합 × 행동 | bucket 표 $K_k$개 | 평균 전략 하나 |
+| 가짜 분할 | 무한히 생길 수 있음 | 좋은 사건 위에서 없음(여유 라벨) | 같음 |
+
+- **방법 A:** 수렴 조건은 정리 1과 같다. 좋아지는 것은 메모리, 미방문 정보집합 처리, 가짜 분할이다.
+- **방법 B:** 증명할 수 있는 가장 좋은 꼴(유한 라운드, 정확한 균형)은 정리 1보다 강하다. 하지만 그 조건을 CFR 평균이 만족하지 않는다는 것을 반례로 보였다. 조건을 만족하는 실용적인 학습기를 찾는 것이 남은 문제다.
 
 ## 참고문헌
 
@@ -385,5 +631,7 @@ $$\sum_I\psi(R_I)=\sum_\alpha\psi(R_\alpha)+H_{\mathcal A}=C+\sum_BH_{B\mid\math
 - Burch, Moravčík, Schmid. Revisiting CFR+ and Alternating Updates. JAIR 2019.
 - Čermák, Lisý, Bošanský. Automated Construction of Bounded-Loss Imperfect-Recall Abstractions in Extensive-Form Games. arXiv 1803.05392 (CFR+IRA).
 - Freedman. On Tail Probabilities for Martingales. Annals of Probability 1975.
+- Hoeffding. Probability Inequalities for Sums of Bounded Random Variables. JASA 1963.
+- Nash. Non-Cooperative Games. Annals of Mathematics 1951.
 - Howard, Ramdas, McAuliffe, Sekhon. Time-uniform, Nonparametric, Nonasymptotic Confidence Sequences. Annals of Statistics 2021.
 - Waugh, Schnizlein, Bowling, Szafron. Abstraction Pathologies in Extensive Games. AAMAS 2009.

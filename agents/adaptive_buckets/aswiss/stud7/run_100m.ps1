@@ -24,6 +24,8 @@ param(
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
+# powershell -File passes "-Arms aswiss,k256" as the single string "aswiss,k256", so split on commas here
+$Arms = @($Arms | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Exe = Join-Path $Here "aswiss_stud.exe"
 $Atlas = Join-Path $Here "atlas"
@@ -34,6 +36,8 @@ $Arm = @{   # name, partition, atlas K, label
     k512   = @("atom_k512", "atom", 512, "k-means 512")
     k1024  = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly")
 }
+$unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
+if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }
 function AtlasPath($k) { Join-Path $Atlas "atlas_power${k}_heur_eps20_seed37301.bin" }
 $Suffix = if ($H4 -eq "learn") { "_h4_s$Seed" } else { "_s$Seed" }
 function RunName($a) { "$($Arm[$a][0])$Suffix" }

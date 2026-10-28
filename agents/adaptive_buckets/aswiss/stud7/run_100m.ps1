@@ -35,6 +35,7 @@ function AtlasPath($k) { Join-Path $Atlas "atlas_power${k}_heur_eps20_seed37301.
 $Suffix = if ($H4 -eq "learn") { "_h4_s$Seed" } else { "_s$Seed" }
 function RunName($a) { "$($Arm[$a][0])$Suffix" }
 New-Item -ItemType Directory -Force $Out | Out-Null
+$Out = (Resolve-Path $Out).Path   # absolute, so the training processes do not depend on their working directory
 
 if ($Action -eq "run") {
     if (-not (Test-Path $Exe)) {
@@ -52,7 +53,9 @@ if ($Action -eq "run") {
                   "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", $CheckpointEvery,
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
-        $p = Start-Process -FilePath $Exe -ArgumentList $argv -RedirectStandardError $log -WindowStyle Hidden -PassThru
+        # Start-Process joins the arguments with spaces, so quote the ones that contain spaces (paths)
+        $quoted = $argv | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }
+        $p = Start-Process -FilePath $Exe -ArgumentList $quoted -RedirectStandardError $log -WindowStyle Hidden -PassThru
         Set-Content $pidFile $p.Id
         Write-Host "started $name (pid $($p.Id)) -> $dir"
     }

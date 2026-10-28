@@ -258,6 +258,9 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
 ## 100M 실행 (중단 후 재개 가능)
 
 `run_100m.ps1`(Windows)와 `run_100m.sh`(Linux/WSL)는 비교군을 하나씩 별도 프로세스(코어 1개)로 돌린다.
+- **필요한 것:** `g++`(Windows는 MinGW-w64, C++17), Python 3 + numpy + matplotlib(평가와 그림). 저장소를 최신 main으로 받은 뒤 저장소 루트에서 실행한다.
+- **처음 실행:** 실행 파일이 없으면 스크립트가 직접 빌드한다(정적 런타임).
+- **확인한 것 (2026-10-28):** `run_100m.sh`로 시작 → STOP으로 중단 → 같은 명령으로 재개 → 평가 → 그림까지 실제로 돌렸다. Windows용 실행 파일은 MinGW-w64 교차 컴파일로 같은 옵션의 빌드가 경고 없이 되는 것까지 확인했다. `run_100m.ps1` 자체는 이 환경에 PowerShell이 없어 실행해 보지 못했다.
 - 기본 비교군은 ASWISS와 k-means 256 / 341 / 512 / 1024다.
 - k-means 341은 10M에서 맞춘 K다. 100M에서 ASWISS의 bucket 수가 어디까지 늘지 모르므로 512로 범위를 넓혀 두었다.
 - atlas 네 개는 `atlas/`에 들어 있다. 모두 heuristic ε=0.2 self-play 10만 핸드, seed 37301로 만들었다.
@@ -306,6 +309,8 @@ bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop |
 
 **규모 추정** (이 환경 기준: 4개 병렬, 10M에 2–2.5시간)
 - **시간:** 100M에 비교군당 약 22–25시간이다. 평가는 2,000 pair에 약 2분, 20,000 pair에 약 20분이다.
+  - `-H4 learn`(12액션)은 root 하나가 약 12–20배 비싸다. 2.55M에 5.8–7.7시간 걸렸으므로 100M이면 비교군당 약 10–13일이다. 12액션은 `-Roots 20000000`(약 2–2.5일)처럼 줄이거나 `-Arms`로 비교군을 줄이는 것을 권한다.
+  - 비교군 수가 코어 수보다 많으면 서로 느려진다. 코어가 4개면 `-Arms aswiss,k256,k341,k1024`처럼 4개로 줄인다.
 - **디스크:** 스냅숏이 비교군당 약 27개라 전체 약 1.5 GB다(k-means 1024는 개당 약 20 MB). checkpoint는 비교군당 수십 MB이고 덮어쓴다.
 - **메모리:** 비교군당 약 110–160 MB(10M 측정값)다. 100M에서는 bucket 기록이 늘어나는 만큼 조금 커진다.
 

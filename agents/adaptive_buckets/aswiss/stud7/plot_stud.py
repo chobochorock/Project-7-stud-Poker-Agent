@@ -8,7 +8,7 @@ budgets; bucket counts; the training-deal gap proxy recorded during training (cu
 LBR and gap of the newest evaluated average policy against buckets. eval_final rows (more LBR pairs) are drawn as
 hollow circles. LBR is an approximate exploitability lower bound and can be negative, so it stays on a linear axis.
 """
-import argparse, csv, json, os
+import argparse, csv, json, os, textwrap
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -139,7 +139,7 @@ for run, label, colour, marker, ls in SERIES:
             where="post", color=colour, lw=2, ls=ls)
     if learned_h4 and "h4_buckets_after" in log[0]:  # thin: the 4th-street (12-action) table
         ax.step([int(r["roots"]) for r in log], [int(r["h4_buckets_after"]) for r in log], where="post", color=colour, lw=1, ls=":")
-styled(ax, "Live buckets (steps: epoch ends)" + ("; thin dotted: 4th-street table" if learned_h4 else ""), "buckets (log)", True)
+styled(ax, "Live buckets (epoch ends)" + ("; dotted: 4th street" if learned_h4 else ""), "buckets (log)", True)
 ax = axes[2, 2]
 have_curve = False
 for run, label, colour, marker, ls in SERIES:
@@ -165,7 +165,7 @@ notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for 
     "(trajectory-relaxed; not a bound). Ante units.",
     "Intervals are deal-sampling intervals only; training-seed variation is not included. "
     f"LBR axes are scaled to points from {AXIS_FROM:.0e} roots on; earlier points may be clipped."]
-fig.text(0.01, 0.005, "\n".join(notes), fontsize=8, color=INK, va="bottom", ha="left", family="monospace")
+fig.text(0.01, 0.005, "\n".join(textwrap.fill(n, 200, subsequent_indent="  ") for n in notes), fontsize=8, color=INK, va="bottom", ha="left", family="monospace")
 handles, labels = axes[0, 0].get_legend_handles_labels()
 handles.append(plt.Line2D([], [], color=MUTED, **{k: v for k, v in HOLLOW.items() if k != "capsize"})); labels.append("re-evaluated with more pairs")
 fig.legend(handles, labels, frameon=False, fontsize=9, loc="upper center", ncol=3)

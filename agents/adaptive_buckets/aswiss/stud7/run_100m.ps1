@@ -7,6 +7,8 @@
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot     # figures
 # Each arm is one process (one core). "run" again after a stop, crash or reboot resumes every unfinished arm from its
 # checkpoint (bit-exact). eval/final skip snapshots already evaluated, so they can be rerun while training continues.
+# The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
+# C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
     [ValidateSet("run", "status", "stop", "eval", "final", "plot")] [string]$Action = "run",
     [long]$Roots = 100000000,
@@ -18,7 +20,8 @@ param(
     [ValidateSet("heuristic", "learn")] [string]$H4 = "heuristic",   # learn: 12-action 4th-street discard/reveal; names get _h4
     [long]$SnapshotEvery = 5000000,
     [long]$CheckpointEvery = 1000000,
-    [long]$CurveEvery = 100000
+    [long]$CurveEvery = 100000,
+    [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -37,10 +40,26 @@ function RunName($a) { "$($Arm[$a][0])$Suffix" }
 New-Item -ItemType Directory -Force $Out | Out-Null
 $Out = (Resolve-Path $Out).Path   # absolute, so the training processes do not depend on their working directory
 
+function FindGxx {
+    if ($Gxx) { if (Test-Path $Gxx) { return (Resolve-Path $Gxx).Path } else { throw "-Gxx $Gxx does not exist" } }
+    $onPath = Get-Command g++ -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+    foreach ($c in @("C:\ProgramData\mingw64\mingw64\bin\g++.exe", "C:\msys64\ucrt64\bin\g++.exe",
+                     "C:\msys64\mingw64\bin\g++.exe", "C:\mingw64\bin\g++.exe")) {
+        if (Test-Path $c) { return $c }
+    }
+    throw ("g++ not found. Pass -Gxx <path to g++.exe>, or install MinGW-w64 (for example MSYS2's " +
+           "mingw-w64-ucrt-x86_64-gcc) and rerun.")
+}
+
 if ($Action -eq "run") {
     if (-not (Test-Path $Exe)) {
-        # static runtime: the README notes that dynamically linked MinGW builds crash on this machine
-        g++ -O3 -std=c++17 -static-libstdc++ -static-libgcc (Join-Path $Here "aswiss_stud.cpp") -o $Exe
+        $compiler = FindGxx
+        # the compiler's own bin first, so a foreign libstdc++/libgcc DLL on PATH cannot shadow its tools
+        $env:PATH = (Split-Path -Parent $compiler) + ";" + $env:PATH
+        Write-Host "building $Exe with $compiler"
+        # fully static (libstdc++, libgcc, winpthread): the program needs no MinGW DLL at run time
+        & $compiler -O3 -std=c++17 -pthread -static (Join-Path $Here "aswiss_stud.cpp") -o $Exe
         if ($LASTEXITCODE -ne 0) { throw "build failed" }
     }
     foreach ($a in $Arms) {

@@ -259,7 +259,9 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
 
 `run_100m.ps1`(Windows)와 `run_100m.sh`(Linux/WSL)는 비교군을 하나씩 별도 프로세스(코어 1개)로 돌린다.
 - **필요한 것:** `g++`(Windows는 MinGW-w64, C++17), Python 3 + numpy + matplotlib(평가와 그림). 저장소를 최신 main으로 받은 뒤 저장소 루트에서 실행한다.
-- **처음 실행:** 실행 파일이 없으면 스크립트가 직접 빌드한다(정적 런타임).
+- **처음 실행:** 실행 파일이 없으면 스크립트가 직접 빌드한다. 실행 시 MinGW DLL이 필요 없도록 완전 정적(`-static`)으로 링크한다.
+  - `g++`는 다음 순서로 찾는다: `-Gxx <g++.exe 경로>` 인자, PATH, `C:\ProgramData\mingw64\mingw64\bin`, `C:\msys64\ucrt64\bin`, `C:\msys64\mingw64\bin`, `C:\mingw64\bin`.
+  - 어디에도 없으면 오류 메시지와 함께 멈춘다. 그때는 `-Gxx`로 경로를 주거나 MinGW-w64를 설치한다.
 - **확인한 것 (2026-10-28):** `run_100m.sh`로 시작 → STOP으로 중단 → 같은 명령으로 재개 → 평가 → 그림까지 실제로 돌렸다. Windows용 실행 파일은 MinGW-w64 교차 컴파일로 같은 옵션의 빌드가 경고 없이 되는 것까지 확인했다. `run_100m.ps1` 자체는 이 환경에 PowerShell이 없어 실행해 보지 못했다.
 - 기본 비교군은 ASWISS와 k-means 256 / 341 / 512 / 1024다.
 - k-means 341은 10M에서 맞춘 K다. 100M에서 ASWISS의 bucket 수가 어디까지 늘지 모르므로 512로 범위를 넓혀 두었다.

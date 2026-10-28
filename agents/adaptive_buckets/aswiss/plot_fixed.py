@@ -1,7 +1,7 @@
 """Figures for the fixed-strategy label and bucket-history key comparison on mini-stud small (seed 1,
 ASWISS_CONVERGENCE_KO.md section 9).
 
-Usage: python plot_fixed.py RUNS_DIR REF_DIR OUT_PREFIX
+Usage: python plot_fixed.py RUNS_DIR REF_DIR OUT_PREFIX [--last 40950000] [--mid 2550000]
 RUNS_DIR holds the label-rule runs (aswiss --label ..., one information set per label unit) and the bucket-history runs
 (--unit history); REF_DIR holds the matched 41M references run with the same tree, seed, epoch schedule and evaluator
 (perfect recall, card k-means, time step only). Writes
@@ -9,16 +9,21 @@ RUNS_DIR holds the label-rule runs (aswiss --label ..., one information set per 
                            k-means baseline at shared checkpoints, buckets, exact H, the certificate rho(avg)/2 and
                            label consistency under the average policy, splits per epoch
   OUT_PREFIX_history.png   bucket-history keys against the same rules on information sets
-  OUT_PREFIX_frontier.png  exploitability vs buckets at 2.55M and 40.95M iterations, every run
+  OUT_PREFIX_frontier.png  exploitability vs buckets at the --mid and --last checkpoints, every run
+--last is the last full-epoch checkpoint (the truncated 10k epoch after it is left out); runs missing from either
+directory are skipped and listed in the figure note.
 """
-import csv, os, sys
+import argparse, csv, os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-R, REF, OUT = sys.argv[1], sys.argv[2], sys.argv[3]
+ap = argparse.ArgumentParser()
+ap.add_argument("runs_dir"); ap.add_argument("ref_dir"); ap.add_argument("out")
+ap.add_argument("--last", type=int, default=40950000); ap.add_argument("--mid", type=int, default=2550000)
+a = ap.parse_args()
+R, REF, OUT, MID, LAST = a.runs_dir, a.ref_dir, a.out, a.mid, a.last
 INK, MUTED, GRID, SURFACE = "#1f1f1e", "#6b6a64", "#e4e3de", "#fcfcfb"
-MID, LAST = 2550000, 40950000
 M = lambda n: f"{n / 1e6:.2f}M"
 HIST_LS = (0, (6, 2, 1, 2))  # dash-dot: bucket-history keys
 # (directory, run, label, colour, marker, linestyle, splits); colours follow the run, slots in fixed order
@@ -40,7 +45,8 @@ REFS = [
 ]
 BASELINE = (REF, "hx_kmeans_matched_s1")
 present = lambda series: [s for s in series if os.path.exists(f"{s[0]}/{s[1]}/exploitability.csv")]
-RULES, HISTORY = present(RULES), present(HISTORY)
+missing = [s[1] for s in RULES + HISTORY + REFS if s not in present([s])]
+RULES, HISTORY, REFS = present(RULES), present(HISTORY), present(REFS)
 COUNTERPARTS = [s for s in RULES if s[1] in ("fx_window_z2_s1", "fx_avg_s1")]
 
 
@@ -88,8 +94,9 @@ def line(ax, x, y, colour, marker, ls, label=None):
 XLABEL = "external-sampling iterations"
 NOTE = (f"mini-stud small, seed 1, exact evaluation on the full tree (not LBR, not sampled). {M(LAST + 10000)} iterations; the "
         "truncated last 10k epoch is excluded. Every run: external-sampling MCCFR+, epochs doubling from 10k, children restart. "
-        "References are the matched 41M runs (same tree, seed, schedule, evaluator); k-means K fixed in hindsight.")
-base = {int(r["iters"]): r for r in expl(*BASELINE)}
+        "References: same tree, seed, schedule and evaluator; k-means K fixed in hindsight."
+        + (f" Not run, so not drawn: {', '.join(missing)}." if missing else ""))
+base = {int(r["iters"]): r for r in expl(*BASELINE)} if os.path.exists(f"{BASELINE[0]}/{BASELINE[1]}/exploitability.csv") else {}
 
 
 def exploitability_panels(axes, series):
@@ -102,15 +109,15 @@ def exploitability_panels(axes, series):
             x = [int(r["iters"]) for r in data]; y = [float(r[key]) for r in data]
             line(ax, x, y, colour, marker, ls, label)
             ends.append((x[-1], y[-1], f"{y[-1]:.4f}"))
-            if (d, run) == BASELINE: continue
             shared = [(xi, yi / float(base[xi][key])) for xi, yi in zip(x, y) if xi in base]
+            if (d, run) == BASELINE or not shared: continue
             line(rax, [s[0] for s in shared], [s[1] for s in shared], colour, marker, ls)
             rends.append((shared[-1][0], shared[-1][1], f"{shared[-1][1]:.3f}"))
         style(ax, f"{name}: exact exploitability", XLABEL, "NashConv/2 (ante)")
-        ax.set_xlim(8e3, 1.6e8); end_labels(ax, ends)
+        ax.set_xlim(8e3, 4 * LAST); end_labels(ax, ends)
         rax.axhline(1, color=INK, lw=1.2)
         style(rax, f"{name}: ratio to card k-means (= 1, black line)", XLABEL, "exploitability / k-means, same checkpoint")
-        rax.set_xlim(8e3, 1.6e8); end_labels(rax, rends)
+        rax.set_xlim(8e3, 4 * LAST); end_labels(rax, rends)
 
 
 def bucket_panel(ax, series):
@@ -122,7 +129,7 @@ def bucket_panel(ax, series):
         ax.axhline(value, color=MUTED, lw=1, ls=(0, (4, 3)))
         ax.text(1.1e4, value * 1.08, text, color=MUTED, fontsize=8, va="bottom")
     style(ax, "Bucket count (steps: epoch-end splits)", XLABEL, "buckets")
-    ax.set_xlim(8e3, 6e7); ax.set_ylim(25, 2e5)
+    ax.set_xlim(8e3, 1.5 * LAST); ax.set_ylim(25, 2e5)
 
 
 def h_panel(ax, series):
@@ -130,7 +137,7 @@ def h_panel(ax, series):
         rows = log_rows(d, run)
         line(ax, [int(r["iters"]) for r in rows], [float(r["exact_H_per_iter"]) for r in rows], colour, marker, ls)
     style(ax, "In-bucket cancellation H of the window (information sets)", XLABEL, "exact H per iteration (ante)")
-    ax.set_xlim(8e3, 6e7)
+    ax.set_xlim(8e3, 1.5 * LAST)
 
 
 def finish(fig, axes, path):
@@ -151,20 +158,20 @@ for d, run, label, colour, marker, ls, _ in RULES:
     line(ax, x, y, colour, marker, ls); ends.append((x[-1], y[-1], f"{y[-1]:.1f}x"))
 ax.axhline(1, color=INK, lw=1.2)
 style(ax, "Certificate looseness: rho(avg)/2 / exact exploitability", XLABEL, "bound / exact (>= 1 by Lemma 7)")
-ax.set_xlim(8e3, 1.6e8); end_labels(ax, ends)
+ax.set_xlim(8e3, 4 * LAST); end_labels(ax, ends)
 ax = axes[2][1]; ends = []
 for d, run, label, colour, marker, ls, _ in RULES:
     rows = log_rows(d, run)
     x = [int(r["iters"]) for r in rows]; y = [float(r["avg_consistent"]) for r in rows]
     line(ax, x, y, colour, marker, ls); ends.append((x[-1], y[-1], f"{y[-1]:.2f}"))
 style(ax, "Buckets whose members share a label under the average policy", XLABEL, "fraction of buckets", logy=False)
-ax.set_xlim(8e3, 1.6e8); ax.set_ylim(0, 1.02); end_labels(ax, ends)
+ax.set_xlim(8e3, 4 * LAST); ax.set_ylim(0, 1.02); end_labels(ax, ends)
 ax = axes[2][2]
 for d, run, label, colour, marker, ls, _ in RULES:
     rows = log_rows(d, run, splits_only=True)
     line(ax, [int(r["iters"]) for r in rows], [int(r["splits"]) for r in rows], colour, marker, ls)
 style(ax, "Buckets split at each epoch end", XLABEL, "buckets split")
-ax.set_xlim(8e3, 6e7)
+ax.set_xlim(8e3, 1.5 * LAST)
 finish(fig, axes, f"{OUT}_curves.png")
 
 # ---- figure 2: bucket-history keys against the same rules on information sets
@@ -180,7 +187,7 @@ if HISTORY:
     ax.axhline(51114, color=MUTED, lw=1, ls=(0, (4, 3)))
     ax.text(1.1e4, 51114 * 1.08, "information sets 51,114", color=MUTED, fontsize=8, va="bottom")
     style(ax, "Distinct history keys at each epoch end (label units)", XLABEL, "keys")
-    ax.set_xlim(8e3, 6e7); ax.set_ylim(500, 2e5)
+    ax.set_xlim(8e3, 1.5 * LAST); ax.set_ylim(500, 2e5)
     finish(fig, axes, f"{OUT}_history.png")
 
 # ---- figure 3: frontier, every run

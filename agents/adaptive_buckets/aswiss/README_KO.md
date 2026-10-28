@@ -340,6 +340,26 @@ python agents/adaptive_buckets/aswiss/plot_fixed.py RUNS_DIR REF_DIR results_fix
 
 원자료: `results_data/fixed_small_seed1.tar.gz`(일곱 비교군과 세 기준선의 `log.csv`, `exploitability.csv`). 풀면 `runs_fx/`와 `runs41m/`이 나오고, `python plot_fixed.py runs_fx runs41m <출력 접두어>`로 위 그림을 다시 그린다.
 
+## 장기 실행: 방법 B와 기존 + B (`run_long.py`)
+
+41M 비교에서 좋았던 두 규칙(방법 B, 기존 + B)을 기존 규칙, 기준선과 함께 더 길게 돌리는 스크립트다. Windows와 Linux에서 같은 명령으로 돈다.
+
+```bash
+# 저장소 루트에서. 필요: Python 3 + numpy + matplotlib, g++ (Windows는 MinGW-w64)
+python agents/adaptive_buckets/aswiss/run_long.py            # 시작 (끝난 비교군은 건너뜀)
+python agents/adaptive_buckets/aswiss/run_long.py --status   # 진행 상황
+# 옵션: --iters 163840000 --workers 4 --arms avg window_avg window pr kmeans timestep --exact-every 1000 --gxx <g++ 경로>
+```
+
+- **하는 일:** 트리를 한 번 내보내고(`export.py`), 학습기를 한 번 빌드한다(Windows는 완전 정적). 그다음 비교군마다 학습하고 모든 checkpoint를 정확히 평가(`eval.py`)한 뒤 그림을 그린다(`plot_fixed.py`).
+- **출력:** `agents/adaptive_buckets/aswiss/data/long/`. `runs/`(B, 기존 + B, 기존), `refs/`(완전 기억, k-means, time step), `results_curves.png`, `results_frontier.png`이 생긴다.
+- **기본 학습량:** 163,840,000반복이다. epoch가 두 배씩 늘어서 81.91M 다음 epoch 경계가 163.83M이다.
+  - `--iters 100000000`도 되지만, 그러면 마지막 epoch가 81.91M–100M으로 잘린다.
+- **k-means 기준선:** 41M 비교와 같은 7,051개 분할(`results_data/bucket_kmeans_matched_es_z2.bin`)을 쓴다.
+- **확인한 것:** 새로 내보낸 트리가 실험에 쓴 트리와 바이트 단위로 같았다. 비교군들도 41M 실행의 앞 checkpoint들과 같은 값을 냈다(같은 seed).
+- **중단:** 학습기에 checkpoint가 없다. 도중에 멈춘 비교군은 다음 실행 때 처음부터 다시 돌고, 끝난 비교군은 건너뛴다.
+- **시간 추정 (이 환경 기준):** 비교군 하나가 163.84M에 약 1시간이다(정확 H 진단 1,000반복마다 포함). 평가에 비교군당 수 분이 더 걸린다. 4개 병렬이면 6개 비교군에 약 2–2.5시간이다.
+
 ## 비교 조건과 남은 차이
 
 - **평가:** 모든 방식은 같은 정확한 BR 평가기, 같은 seed, 같은 반복 수로 평가했다. LBR이나 Local BR-gap이 아니다.

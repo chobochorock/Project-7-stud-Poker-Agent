@@ -15,6 +15,21 @@
 // Split rule at each epoch end: label(I) = argmax_a R_I(a) when the evidence is positive (full: per-reach
 // regret > tol; es: R_I(a) - z * sqrt(sum of squared sampled regrets) > 0), else "none". A bucket whose
 // members carry two or more labels is split by label; children restart Q and S. No merges.
+// --label selects the labels the split rule uses (ASWISS_CONVERGENCE_KO.md section 9); every rule except `window`
+// uses noise-tolerant label sets (Lemma 9): the labels within 2*eta of the best estimate, the "none" label being 0. A
+// bucket is split when its members' sets have no common label; each member then joins the child of the label of its
+// set shared by the most members of the bucket.
+//   window      the rule above (window sums of the sampled regrets, argmax + test)
+//   window_tol  the same sums with tolerant sets, eta = z * sqrt(max_a sum of squared sampled regrets)
+//   replay      method A: exact regrets of the current strategy at random iterations (each with probability
+//               --replay-p, own RNG), summed with weight 1/p (unbiased for the window sum); eta = z * sqrt(max_a of
+//               the unbiased variance estimate (1-p)/p^2 * sum r^2)
+//   avg         method B: exact regrets r^avg(I) of the bucket average policy at the epoch end (eta = 0)
+//   window+avg  the common refinement of `window` and `avg` (a bucket splits when either rule splits it)
+// Every epoch end also logs, for the bucket average policy avg, rho(avg)/2 (an upper bound on its exploitability,
+// Lemma 7), rho_P(avg)/2, H(avg)/2 and the fraction of buckets whose members share a label under avg.
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +62,8 @@ vector<int64_t> start;
 vector<double> prob, util, delta_range;
 int nI, B;
 vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
+vector<double> Rp, Rp2, Rit;                   // method A: replayed window sums, squared sums, one-iteration buffer
+mt19937_64 replay_rng;
 vector<int> touched;                           // buckets with pending regrets in Rtmp (apply_regrets visits only these)
 vector<char> dirty;
 double ex_weight = 0;
@@ -114,6 +131,40 @@ double exact(int h, double p0, double p1, double pc, double factor, double wfact
     return node;
 }
 
+// Exact counterfactual regrets of every original infoset under a lifted strategy, added to out: the current RM+
+// strategy of the bucket tables when pol is null, otherwise pol[I * W + a].
+double exact_into(int h, double p0, double p1, double pc, const double* pol, vector<double>& out) {
+    int pl = players[h];
+    if (pl == TERMINAL) return util[h];
+    int64_t e = start[h]; int d = degree[h];
+    if (pl == CHANCE) {
+        double v = 0;
+        for (int k = 0; k < d; ++k) v += prob[e + k] * exact_into(edges[e + k], p0, p1, pc * prob[e + k], pol, out);
+        return v;
+    }
+    int I = info[h];
+    double s[W], v[W], node = 0;
+    if (pol) for (int a = 0; a < d; ++a) s[a] = pol[(size_t)I * W + a];
+    else strategy(bucket[I], d, s);
+    for (int a = 0; a < d; ++a) {
+        v[a] = pl == 0 ? exact_into(edges[e + a], p0 * s[a], p1, pc, pol, out) : exact_into(edges[e + a], p0, p1 * s[a], pc, pol, out);
+        node += s[a] * v[a];
+    }
+    double sign = pl == 0 ? 1.0 : -1.0, cf = (pl == 0 ? p1 : p0) * pc;
+    for (int a = 0; a < d; ++a) out[(size_t)I * W + a] += sign * (v[a] - node) * cf;
+    return node;
+}
+
+// Tolerant label set: bit 0 = "none" (value 0), bit a + 1 = action a; labels within 2 * eta of the best value.
+uint32_t label_set(const double* x, int n, double eta) {
+    double best = 0;
+    for (int a = 0; a < n; ++a) best = max(best, x[a]);
+    double floor = best - 2 * eta - 1e-12;
+    uint32_t m = 0 >= floor ? 1u : 0u;
+    for (int a = 0; a < n; ++a) if (x[a] >= floor) m |= 1u << (a + 1);
+    return m;
+}
+
 // External sampling for traverser p: returns the sampled value for p.
 double es(int h, int p, double weight) {
     int pl = players[h];
@@ -179,7 +230,8 @@ inline double psi(const double* x, int n) {
 int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
-                            {"--test", "normal"}, {"--delta", "0.05"}};
+                            {"--test", "normal"}, {"--delta", "0.05"}, {"--label", "window"},
+                            {"--replay-p", "0.01"}, {"--replay-seed", "777"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -196,11 +248,17 @@ int main(int argc, char** argv) {
     long long exact_every = stoll(opt["--exact-every"]);
     string test = opt["--test"];
     double delta0 = stod(opt["--delta"]);
+    string label_rule = opt["--label"];
+    if (label_rule != "window" && label_rule != "window_tol" && label_rule != "replay" && label_rule != "avg" &&
+        label_rule != "window+avg") throw runtime_error("unknown --label " + label_rule);
+    double replay_p = stod(opt["--replay-p"]);
+    replay_rng.seed(stoull(opt["--replay-seed"]));
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
+    if (label_rule == "replay") { Rp.assign((size_t)nI * W, 0); Rp2.assign((size_t)nI * W, 0); Rit.assign((size_t)nI * W, 0); }
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
-    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl\n");
+    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent\n");
     auto t0 = chrono::steady_clock::now();
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
     while (t < T) {
@@ -209,6 +267,11 @@ int main(int argc, char** argv) {
         if (exact_every > 0 && t % exact_every == 0) {
             exact(0, 1, 1, 1, (double)exact_every, (double)exact_every * weight);
             ex_weight += (double)exact_every * weight;
+        }
+        if (label_rule == "replay" && uniform_real_distribution<double>(0, 1)(replay_rng) < replay_p) {
+            fill(Rit.begin(), Rit.end(), 0.0);
+            exact_into(0, 1, 1, 1, nullptr, Rit);   // regrets of the strategy used in this iteration
+            for (size_t i = 0; i < Rit.size(); ++i) { Rp[i] += Rit[i]; Rp2[i] += Rit[i] * Rit[i]; }
         }
         if (mode == "full") { full(0, 1, 1, 1, weight); apply_regrets(); }
         else for (int p = 0; p < 2; ++p) { es(0, p, weight); apply_regrets(); }
@@ -236,6 +299,22 @@ int main(int argc, char** argv) {
             for (int b = 0; b < B; ++b) eC += psi(&esum[(size_t)b * W], bcount[b]);
             fill(ExW.begin(), ExW.end(), 0);
         }
+        // regrets of the bucket average policy (the checkpoint policy_bucket_k): certificate diagnostics, method B labels
+        vector<double> avg_pol = policy(S, true), Ravg((size_t)nI * W, 0.0);
+        exact_into(0, 1, 1, 1, avg_pol.data(), Ravg);
+        double rho = 0, rhoP = 0;
+        int consistent = 0;
+        {
+            vector<double> asum((size_t)B * W, 0.0);
+            vector<uint32_t> common(B, ~0u);
+            for (int I = 0; I < nI; ++I) {
+                rho += psi(&Ravg[(size_t)I * W], counts[I]);
+                for (int a = 0; a < counts[I]; ++a) asum[(size_t)bucket[I] * W + a] += Ravg[(size_t)I * W + a];
+                common[bucket[I]] &= label_set(&Ravg[(size_t)I * W], counts[I], 0.0);
+            }
+            for (int b = 0; b < B; ++b) { rhoP += psi(&asum[(size_t)b * W], bcount[b]); consistent += common[b] != 0; }
+        }
+        const int Bprev = B;  // partition of the epoch just finished
         int splits = 0;
         if (split) {
             vector<int> label(nI, -1);
@@ -263,20 +342,53 @@ int main(int argc, char** argv) {
                 }
                 if (positive) label[I] = best;
             }
-            vector<map<int, int>> seen(B);
-            for (int I = 0; I < nI; ++I) seen[bucket[I]][label[I]] = 0;
+            // label sets: m1 (window rules, replay, avg) and m2 (avg, for window+avg); window = one label per set
+            bool two = label_rule == "window+avg";
+            vector<uint32_t> m1(nI), m2(two ? nI : 0);
+            for (int I = 0; I < nI; ++I) {
+                const size_t o = (size_t)I * W; const int n = counts[I];
+                if (label_rule == "window" || two) m1[I] = 1u << (label[I] + 1);
+                else if (label_rule == "window_tol") {
+                    double v = 0;
+                    for (int a = 0; a < n; ++a) v = max(v, Sq[o + a]);
+                    m1[I] = label_set(&Rw[o], n, mass[I] > 0 ? z * sqrt(v) : 0.0);
+                } else if (label_rule == "replay") {
+                    double x[W], v = 0;
+                    for (int a = 0; a < n; ++a) { x[a] = Rp[o + a] / replay_p; v = max(v, (1 - replay_p) / (replay_p * replay_p) * Rp2[o + a]); }
+                    m1[I] = label_set(x, n, z * sqrt(v));
+                } else m1[I] = label_set(&Ravg[o], n, 0.0);
+                if (two) m2[I] = label_set(&Ravg[o], n, 0.0);
+            }
+            // per bucket: common label of each set family, and how many members carry each label
+            vector<uint32_t> c1(B, ~0u), c2(B, ~0u);
+            vector<array<int, W + 1>> f1(B), f2(two ? B : 0);
+            for (auto& f : f1) f.fill(0);
+            for (auto& f : f2) f.fill(0);
+            for (int I = 0; I < nI; ++I) {
+                int b = bucket[I];
+                c1[b] &= m1[I];
+                for (int l = 0; l <= W; ++l) f1[b][l] += (m1[I] >> l) & 1;
+                if (two) { c2[b] &= m2[I]; for (int l = 0; l <= W; ++l) f2[b][l] += (m2[I] >> l) & 1; }
+            }
+            auto pick = [](uint32_t m, const array<int, W + 1>& f) {  // the member's label shared by most members
+                int best = -1;
+                for (int l = 0; l <= W; ++l) if (((m >> l) & 1) && (best < 0 || f[l] > f[best])) best = l;
+                return best;
+            };
             map<pair<int, int>, int> child;
             vector<int> next(nI);
             int B2 = 0;
             vector<int> keep;  // parent of each unsplit new id, -1 for children
             for (int I = 0; I < nI; ++I) {
-                int b = bucket[I], lab = seen[b].size() > 1 ? label[I] : -2;
+                int b = bucket[I];
+                bool s1 = c1[b] == 0, s2 = two && c2[b] == 0;
+                int lab = !s1 && !s2 ? -2 : (s1 ? pick(m1[I], f1[b]) : 0) * 8 + (s2 ? pick(m2[I], f2[b]) : 0);
                 auto key = make_pair(b, lab);
                 auto it = child.find(key);
                 if (it == child.end()) { it = child.emplace(key, B2++).first; keep.push_back(lab == -2 ? b : -1); }
                 next[I] = it->second;
             }
-            for (int b = 0; b < B; ++b) splits += seen[b].size() > 1;
+            for (int b = 0; b < B; ++b) splits += c1[b] == 0 || (two && c2[b] == 0);
             vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
             for (int nb = 0; nb < B2; ++nb)
                 if (keep[nb] >= 0)
@@ -292,13 +404,15 @@ int main(int argc, char** argv) {
         save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
         double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
         double len = (double)(t - epoch_start);
-        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
-                eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0);
+        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
+                eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
+                rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev);
         fflush(log);
         fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
                 k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);
         epoch_start = t;
         fill(Rw.begin(), Rw.end(), 0); fill(Sq.begin(), Sq.end(), 0); fill(mass.begin(), mass.end(), 0);
+        if (label_rule == "replay") { fill(Rp.begin(), Rp.end(), 0); fill(Rp2.begin(), Rp2.end(), 0); }
         ++k; L *= 2; epoch_end = t + L;
         if (epoch_end > T) epoch_end = T;
     }

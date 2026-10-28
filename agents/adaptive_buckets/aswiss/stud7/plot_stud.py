@@ -22,7 +22,8 @@ a = ap.parse_args()
 R, OUT, BASELINE = a.runs_dir, a.out, a.baseline
 INK, MUTED, GRID, SURFACE = "#1f1f1e", "#6b6a64", "#e4e3de", "#fcfcfb"
 # style by arm family: (colour, marker, linestyle)
-STYLE = {"atom_k1024": (INK, "o", (0, (5, 3))), "aswiss": ("#eb6834", "s", "-"), "atom_kmatched": ("#2a78d6", "D", "-"),
+STYLE = {"atom_k1024": (INK, "o", (0, (5, 3))), "aswiss_b_": ("#6250d6", "v", "-"), "aswiss_wb_": ("#e87ba4", "^", (0, (6, 2))),
+         "aswiss": ("#eb6834", "s", "-"), "atom_kmatched": ("#2a78d6", "D", "-"),
          "atom_k341": ("#2a78d6", "D", "-"), "atom_k512": ("#1baf7a", "^", "-"), "atom_k256": (INK, "P", "-"),
          "context": (MUTED, "X", (0, (1, 2)))}
 DEFAULT = ["atom_k1024_s1:k-means 1024 = atoms trained directly", "aswiss_k1024_z2_s1:ASWISS (context start, atom labels, z=2)",
@@ -163,6 +164,9 @@ notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for 
     "LOWER bound. Hollow circles: newest snapshot re-evaluated with more pairs.",
     "Gap proxy: sum over the traverser's visited states of max_a Q - E_pi Q under external sampling, mean of both seats "
     "(trajectory-relaxed; not a bound). Ante units.",
+    *(["Method B arms (aswiss_b: labels from the split-time average policy; aswiss_wb: window labels and B labels "
+       "combined) spend an extra average-policy pass of 25% of each epoch's roots per seat at the epoch end; "
+       "these traversals are not counted on the x axis."] if any(r.startswith(("aswiss_b_", "aswiss_wb_")) for r, *_ in SERIES) else []),
     "Intervals are deal-sampling intervals only; training-seed variation is not included. "
     f"LBR axes are scaled to points from {AXIS_FROM:.0e} roots on; earlier points may be clipped."]
 fig.text(0.01, 0.005, "\n".join(textwrap.fill(n, 200, subsequent_indent="  ") for n in notes), fontsize=8, color=INK, va="bottom", ha="left", family="monospace")

@@ -26,6 +26,11 @@
 //               the unbiased variance estimate (1-p)/p^2 * sum r^2)
 //   avg         method B: exact regrets r^avg(I) of the bucket average policy at the epoch end (eta = 0)
 //   window+avg  the common refinement of `window` and `avg` (a bucket splits when either rule splits it)
+// --unit history labels bucket-history keys instead of information sets (export_history.py): the key of I is (time
+// step of I, the buckets and actions of its player's earlier decisions, the observations since the last one), so the
+// past is remembered only through the buckets it fell into. Regret sums are pooled over each key and every member
+// gets the key's label set, so a split never separates two information sets with the same key. Keys refine as the
+// buckets of earlier decisions split; with one bucket per information set they identify information sets.
 // Every epoch end also logs, for the bucket average policy avg, rho(avg)/2 (an upper bound on its exploitability,
 // Lemma 7), rho_P(avg)/2, H(avg)/2 and the fraction of buckets whose members share a label under avg.
 #include <algorithm>
@@ -64,6 +69,31 @@ int nI, B;
 vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
 vector<double> Rp, Rp2, Rit;                   // method A: replayed window sums, squared sums, one-iteration buffer
 mt19937_64 replay_rng;
+vector<int32_t> prev_info, prev_action, inc_code, timestep_of;  // --unit history inputs
+vector<int> history_order;                                      // information sets, earlier decisions first
+
+// Bucket-history key of every information set under the current partition; returns the number of keys.
+int history_keys(vector<int>& key) {
+    map<vector<int>, int> ids;
+    vector<vector<int>> past(nI);  // (bucket, action) of each earlier decision of the acting player
+    key.assign(nI, -1);
+    for (int I : history_order) {
+        if (prev_info[I] >= 0) {
+            past[I] = past[prev_info[I]];
+            past[I].push_back(bucket[prev_info[I]]); past[I].push_back(prev_action[I]);
+        }
+        vector<int> k = past[I];
+        k.push_back(timestep_of[I]); k.push_back(inc_code[I]);
+        key[I] = ids.emplace(k, (int)ids.size()).first->second;
+    }
+    return (int)ids.size();
+}
+// Replace every information set's row of `x` (width w) by the sum over its key.
+void pool(vector<double>& x, const vector<int>& key, int keys, int w) {
+    vector<double> sum((size_t)keys * w, 0.0);
+    for (int I = 0; I < nI; ++I) for (int a = 0; a < w; ++a) sum[(size_t)key[I] * w + a] += x[(size_t)I * w + a];
+    for (int I = 0; I < nI; ++I) for (int a = 0; a < w; ++a) x[(size_t)I * w + a] = sum[(size_t)key[I] * w + a];
+}
 vector<int> touched;                           // buckets with pending regrets in Rtmp (apply_regrets visits only these)
 vector<char> dirty;
 double ex_weight = 0;
@@ -253,12 +283,26 @@ int main(int argc, char** argv) {
         label_rule != "window+avg") throw runtime_error("unknown --label " + label_rule);
     double replay_p = stod(opt["--replay-p"]);
     replay_rng.seed(stoull(opt["--replay-seed"]));
+    const bool history_unit = opt.count("--unit") && opt["--unit"] == "history";
+    if (opt.count("--unit") && opt["--unit"] != "history" && opt["--unit"] != "infoset") throw runtime_error("unknown --unit");
+    // replay sums every member exactly in the same iteration, so pooled squared sums would not be the key's variance;
+    // the sampled window sums visit at most one member of a key per traversal (the key fixes the player's actions)
+    if (history_unit && label_rule == "replay") throw runtime_error("--unit history does not support --label replay");
+    if (history_unit) {
+        prev_info = load<int32_t>(dir + "/prev.bin"); prev_action = load<int32_t>(dir + "/prev_action.bin");
+        inc_code = load<int32_t>(dir + "/inc.bin"); timestep_of = load<int32_t>(dir + "/bucket_timestep.bin");
+        vector<int> depth(nI, 0);
+        for (int I = 0; I < nI; ++I) for (int J = prev_info[I]; J >= 0; J = prev_info[J]) ++depth[I];
+        history_order.resize(nI);
+        for (int I = 0; I < nI; ++I) history_order[I] = I;
+        stable_sort(history_order.begin(), history_order.end(), [&](int a, int b) { return depth[a] < depth[b]; });
+    }
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     if (label_rule == "replay") { Rp.assign((size_t)nI * W, 0); Rp2.assign((size_t)nI * W, 0); Rit.assign((size_t)nI * W, 0); }
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
-    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent\n");
+    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units\n");
     auto t0 = chrono::steady_clock::now();
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
     while (t < T) {
@@ -315,8 +359,14 @@ int main(int argc, char** argv) {
             for (int b = 0; b < B; ++b) { rhoP += psi(&asum[(size_t)b * W], bcount[b]); consistent += common[b] != 0; }
         }
         const int Bprev = B;  // partition of the epoch just finished
-        int splits = 0;
+        int splits = 0, units = nI;
         if (split) {
+            if (history_unit) {  // pool every label input over the bucket-history key
+                vector<int> key;
+                units = history_keys(key);
+                pool(Rw, key, units, W); pool(Sq, key, units, W); pool(mass, key, units, 1); pool(Ravg, key, units, W);
+                if (label_rule == "replay") { pool(Rp, key, units, W); pool(Rp2, key, units, W); }
+            }
             vector<int> label(nI, -1);
             for (int I = 0; I < nI; ++I) {
                 if (mass[I] <= 0) continue;
@@ -404,9 +454,9 @@ int main(int argc, char** argv) {
         save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
         double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
         double len = (double)(t - epoch_start);
-        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
+        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
                 eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
-                rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev);
+                rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev, units);
         fflush(log);
         fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
                 k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);

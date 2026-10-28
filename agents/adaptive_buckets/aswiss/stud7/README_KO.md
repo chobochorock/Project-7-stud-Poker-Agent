@@ -262,6 +262,15 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
 - **처음 실행:** 실행 파일이 없으면 스크립트가 직접 빌드한다. 실행 시 MinGW DLL이 필요 없도록 완전 정적(`-static`)으로 링크한다.
   - `g++`는 다음 순서로 찾는다: `-Gxx <g++.exe 경로>` 인자, PATH, `C:\ProgramData\mingw64\mingw64\bin`, `C:\msys64\ucrt64\bin`, `C:\msys64\mingw64\bin`, `C:\mingw64\bin`.
   - 어디에도 없으면 오류 메시지와 함께 멈춘다. 그때는 `-Gxx`로 경로를 주거나 MinGW-w64를 설치한다.
+- **git symlink:** 저장소에는 폴더 이전 때 남긴 git symlink가 160개 있다(`agent/*.py`, `agents/cpp_mccfr/` 등).
+  - Windows의 git은 symlink 지원을 켜지 않으면 이것을 "대상 경로 한 줄짜리 텍스트 파일"로 받는다.
+  - 이 실험의 빌드는 엔진이 실제 헤더(`environments/seven_stud/stud_rules.hpp`)를 직접 include하도록 고쳐서 symlink 없이도 된다(2026-10-28).
+  - 프로젝트의 다른 부분까지 쓰려면 Windows 개발자 모드를 켜고, 저장소에서 아래를 한 번 실행해 symlink를 다시 받는다.
+    ```powershell
+    git config core.symlinks true
+    git ls-files -s | Where-Object { $_ -like '120000*' } | ForEach-Object { $_.Split("`t")[1] } |
+        ForEach-Object { Remove-Item -LiteralPath $_ -Force; git checkout -- $_ }
+    ```
 - **확인한 것 (2026-10-28):** `run_100m.sh`로 시작 → STOP으로 중단 → 같은 명령으로 재개 → 평가 → 그림까지 실제로 돌렸다. Windows용 실행 파일은 MinGW-w64 교차 컴파일로 같은 옵션의 빌드가 경고 없이 되는 것까지 확인했다. `run_100m.ps1` 자체는 이 환경에 PowerShell이 없어 실행해 보지 못했다.
 - 기본 비교군은 ASWISS와 k-means 256 / 341 / 512 / 1024다.
 - k-means 341은 10M에서 맞춘 K다. 100M에서 ASWISS의 bucket 수가 어디까지 늘지 모르므로 512로 범위를 넓혀 두었다.

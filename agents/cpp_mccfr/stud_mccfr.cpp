@@ -189,7 +189,9 @@ bool aggressive(Action action) {
     return action >= BBING && action <= FULL;
 }
 
-#include "stud_rules.hpp"
+// The real header, not the stud_rules.hpp symlink next to this file: Git on Windows checks symlinks out as
+// text files holding the target path unless symlink support is enabled.
+#include "../../environments/seven_stud/stud_rules.hpp"
 
 using DeepCfrTensor = std::array<float, kDeepCfrTensorSize>;
 

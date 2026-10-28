@@ -29,12 +29,14 @@ $Arms = @($Arms | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() 
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Exe = Join-Path $Here "aswiss_stud.exe"
 $Atlas = Join-Path $Here "atlas"
-$Arm = @{   # name, partition, atlas K, label
-    aswiss = @("aswiss_k1024_z2", "aswiss", 1024, "ASWISS (context start, K=1024 atoms, z=2)")
-    k256   = @("atom_k256", "atom", 256, "k-means 256")
-    k341   = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)")
-    k512   = @("atom_k512", "atom", 512, "k-means 512")
-    k1024  = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly")
+$Arm = @{   # name, partition, atlas K, label, extra trainer arguments
+    aswiss    = @("aswiss_k1024_z2", "aswiss", 1024, "ASWISS (context start, K=1024 atoms, z=2)", "")
+    aswiss_b  = @("aswiss_b_k1024_z2", "aswiss", 1024, "ASWISS, method B labels (average policy, sampled)", "--label avg")
+    aswiss_wb = @("aswiss_wb_k1024_z2", "aswiss", 1024, "ASWISS, window + method B labels", "--label window+avg")
+    k256      = @("atom_k256", "atom", 256, "k-means 256", "")
+    k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")
+    k512      = @("atom_k512", "atom", 512, "k-means 512", "")
+    k1024     = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly", "")
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }
@@ -57,14 +59,24 @@ function FindGxx {
 }
 
 if ($Action -eq "run") {
-    if (-not (Test-Path $Exe)) {
+    # rebuild when the executable is missing or older than its sources (for example after git pull)
+    $sources = @((Join-Path $Here "aswiss_stud.cpp"), (Join-Path $Here "h4_lbr_generated.hpp"),
+                 (Join-Path $Here "..\..\..\cpp_mccfr\stud_mccfr.cpp"))
+    $stale = -not (Test-Path $Exe)
+    if (-not $stale) {
+        $built = (Get-Item $Exe).LastWriteTime
+        $stale = @($sources | Where-Object { (Get-Item $_).LastWriteTime -gt $built }).Count -gt 0
+    }
+    if ($stale) {
         $compiler = FindGxx
         # the compiler's own bin first, so a foreign libstdc++/libgcc DLL on PATH cannot shadow its tools
         $env:PATH = (Split-Path -Parent $compiler) + ";" + $env:PATH
         Write-Host "building $Exe with $compiler"
         # fully static (libstdc++, libgcc, winpthread): the program needs no MinGW DLL at run time
         & $compiler -O3 -std=c++17 -pthread -static (Join-Path $Here "aswiss_stud.cpp") -o $Exe
-        if ($LASTEXITCODE -ne 0) { throw "build failed" }
+        if ($LASTEXITCODE -ne 0) {
+            throw "build failed. If training processes are still running they lock $Exe: -Action stop, wait until -Action status shows running=False, then run again (the arms resume exactly)."
+        }
     }
     foreach ($a in $Arms) {
         $name = RunName $a; $dir = Join-Path $Out $name
@@ -75,6 +87,7 @@ if ($Action -eq "run") {
         $argv = @("train", "--partition", $Arm[$a][1], "--atlas", (AtlasPath $Arm[$a][2]), "--z", "2", "--seed", $Seed,
                   "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", $CheckpointEvery,
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
+        if ($Arm[$a][4]) { $argv += $Arm[$a][4] -split " " }
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
         # Start-Process joins the arguments with spaces, so quote the ones that contain spaces (paths)
         $quoted = $argv | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }

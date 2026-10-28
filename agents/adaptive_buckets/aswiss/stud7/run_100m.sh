@@ -14,22 +14,30 @@ OUT=${OUT:-agents/adaptive_buckets/aswiss/stud7/data/runs_100m}; WORKERS=${WORKE
 H4=${H4:-heuristic}; SNAPSHOT_EVERY=${SNAPSHOT_EVERY:-5000000}; CHECKPOINT_EVERY=${CHECKPOINT_EVERY:-1000000}
 CURVE_EVERY=${CURVE_EVERY:-100000}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
 EXE=$HERE/aswiss_stud
-declare -A NAME=([aswiss]=aswiss_k1024_z2 [k256]=atom_k256 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024)
-declare -A PART=([aswiss]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom)
-declare -A K=([aswiss]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024)
-declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [k256]="k-means 256"
+declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
+                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024)
+declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom)
+declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024)
+declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg")
+declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
+                  [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly")
 atlas() { echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }
 mkdir -p "$OUT"
 case $ACTION in
 run)
-    [ -x "$EXE" ] || g++ -O3 -std=c++17 "$HERE/aswiss_stud.cpp" -o "$EXE"
+    # rebuild when the executable is missing or older than its sources (for example after git pull)
+    if [ ! -x "$EXE" ] || [ "$HERE/aswiss_stud.cpp" -nt "$EXE" ] || [ "$HERE/h4_lbr_generated.hpp" -nt "$EXE" ] ||
+       [ "$HERE/../../../cpp_mccfr/stud_mccfr.cpp" -nt "$EXE" ]; then
+        g++ -O3 -std=c++17 "$HERE/aswiss_stud.cpp" -o "$EXE" ||
+            { echo "build failed; if arms are still running, stop them first (stop, then status)"; exit 1; }
+    fi
     for a in $ARMS; do
         name=${NAME[$a]}$SUFFIX
         if [ -f "$OUT/$name.pid" ] && kill -0 "$(cat "$OUT/$name.pid")" 2>/dev/null; then echo "$name already running"; continue; fi
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \
             --epoch0 10000 --checkpoint-every "$CHECKPOINT_EVERY" --snapshot-every "$SNAPSHOT_EVERY" --curve-every "$CURVE_EVERY" \
-            --h4 "$H4" --out "$OUT/$name" \
+            --h4 "$H4" ${EXTRA[$a]:-} --out "$OUT/$name" \
             >> "$OUT/$name.stderr.log" 2>&1 &
         echo $! > "$OUT/$name.pid"; echo "started $name (pid $!)"
     done ;;

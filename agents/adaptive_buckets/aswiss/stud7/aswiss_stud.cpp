@@ -3,7 +3,8 @@
 // Build: g++ -O3 -std=c++17 aswiss_stud.cpp -o aswiss_stud
 // Train: ./aswiss_stud train --partition aswiss|atom|context [--atlas ATLAS] --roots N [--epoch0 10000]
 //                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] [--checkpoint-every 1000000]
-//                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn] --out DIR
+//                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
+//                            [--label window|avg|window+avg] [--avg-frac 0.25] --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
@@ -21,6 +22,11 @@
 //            Unvisited members (for a rest bucket: unseen clusters) count as none. A bucket carrying two
 //            or more labels is split by label; children restart their tables (--inherit 1: each child starts
 //            from a copy of the parent's regret and average tables); no merges.
+//            --label avg (method B, ASWISS_CONVERGENCE_KO.md section 9): the labels come instead from the regrets of
+//            the bucket average policy, estimated at each epoch end by a separate external-sampling pass of
+//            --avg-frac x (epoch length) roots in which both seats play the frozen average policy (own RNG seeded
+//            by seed and epoch, so resuming stays exact); same z test. --label window+avg splits by the pair of
+//            both labels (the common refinement). Both need --partition aswiss and the heuristic H4.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -67,6 +73,7 @@ struct AtomStats {
     std::array<double, A> r{}, sq{};
     double visits = 0;
 };
+using AtomMap = std::unordered_map<InfoKey, AtomStats, InfoKeyHash>;
 struct Context {
     std::unordered_map<uint16_t, uint32_t> member;  // explicit cluster -> bucket
     uint32_t rest = kNone;
@@ -503,18 +510,30 @@ public:
         for (const auto& [b, s] : sums) w.C += psi(s, masks[b]);
         return w;
     }
-    // ASWISS refinement from the window's atom labels; returns the number of buckets split
-    int split(double z, bool inherit = false) {
+    // label of one atom: argmax_a R(a) when R(a) > z sqrt(sum r(a)^2), else -1 (none)
+    static int atom_label(const InfoKey& atom, const AtomStats& st, double z) {
+        int best = -1;
+        for (int a = 0; a < A; ++a) if ((atom.legal_mask & (1u << a)) && (best < 0 || st.r[a] > st.r[best])) best = a;
+        return st.visits > 0 && st.r[best] > z * std::sqrt(st.sq[best]) ? best : -1;
+    }
+    // ASWISS refinement; returns the number of buckets split. Labels come from the window sums, from the
+    // average-policy regrets `avg` (avg without window), or from the pair of both (the common refinement).
+    int split(double z, bool inherit = false, const AtomMap* avg = nullptr, bool use_window = true) {
+        struct Labels { int window = -1, average = -1; };
+        std::unordered_map<InfoKey, Labels, InfoKeyHash> labels_of;
+        if (use_window) for (const auto& [atom, st] : atoms_) labels_of[atom].window = atom_label(atom, st, z);
+        if (avg) for (const auto& [atom, st] : *avg) labels_of[atom].average = atom_label(atom, st, z);
         std::map<InfoKey, std::vector<std::pair<uint16_t, int>>, KeyLess> by_context;  // ordered: reproducible ids
-        for (const auto& [atom, st] : atoms_) {
-            int best = -1;
-            for (int a = 0; a < A; ++a) if ((atom.legal_mask & (1u << a)) && (best < 0 || st.r[a] > st.r[best])) best = a;
-            const int label = st.visits > 0 && st.r[best] > z * std::sqrt(st.sq[best]) ? best : -1;
+        for (const auto& [atom, l] : labels_of) {
+            const int label = !avg ? l.window : !use_window ? l.average
+                            : l.window < 0 && l.average < 0 ? -1 : (l.window + 1) * 16 + (l.average + 1);
             by_context[context_of(atom)].push_back({atom.power_cluster, label});
         }
         int splits = 0;
         for (auto& [ctx, visited] : by_context) {
-            Context& c = contexts_.at(ctx);
+            const auto found = contexts_.find(ctx);
+            if (found == contexts_.end()) continue;  // a context only the average-policy pass reached
+            Context& c = found->second;
             std::sort(visited.begin(), visited.end());
             std::unordered_map<uint16_t, int> label_of(visited.begin(), visited.end());
             std::map<uint32_t, std::set<int>> labels;  // bucket -> labels of its members
@@ -765,6 +784,36 @@ double gap_traverse(const Model& model, bool average, State state, int traverser
     return node;
 }
 
+// One external-sampling traversal under the frozen average policy (method B labels): adds the traverser's sampled
+// regrets v(a) - sum_b avg(b) v(b) to `stats` per atom. The model is not changed.
+double avg_traverse(const Model& model, State state, int traverser, std::mt19937_64& rng, AtomMap& stats) {
+    if (state.terminal) return terminal_net_search(state, traverser);
+    const int actor = state.actor;
+    const uint8_t mask = valid_mask(state, actor);
+    const auto sigma = model.strategy(state, actor, true);
+    if (actor != traverser) {
+        step(state, actor, sample_action(sigma, mask, rng));
+        return avg_traverse(model, std::move(state), traverser, rng, stats);
+    }
+    std::array<double, A> v{};
+    double node = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        State child = state;
+        step(child, actor, static_cast<Action>(a));
+        v[a] = avg_traverse(model, std::move(child), traverser, rng, stats);
+        node += sigma[a] * v[a];
+    }
+    AtomStats& st = stats[model.atom_key(state, actor)];
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        const double r = v[a] - node;
+        st.r[a] += r; st.sq[a] += r * r;
+    }
+    st.visits += 1;
+    return node;
+}
+
 std::map<std::string, std::string> parse(int argc, char** argv, std::map<std::string, std::string> opt) {
     for (int i = 2; i + 1 < argc; i += 2) {
         if (!opt.count(argv[i])) throw std::runtime_error(std::string("unknown option ") + argv[i]);
@@ -858,11 +907,18 @@ int train(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
-                                {"--curve-every", "10000"}, {"--h4", "heuristic"}});
+                                {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
+                                {"--avg-frac", "0.25"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
     const bool learn_h4 = o["--h4"] == "learn";
+    const std::string label_rule = o["--label"];
+    if (label_rule != "window" && label_rule != "avg" && label_rule != "window+avg")
+        throw std::runtime_error("--label must be window, avg or window+avg");
+    if (label_rule != "window" && (o["--partition"] != "aswiss" || learn_h4))
+        throw std::runtime_error("--label avg and window+avg need --partition aswiss and the heuristic H4");
+    const double avg_frac = std::stod(o["--avg-frac"]);
     Model model(partition, atlas.get(), learn_h4);
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -876,7 +932,8 @@ int train(int argc, char** argv) {
     std::ostringstream cfg;
     cfg << "partition=" << o["--partition"] << ";atlas=" << std::filesystem::path(o["--atlas"]).filename().string() << ":"
         << file_size_or_zero(o["--atlas"]) << ";epoch0=" << epoch0 << ";z=" << o["--z"] << ";inherit=" << o["--inherit"]
-        << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "");
+        << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "")
+        << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -949,7 +1006,22 @@ int train(int argc, char** argv) {
             index << file << ',' << s.t << ",epoch," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
-            const int splits = partition == Partition::Aswiss ? model.split(z, inherit) : 0;
+            int splits = 0;
+            if (partition == Partition::Aswiss && label_rule == "window") splits = model.split(z, inherit);
+            else if (partition == Partition::Aswiss) {
+                // method B: regrets of the frozen average policy from a separate sampled pass (deterministic per epoch)
+                AtomMap avg;
+                std::mt19937_64 eval_rng(std::stoull(o["--seed"]) * 1000003ull + s.k);
+                const uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
+                for (uint64_t i = 0; i < n; ++i) {
+                    auto eval_deck = fresh_deck();
+                    std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
+                    for (int p = 0; p < 2; ++p)
+                        avg_traverse(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), p, eval_rng, avg);
+                }
+                splits = model.split(z, inherit, &avg, label_rule == "window+avg");
+                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " atoms\n";
+            }
             model.clear_window();
             const auto live = model.live_buckets();
             const double len = static_cast<double>(s.t - s.epoch_start), secs = elapsed();

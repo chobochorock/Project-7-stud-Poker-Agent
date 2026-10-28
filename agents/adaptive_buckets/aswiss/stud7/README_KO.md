@@ -275,6 +275,13 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
     ```
 - **확인한 것 (2026-10-28):** `run_100m.sh`로 시작 → STOP으로 중단 → 같은 명령으로 재개 → 평가 → 그림까지 실제로 돌렸다. Windows용 실행 파일은 MinGW-w64 교차 컴파일로 같은 옵션의 빌드가 경고 없이 되는 것까지 확인했다. `run_100m.ps1` 자체는 이 환경에 PowerShell이 없어 실행해 보지 못했다.
 - 기본 비교군은 ASWISS와 k-means 256 / 341 / 512 / 1024다.
+- **방법 B 비교군 (2026-10-28 추가):** `aswiss_b`(방법 B 라벨만)와 `aswiss_wb`(기존 라벨 + 방법 B 분할의 공통 세분화)다.
+  - 7-stud는 원 정보집합이 거의 반복되지 않으므로 라벨 단위는 기존 ASWISS와 같은 원자다. 그래서 이것은 "원자로 가속한 방법 B"다.
+  - 평균 전략의 regret은 전체 순회가 불가능하므로, epoch 끝마다 두 좌석 모두 평균 전략으로 두는 별도 표본 순회로 추정한다. 순회 수는 epoch 길이의 25%(`--avg-frac`)다. 라벨 검정은 기존과 같은 z=2다. 학습 시간은 약 25% 늘어난다.
+  - 4구 heuristic 모드에서만 쓸 수 있다(`-H4 learn`과 함께 쓰면 학습기가 멈춘다).
+  - 실행 예: `-Arms aswiss_b,aswiss_wb,aswiss,k341` (Linux: `ARMS="aswiss_b aswiss_wb aswiss k341"`).
+  - 확인한 것: 기본 라벨 모드는 이전 학습기와 스냅숏이 바이트 단위로 같다. `window+avg` 모드도 중단 후 재개가 끊지 않은 실행과 바이트 단위로 같다. bash 스크립트로 두 비교군을 실제로 돌렸다.
+- **다시 빌드:** 실행 파일이 소스보다 오래됐으면(예: `git pull` 뒤) `run`이 자동으로 다시 빌드한다. 학습 중인 프로세스가 실행 파일을 잡고 있으면 빌드가 실패한다. 그때는 `stop`으로 멈추고 `status`에서 모두 멈춘 것을 확인한 뒤 다시 `run` 한다(모든 비교군이 checkpoint에서 그대로 이어진다).
 - k-means 341은 10M에서 맞춘 K다. 100M에서 ASWISS의 bucket 수가 어디까지 늘지 모르므로 512로 범위를 넓혀 두었다.
 - atlas 네 개는 `atlas/`에 들어 있다. 모두 heuristic ε=0.2 self-play 10만 핸드, seed 37301로 만들었다.
 

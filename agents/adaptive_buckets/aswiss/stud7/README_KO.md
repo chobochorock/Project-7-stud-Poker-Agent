@@ -384,14 +384,39 @@ powershell -ExecutionPolicy Bypass -File $s -Action stop     # checkpoint 저장
 powershell -ExecutionPolicy Bypass -File $s -Action eval     # 새 스냅숏 평가 (LBR 2,000 pair, 이미 한 것은 건너뜀)
 powershell -ExecutionPolicy Bypass -File $s -Action final    # 가장 최근 스냅숏, LBR 20,000 pair
 powershell -ExecutionPolicy Bypass -File $s -Action plot     # 그림
+powershell -ExecutionPolicy Bypass -File $s -Action pack     # 결과 요약 파일을 results_data로 묶기 (공유용)
 # 옵션: -Roots 100000000 -Seed 1 -Arms aswiss,k256,k341,k512,k1024 -Workers 4 -Out <폴더> -Python python
 #       -H4 learn (4구 12액션 학습) -SnapshotEvery 5000000 -CheckpointEvery 1000000 -CurveEvery 100000
 ```
 
 ```bash
-bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop | eval | final | plot
+bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop | eval | final | plot | pack
 # 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON H4 SNAPSHOT_EVERY CHECKPOINT_EVERY CURVE_EVERY
 ```
+
+**학습이 끝난 뒤 확인하는 순서** (2026-10-29 추가)
+- **모든 단계에 학습 때와 같은 `-Arms`를 준다.** 아래는 `-Arms aswiss_b,aswiss_wb,aswiss,k341`로 돌렸을 때의 예다.
+  ```powershell
+  git pull origin main
+  $s = "agents\adaptive_buckets\aswiss\stud7\run_100m.ps1"; $a = "aswiss_b,aswiss_wb,aswiss,k341"
+  powershell -ExecutionPolicy Bypass -File $s -Action status -Arms $a   # 모두 running=False, 마지막 줄 roots가 100,000,000인지
+  powershell -ExecutionPolicy Bypass -File $s -Action eval   -Arms $a   # 스냅숏마다 LBR 2,000 pair (학습 곡선)
+  powershell -ExecutionPolicy Bypass -File $s -Action final  -Arms $a   # 마지막 스냅숏 LBR 20,000 pair (최종 비교)
+  powershell -ExecutionPolicy Bypass -File $s -Action plot   -Arms $a   # 그림
+  powershell -ExecutionPolicy Bypass -File $s -Action pack   -Arms $a   # 표 출력 + 결과 요약 묶기
+  ```
+- **소요 시간:** 이 환경 기준으로 `eval`은 4개 비교군에 약 2시간, `final`은 약 40분이다. 노트북 성능에 따라 다르다. 중간에 끊겨도 다시 실행하면 이미 평가한 스냅숏은 건너뛴다.
+- **결과 보는 곳:** 기본 출력 폴더는 `agents\adaptive_buckets\aswiss\stud7\data\runs_100m`이다.
+  - 그림은 `results_s1_curves.png`(학습 곡선, 기준선 대비 짝지은 차이)와 `results_s1_frontier.png`(bucket 수 대비 LBR)다.
+  - 기준선은 실행한 비교군 중 첫 k-means다(k256이 있으면 k256, 없으면 k341). 학습하지 않은 비교군은 평가와 그림에서 건너뛰고, 그 사실을 화면과 그림 주석에 적는다.
+  - `pack`은 비교군별 학습량, 평가한 분할의 bucket 수, 최종 LBR(평균/현재 정책, 95%)을 표로 출력한다.
+- **공유:** `pack`이 만드는 `results_data\runs_100m_s1_summaries.tar.gz`(수 MB)에는 스냅숏과 checkpoint가 빠져 있다. 이 파일만 커밋해 push하면 다른 곳에서 같은 그림과 짝지은 비교를 다시 계산할 수 있다.
+  ```powershell
+  git add agents\adaptive_buckets\aswiss\stud7\results_data\runs_100m_s1_summaries.tar.gz
+  git commit -m "Add 7-stud 100M run summaries"; git push origin main
+  ```
+  `data\` 폴더는 `.gitignore` 대상이라 스냅숏(약 1.5 GB)이 실수로 올라가지 않는다.
+- **확인한 것:** bash 판(`run_100m.sh`)으로 `eval`, `final`, `plot`, `pack`을 10.23M 결과를 복사한 폴더에서 실제로 돌렸다. 학습하지 않은 비교군을 넣어도 멈추지 않았고, 묶은 파일을 풀어 다시 그릴 수 있었다. PowerShell 판은 이 환경에 PowerShell이 없어 실행해 보지 못했다.
 
 **중단과 재개**
 - **checkpoint 저장 시점:** 다음 네 경우에 학습 상태 전체를 `checkpoint.bin`에 원자적으로 저장한다.

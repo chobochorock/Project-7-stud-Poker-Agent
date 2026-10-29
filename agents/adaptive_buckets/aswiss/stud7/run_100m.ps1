@@ -5,12 +5,13 @@
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval     # LBR / gap of new snapshots
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final    # newest snapshot, 20k pairs
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot     # figures
+#   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack     # results -> results_data
 # Each arm is one process (one core). "run" again after a stop, crash or reboot resumes every unfinished arm from its
 # checkpoint (bit-exact). eval/final skip snapshots already evaluated, so they can be rerun while training continues.
 # The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
 # C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
-    [ValidateSet("run", "status", "stop", "eval", "final", "plot")] [string]$Action = "run",
+    [ValidateSet("run", "status", "stop", "eval", "final", "plot", "pack")] [string]$Action = "run",
     [long]$Roots = 100000000,
     [int]$Seed = 1,
     [string[]]$Arms = @("aswiss", "k256", "k341", "k512", "k1024"),
@@ -119,5 +120,12 @@ elseif ($Action -in @("eval", "final")) {
 }
 elseif ($Action -eq "plot") {
     $specs = $Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" }
-    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName "k256")
+    # baseline: the first k-means arm that was run (k256 when present)
+    $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
+    if (-not $base) { $base = "k256" }
+    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base)
+}
+elseif ($Action -eq "pack") {
+    # small result files of every run in $Out (no snapshots or checkpoints) -> results_data, for git or sharing
+    & $Python (Join-Path $Here "pack_summaries.py") $Out (Join-Path $Here "results_data\runs_100m${Suffix}_summaries.tar.gz")
 }

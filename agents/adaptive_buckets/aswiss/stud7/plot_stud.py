@@ -39,10 +39,13 @@ def style(run):
     return (MUTED, "o", "-")
 
 
-SERIES = []
+SERIES, MISSING = [], []
 for spec in (a.runs or DEFAULT):
     run, label = spec.split(":", 1)
     if os.path.exists(f"{R}/{run}/eval.jsonl"): SERIES.append((run, label) + style(run))
+    else: MISSING.append(run)
+if BASELINE not in [run for run, *_ in SERIES] and BASELINE not in MISSING: MISSING.append(BASELINE)
+for run in MISSING: print(f"not drawn: {run} has no eval.jsonl in {R}" + (" (baseline: difference and ratio panels stay empty)" if run == BASELINE else ""))
 
 
 def load(run, name):
@@ -156,6 +159,8 @@ if have_curve:
 else:
     ax.axis("off")
 notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for run in sorted(off_scale)] + [
+    f"{run}: no evaluations found, not drawn" + (" - this is the baseline, so the difference and ratio panels are empty"
+                                                  if run == BASELINE else "") for run in MISSING] + [
     ("Heads-up 7-stud, rules v3, 5th-7th street with the 4th-street discard/reveal (12 actions) learned by both seats, "
      "ante 1000; the LBR attacker keeps the heuristic H4 and its hidden-card prior uses the target's learned H4."
      if learned_h4 else "Heads-up 7-stud, rules v3, 5th-7th street, heuristic H4, ante 1000.")

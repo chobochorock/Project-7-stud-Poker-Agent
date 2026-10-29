@@ -51,6 +51,9 @@ jobs = []
 for spec in a.runs:
     name, partition, atlas = spec.split(":", 2)
     d = os.path.join(a.runs_dir, name)
+    if not any(os.path.exists(os.path.join(d, f)) for f in ("snapshots.csv", "log.csv")):
+        print(f"skipped {name}: no run folder with log.csv in {a.runs_dir} (arm not trained here?)", flush=True)
+        continue
     have = done(os.path.join(d, f"eval{suffix}.jsonl"))
     snaps = [s for s in snapshots(d, partition) if s[2] in a.kinds and s[1] >= a.min_roots]
     if a.epochs is not None: snaps = [s for s in snaps if s[2] == "epoch" and s[3] in a.epochs]

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Long 7-stud ASWISS comparison (default 100M roots), resumable. Linux / WSL counterpart of run_100m.ps1.
 # Run from the repository root:
-#   bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh [run|status|stop|eval|final|plot]
+#   bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh [run|status|stop|eval|final|plot|pack]
 # Environment overrides: ROOTS=100000000 SEED=1 ARMS="aswiss k256 k341 k512 k1024" OUT=... WORKERS=4 PYTHON=python3
 #   H4=learn (learn the 12-action 4th-street discard/reveal; run names get _h4), SNAPSHOT_EVERY=5000000,
 #   CHECKPOINT_EVERY=1000000, CURVE_EVERY=100000
@@ -56,6 +56,9 @@ eval|final)
     "$PYTHON" "$HERE/evaluate.py" "$EXE" "$OUT" --runs "${specs[@]}" --workers "$WORKERS" "${extra[@]}" ;;
 plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
-    "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "atom_k256$SUFFIX" ;;
-*) echo "usage: $0 run|status|stop|eval|final|plot"; exit 2 ;;
+    base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run
+    "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" ;;
+pack)  # small result files of every run in OUT (no snapshots) -> results_data, for git or sharing
+    "$PYTHON" "$HERE/pack_summaries.py" "$OUT" "$HERE/results_data/runs_100m${SUFFIX}_summaries.tar.gz" ;;
+*) echo "usage: $0 run|status|stop|eval|final|plot|pack"; exit 2 ;;
 esac

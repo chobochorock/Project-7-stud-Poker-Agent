@@ -76,7 +76,7 @@ if ($Action -eq "run") {
         # fully static (libstdc++, libgcc, winpthread): the program needs no MinGW DLL at run time
         & $compiler -O3 -std=c++17 -pthread -static (Join-Path $Here "aswiss_stud.cpp") -o $Exe
         if ($LASTEXITCODE -ne 0) {
-            throw "build failed. If training processes are still running they lock $Exe: -Action stop, wait until -Action status shows running=False, then run again (the arms resume exactly)."
+            throw "build failed. If training processes are still running they lock $Exe : -Action stop, wait until -Action status shows running=False, then run again (the arms resume exactly)."
         }
     }
     foreach ($a in $Arms) {

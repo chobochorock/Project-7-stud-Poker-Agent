@@ -34,8 +34,10 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     aswiss    = @("aswiss_k1024_z2", "aswiss", 1024, "ASWISS (context start, K=1024 atoms, z=2)", "")
     aswiss_b  = @("aswiss_b_k1024_z2", "aswiss", 1024, "ASWISS, method B labels (average policy, sampled)", "--label avg")
     aswiss_wb = @("aswiss_wb_k1024_z2", "aswiss", 1024, "ASWISS, window + method B labels", "--label window+avg")
-    hist      = @("history_street", "history", 1024, "bucket-history keys (cards at each street's first decision)", "--history-cards street")
-    hist_every = @("history_every", "history", 1024, "bucket-history keys (cards at every decision)", "--history-cards every")
+    # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
+    hist      = @("history_street", "history", 1024, "bucket-history keys, window labels", "--history-cards street --label-cap 2560000")
+    hist_b    = @("history_b_street", "history", 1024, "bucket-history keys, method B labels (average policy)", "--history-cards street --label avg --label-cap 2560000")
+    hist_every = @("history_every", "history", 1024, "bucket-history keys, cards at every decision", "--history-cards every --label-cap 2560000")
     k256      = @("atom_k256", "atom", 256, "k-means 256", "")
     k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")
     k512      = @("atom_k512", "atom", 512, "k-means 512", "")
@@ -125,7 +127,7 @@ elseif ($Action -eq "plot") {
     # baseline: the first k-means arm that was run (k256 when present)
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
-    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base)
+    & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
 }
 elseif ($Action -eq "pack") {
     # small result files of every run in $Out (no snapshots or checkpoints) -> results_data, for git or sharing

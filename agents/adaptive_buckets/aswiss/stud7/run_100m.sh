@@ -15,19 +15,22 @@ H4=${H4:-heuristic}; SNAPSHOT_EVERY=${SNAPSHOT_EVERY:-5000000}; CHECKPOINT_EVERY
 CURVE_EVERY=${CURVE_EVERY:-100000}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
 EXE=$HERE/aswiss_stud
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
-                 [hist]=history_street [hist_every]=history_every
+                 [hist]=history_street [hist_b]=history_b_street [hist_every]=history_every
                  [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
-                 [hist]=history [hist_every]=history)
+                 [hist]=history [hist_b]=history [hist_every]=history)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_every]=1024)
-declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street"
-                  [hist_every]="--history-cards every")
+              [hist_b]=1024 [hist_every]=1024)
+# history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
+declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
+                  [hist_b]="--history-cards street --label avg --label-cap 2560000"
+                  [hist_every]="--history-cards every --label-cap 2560000")
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
                   [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly"
-                  [hist]="bucket-history keys (cards at each street's first decision)"
-                  [hist_every]="bucket-history keys (cards at every decision)")
+                  [hist]="bucket-history keys, window labels"
+                  [hist_b]="bucket-history keys, method B labels (average policy)"
+                  [hist_every]="bucket-history keys, cards at every decision")
 atlas() { echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }
 mkdir -p "$OUT"
 case $ACTION in
@@ -63,7 +66,7 @@ eval|final)
 plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run
-    "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" ;;
+    "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only ;;
 pack)  # small result files of every run in OUT (no snapshots) -> results_data, for git or sharing
     "$PYTHON" "$HERE/pack_summaries.py" "$OUT" "$HERE/results_data/runs_100m${SUFFIX}_summaries.tar.gz" ;;
 *) echo "usage: $0 run|status|stop|eval|final|plot|pack"; exit 2 ;;

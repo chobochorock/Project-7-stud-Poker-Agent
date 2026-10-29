@@ -4,7 +4,8 @@
 // Train: ./aswiss_stud train --partition aswiss|atom|context|history [--atlas ATLAS] --roots N [--epoch0 10000]
 //                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] [--checkpoint-every 1000000]
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
-//                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every] --out DIR
+//                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
+//                            [--label-cap 0] --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
@@ -30,7 +31,12 @@
 //   history: bucket-history keys instead of atoms (see "bucket-history keys" below): the label units are keys made of
 //            the actor's previous bucket and action, the opponent's actions since, and the power cluster when new cards
 //            were observed (--history-cards street: first decision of each street; every: every decision); buckets start
-//            as one per (street, legal mask) and split by the same z test. Window labels, heuristic H4 only.
+//            as one per (street, legal mask) and split by the same z test. --label window|avg|window+avg as for aswiss
+//            (the average-policy pass keeps a trail as training does; with avg alone no window is kept, so the log's
+//            L/C/H columns are 0). Heuristic H4 only.
+// --label-cap N: the labels of an epoch use at most N roots (window: the epoch's last N roots; average-policy pass:
+//            at most N roots). History keys do not saturate (their number grows about 1.85x per epoch), so this bounds
+//            the memory of long runs; it also stops the detection threshold from shrinking once epochs exceed N.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -188,6 +194,7 @@ struct HFull {  // structural context (street << 8 | legal mask) + member key
 struct HFullHash {
     size_t operator()(const HFull& k) const { return HKeyHash()(k.m) * 31 + k.ctx; }
 };
+using HMap = std::unordered_map<HFull, struct AtomStats, HFullHash>;
 struct HContext {
     std::unordered_map<HKey, uint32_t, HKeyHash> member;  // explicit key -> bucket
     uint32_t rest = kNone;
@@ -606,6 +613,11 @@ public:
             m.prev = parent_[m.prev];
         }
     }
+    // policy of bucket b (uniform for kNone)
+    std::array<double, A> bucket_policy(uint32_t b, uint8_t mask, bool average) const {
+        if (b == kNone) return uniform_strategy(mask);
+        return average ? normalized(buckets_[b].s, mask) : rm_plus(buckets_[b].q, mask);
+    }
     uint32_t hlookup(const HFull& k) const {
         const auto it = hctx_.find(k.ctx);
         return it == hctx_.end() ? kNone : hresolve(it->second, k.m);
@@ -658,14 +670,23 @@ public:
     }
     // History split: split() with history keys as the label units. Explicit entries not visited this epoch (in
     // particular entries whose previous bucket has since been split) count as none, like the rest bucket's unseen keys.
-    int hsplit(double z) {
-        std::map<uint16_t, std::vector<std::pair<HKey, int>>> by_ctx;  // ordered: reproducible bucket ids
-        for (const auto& [k, st] : hatoms_) {
+    // Labels from the window sums, from the average-policy regrets `avg` (avg without window), or from both (the
+    // common refinement), as in split().
+    int hsplit(double z, const HMap* avg = nullptr, bool use_window = true) {
+        auto label = [z](const HFull& k, const AtomStats& st) {
             const uint8_t mask = k.ctx & 0xff;
             int best = -1;
             for (int a = 0; a < A; ++a) if ((mask & (1u << a)) && (best < 0 || st.r[a] > st.r[best])) best = a;
-            by_ctx[k.ctx].push_back({k.m, st.visits > 0 && st.r[best] > z * std::sqrt(st.sq[best]) ? best : -1});
-        }
+            return st.visits > 0 && st.r[best] > z * std::sqrt(st.sq[best]) ? best : -1;
+        };
+        struct Labels { int window = -1, average = -1; };
+        std::unordered_map<HFull, Labels, HFullHash> labels_of;
+        if (use_window) for (const auto& [k, st] : hatoms_) labels_of[k].window = label(k, st);
+        if (avg) for (const auto& [k, st] : *avg) labels_of[k].average = label(k, st);
+        std::map<uint16_t, std::vector<std::pair<HKey, int>>> by_ctx;  // ordered: reproducible bucket ids
+        for (const auto& [k, l] : labels_of)
+            by_ctx[k.ctx].push_back({k.m, !avg ? l.window : !use_window ? l.average
+                                          : l.window < 0 && l.average < 0 ? -1 : (l.window + 1) * 16 + (l.average + 1)});
         int splits = 0;
         for (auto& [ctx, visited] : by_ctx) {
             const auto found = hctx_.find(ctx);
@@ -1057,7 +1078,7 @@ private:
     bool hcards_every_ = false;
     std::unordered_map<uint16_t, HContext> hctx_;
     std::vector<uint32_t> parent_;  // bucket -> the bucket it was split from (kNone: a context's first bucket)
-    std::unordered_map<HFull, AtomStats, HFullHash> hatoms_;
+    HMap hatoms_;
 };
 
 // frozen snapshot as a PolicyLBR target; with a learned H4 it also supplies the H4 likelihood used by H4PolicyLBR
@@ -1139,6 +1160,41 @@ double avg_traverse(const Model& model, State state, int traverser, std::mt19937
         node += sigma[a] * v[a];
     }
     AtomStats& st = stats[model.atom_key(state, actor)];
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        const double r = v[a] - node;
+        st.r[a] += r; st.sq[a] += r * r;
+    }
+    st.visits += 1;
+    return node;
+}
+
+// avg_traverse with bucket-history keys: the trail carries each seat's last bucket under the frozen partition
+double avg_traverse_h(const Model& model, State state, Trail trail, int traverser, std::mt19937_64& rng, HMap& stats) {
+    if (state.terminal) return terminal_net_search(state, traverser);
+    const int actor = state.actor;
+    const uint8_t mask = valid_mask(state, actor);
+    const HFull key = model.hkey(state, actor, trail);
+    const uint32_t b = model.hlookup(key), seen = b == kNone ? kUnseen : b;
+    const auto sigma = model.bucket_policy(b, mask, true);
+    if (actor != traverser) {
+        const Action a = sample_action(sigma, mask, rng);
+        trail_step(trail, state, actor, a, seen);
+        step(state, actor, a);
+        return avg_traverse_h(model, std::move(state), trail, traverser, rng, stats);
+    }
+    std::array<double, A> v{};
+    double node = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        State child = state;
+        Trail child_trail = trail;
+        trail_step(child_trail, state, actor, static_cast<Action>(a), seen);
+        step(child, actor, static_cast<Action>(a));
+        v[a] = avg_traverse_h(model, std::move(child), child_trail, traverser, rng, stats);
+        node += sigma[a] * v[a];
+    }
+    AtomStats& st = stats[key];
     for (int a = 0; a < A; ++a) {
         if (!(mask & (1u << a))) continue;
         const double r = v[a] - node;
@@ -1243,7 +1299,7 @@ int train(int argc, char** argv) {
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
-                                {"--avg-frac", "0.25"}, {"--history-cards", "street"}});
+                                {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1251,8 +1307,9 @@ int train(int argc, char** argv) {
     const std::string label_rule = o["--label"];
     if (label_rule != "window" && label_rule != "avg" && label_rule != "window+avg")
         throw std::runtime_error("--label must be window, avg or window+avg");
-    if (label_rule != "window" && (o["--partition"] != "aswiss" || learn_h4))
-        throw std::runtime_error("--label avg and window+avg need --partition aswiss and the heuristic H4");
+    if (label_rule != "window" && ((partition != Partition::Aswiss && partition != Partition::History) || learn_h4))
+        throw std::runtime_error("--label avg and window+avg need --partition aswiss or history and the heuristic H4");
+    const uint64_t label_cap = std::stoull(o["--label-cap"]);  // 0: no cap
     const double avg_frac = std::stod(o["--avg-frac"]);
     if (o["--history-cards"] != "street" && o["--history-cards"] != "every")
         throw std::runtime_error("--history-cards must be street or every");
@@ -1274,7 +1331,8 @@ int train(int argc, char** argv) {
         << file_size_or_zero(o["--atlas"]) << ";epoch0=" << epoch0 << ";z=" << o["--z"] << ";inherit=" << o["--inherit"]
         << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "")
         << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
-        << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "");
+        << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "")
+        << (label_cap ? ";label_cap=" + o["--label-cap"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1325,7 +1383,11 @@ int train(int argc, char** argv) {
         ++s.t;
         auto deck = fresh_deck();
         std::shuffle(deck.begin(), deck.end(), deal_rng);
-        for (int p = 0; p < 2; ++p) { model.traverse_root(deck, p, static_cast<double>(s.t), rng, track); model.apply_regrets(); }
+        // --label-cap: window sums only over the epoch's last label_cap roots (bounds the window's memory)
+        // history keys with --label avg: no window at all (it would only feed the L/C diagnostic and doubles the memory)
+        const bool in_window = track && (!label_cap || epoch_end - s.t < label_cap) &&
+                               !(partition == Partition::History && label_rule == "avg");
+        for (int p = 0; p < 2; ++p) { model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window); model.apply_regrets(); }
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root
         s.curve_sum += gap; s.curve_sq += gap * gap; ++s.curve_roots;
         if (curve_every && s.t % curve_every == 0) {
@@ -1349,11 +1411,26 @@ int train(int argc, char** argv) {
             const auto mb = model.table_megabytes();  // measured before the window is cleared
             int splits = 0;
             if (track && label_rule == "window") splits = model.split(z, inherit);
+            else if (track && partition == Partition::History) {  // method B with bucket-history keys
+                HMap avg;
+                std::mt19937_64 eval_rng(std::stoull(o["--seed"]) * 1000003ull + s.k);
+                uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
+                if (label_cap) n = std::min(n, label_cap);
+                for (uint64_t i = 0; i < n; ++i) {
+                    auto eval_deck = fresh_deck();
+                    std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
+                    for (int p = 0; p < 2; ++p)
+                        avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, avg);
+                }
+                splits = model.hsplit(z, &avg, label_rule == "window+avg");
+                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys\n";
+            }
             else if (partition == Partition::Aswiss) {
                 // method B: regrets of the frozen average policy from a separate sampled pass (deterministic per epoch)
                 AtomMap avg;
                 std::mt19937_64 eval_rng(std::stoull(o["--seed"]) * 1000003ull + s.k);
-                const uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
+                uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
+                if (label_cap) n = std::min(n, label_cap);
                 for (uint64_t i = 0; i < n; ++i) {
                     auto eval_deck = fresh_deck();
                     std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
@@ -1365,7 +1442,7 @@ int train(int argc, char** argv) {
             }
             model.clear_window();
             const auto live = model.live_buckets();
-            const double len = static_cast<double>(s.t - s.epoch_start), secs = elapsed();
+            const double len = std::min<double>(label_cap ? label_cap : s.t - s.epoch_start, s.t - s.epoch_start), secs = elapsed();
             const auto cache = atlas ? atlas->assignment_cache_stats() : PowerCacheStats{};
             log << s.k << ',' << s.t << ',' << model.contexts() << ',' << live[0] + live[1] + live[2] << ',' << live[0] << ','
                 << live[1] << ',' << live[2] << ',' << splits << ',' << w.atoms << ',' << w.L / len << ',' << w.C / len << ','

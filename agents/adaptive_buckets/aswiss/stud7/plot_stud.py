@@ -1,6 +1,6 @@
 """Figures for the 7-stud ASWISS comparison (heads-up, 5th-7th street).
 
-Usage: python plot_stud.py RUNS_DIR OUT_PREFIX [--runs NAME:LABEL ...] [--baseline NAME]
+Usage: python plot_stud.py RUNS_DIR OUT_PREFIX [--runs NAME:LABEL ...] [--baseline NAME] [--lw 1.1] [--epoch-only]
 Reads RUNS_DIR/NAME/{log.csv, eval.jsonl, eval_final.jsonl (optional), curve.csv (optional)}.
 Writes OUT_PREFIX_curves.png: Policy-LBR with 95% intervals and the sampled BR-gap proxy against training roots,
 average and current policy separately; LBR minus the k-means baseline (paired deals) and gap ratio to it at shared
@@ -18,7 +18,10 @@ ap = argparse.ArgumentParser()
 ap.add_argument("runs_dir"); ap.add_argument("out")
 ap.add_argument("--runs", nargs="+", help="NAME:LABEL; default: the seed-1 comparison")
 ap.add_argument("--baseline", default="atom_k256_s1")
+ap.add_argument("--lw", type=float, default=1.1, help="line width (markers and error bars scale with it)")
+ap.add_argument("--epoch-only", action="store_true", help="draw only epoch-end snapshots (skip the periodic ones)")
 a = ap.parse_args()
+LW = a.lw
 R, OUT, BASELINE = a.runs_dir, a.out, a.baseline
 INK, MUTED, GRID, SURFACE = "#1f1f1e", "#6b6a64", "#e4e3de", "#fcfcfb"
 # style by arm family: (colour, marker, linestyle)
@@ -60,6 +63,7 @@ def load(run, name):
             k = r["epoch"]
             r["file"] = f"snapshot_{k}.bin"; r["roots"] = int(log[k]["roots"])
             r["buckets"] = int(log[k - 1]["buckets_after"]) if run.startswith("aswiss") and k > 0 else int(log[k]["buckets_after"])
+        if a.epoch_only and r.get("kind", "epoch") != "epoch" and name == "eval.jsonl": continue
         rows[(r["file"], r["policy"])] = r
     return rows
 
@@ -97,10 +101,11 @@ def styled(ax, title, ylabel, logy, xlabel="training roots (5th-street deals)"):
 
 
 def line(ax, x, y, colour, marker, ls, label=None, err=None):
-    ax.errorbar(x, y, yerr=err, color=colour, lw=2, ls=ls, marker=marker, ms=6, mec=SURFACE, mew=1.2, capsize=3, label=label)
+    ax.errorbar(x, y, yerr=err, color=colour, lw=LW, ls=ls, marker=marker, ms=2.2 + 1.5 * LW, mec=SURFACE, mew=0.6,
+                capsize=1.5, elinewidth=0.6 * LW, capthick=0.6 * LW, label=label)
 
 
-HOLLOW = dict(marker="o", ms=11, mfc=SURFACE, mew=2, capsize=4, ls="none")
+HOLLOW = dict(marker="o", ms=4 + 3 * LW, mfc=SURFACE, mew=1.2 * LW, capsize=3, ls="none")
 fig, axes = plt.subplots(3, 3, figsize=(17, 14))
 for col, policy in enumerate(("average", "current")):
     for run, label, colour, marker, ls in SERIES:
@@ -141,9 +146,9 @@ ax = axes[1, 2]
 for run, label, colour, marker, ls in SERIES:
     log = list(csv.DictReader(open(f"{R}/{run}/log.csv")))
     ax.step([1e4] + [int(r["roots"]) for r in log], [int(log[0]["contexts"])] + [int(r["buckets_after"]) for r in log],
-            where="post", color=colour, lw=2, ls=ls)
+            where="post", color=colour, lw=LW, ls=ls)
     if learned_h4 and "h4_buckets_after" in log[0]:  # thin: the 4th-street (12-action) table
-        ax.step([int(r["roots"]) for r in log], [int(r["h4_buckets_after"]) for r in log], where="post", color=colour, lw=1, ls=":")
+        ax.step([int(r["roots"]) for r in log], [int(r["h4_buckets_after"]) for r in log], where="post", color=colour, lw=0.6 * LW, ls=":")
 styled(ax, "Live buckets (epoch ends)" + ("; dotted: 4th street" if learned_h4 else ""), "buckets (log)", True)
 ax = axes[2, 2]
 have_curve = False
@@ -154,7 +159,7 @@ for run, label, colour, marker, ls in SERIES:
     if not rows: continue
     have_curve = True
     x = np.array([int(r["roots"]) for r in rows]); y = np.array([float(r["train_gap_mean"]) for r in rows])
-    ax.plot(x, y, color=colour, lw=1.5, ls=ls)
+    ax.plot(x, y, color=colour, lw=0.7 * LW, ls=ls)
 if have_curve:
     styled(ax, "Training-deal gap proxy of the current policy (curve.csv)", "chunk mean, ante/hand (log)", True)
 else:
@@ -192,7 +197,7 @@ for ax, key, title, logy in ((axes[0], "lbr_ante", "Newest average policy: Polic
         rows = {k: v for k, v in (final[run] or data[run]).items() if k[1] == "average"}
         r = max(rows.values(), key=lambda r: r["roots"])
         err = 1.96 * r["lbr_se"] if key == "lbr_ante" else None
-        ax.errorbar([r["buckets"] + r.get("h4_buckets", 0) if learned_h4 else r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=9, mec=SURFACE, mew=1.2, capsize=3,
+        ax.errorbar([r["buckets"] + r.get("h4_buckets", 0) if learned_h4 else r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=4 + 3 * LW, mec=SURFACE, mew=0.8, capsize=2,
                     ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots, {r['pairs']:,} pairs)")
     ax.set_xscale("log")
     if logy: ax.set_yscale("log")

@@ -34,6 +34,8 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     aswiss    = @("aswiss_k1024_z2", "aswiss", 1024, "ASWISS (context start, K=1024 atoms, z=2)", "")
     aswiss_b  = @("aswiss_b_k1024_z2", "aswiss", 1024, "ASWISS, method B labels (average policy, sampled)", "--label avg")
     aswiss_wb = @("aswiss_wb_k1024_z2", "aswiss", 1024, "ASWISS, window + method B labels", "--label window+avg")
+    hist      = @("history_street", "history", 1024, "bucket-history keys (cards at each street's first decision)", "--history-cards street")
+    hist_every = @("history_every", "history", 1024, "bucket-history keys (cards at every decision)", "--history-cards every")
     k256      = @("atom_k256", "atom", 256, "k-means 256", "")
     k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")
     k512      = @("atom_k512", "atom", 512, "k-means 512", "")

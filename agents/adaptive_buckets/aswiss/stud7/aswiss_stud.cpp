@@ -1,10 +1,10 @@
 // ASWISS on heads-up seven-card stud (rules v3, 5th to 7th street, heuristic H4 discard/reveal).
 //
 // Build: g++ -O3 -std=c++17 aswiss_stud.cpp -o aswiss_stud
-// Train: ./aswiss_stud train --partition aswiss|atom|context [--atlas ATLAS] --roots N [--epoch0 10000]
+// Train: ./aswiss_stud train --partition aswiss|atom|context|history [--atlas ATLAS] --roots N [--epoch0 10000]
 //                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] [--checkpoint-every 1000000]
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
-//                            [--label window|avg|window+avg] [--avg-frac 0.25] --out DIR
+//                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every] --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
@@ -27,6 +27,10 @@
 //            --avg-frac x (epoch length) roots in which both seats play the frozen average policy (own RNG seeded
 //            by seed and epoch, so resuming stays exact); same z test. --label window+avg splits by the pair of
 //            both labels (the common refinement). Both need --partition aswiss and the heuristic H4.
+//   history: bucket-history keys instead of atoms (see "bucket-history keys" below): the label units are keys made of
+//            the actor's previous bucket and action, the opponent's actions since, and the power cluster when new cards
+//            were observed (--history-cards street: first decision of each street; every: every decision); buckets start
+//            as one per (street, legal mask) and split by the same z test. Window labels, heuristic H4 only.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -63,7 +67,7 @@ struct NullAtlas final : PowerAtlas {
     uint16_t assign(const State&, int) const override { return 0; }
 };
 
-enum class Partition { Context, Atom, Aswiss };
+enum class Partition { Context, Atom, Aswiss, History };
 
 struct Bucket {
     std::array<double, A> q{}, s{}, pending{};
@@ -146,6 +150,86 @@ InfoKey get_key(std::ifstream& in) {
     get(in, k.power_cluster); get(in, k.history_code);
     return k;
 }
+
+// ---- bucket-history keys (--partition history) ---------------------------------------------------------------------
+// The key of a decision is (structural context = street and legal mask; the actor's bucket at its previous decision of
+// this hand and the action taken there; the opponent's actions since then; the power cluster of the cards when new
+// cards were observed, i.e. at the actor's first decision of each street, or at every decision with
+// --history-cards every). The past is remembered only through the bucket it fell into. Buckets partition the keys of
+// a structural context and split by labels exactly as the atom version; a key whose previous bucket was split later
+// resolves through the split genealogy (parent_) to the entry of its ancestor key, so keys refine as earlier buckets
+// split. Card information still comes from the power cluster (the heuristic part); betting information comes only from
+// the bucket history (no hand-made betting summary).
+constexpr uint32_t kUnseen = 0xfffffffeu;  // the previous decision fell in no known bucket (evaluation only)
+constexpr uint16_t kNoCards = 0xffffu;     // no new card observation at this decision
+struct HKey {  // member key within a structural context
+    uint32_t prev = kNone;        // own bucket at the previous own decision of this hand (kNone: first decision)
+    uint8_t action = 0xff;        // own action there
+    uint16_t cluster = kNoCards;  // power cluster when new cards were observed
+    uint64_t opp = 0;             // opponent actions since then, 5 bits each: (street - 5) * 8 + action + 1
+    bool operator==(const HKey& o) const { return prev == o.prev && action == o.action && cluster == o.cluster && opp == o.opp; }
+    bool operator<(const HKey& o) const {
+        return std::tie(prev, action, cluster, opp) < std::tie(o.prev, o.action, o.cluster, o.opp);
+    }
+};
+struct HKeyHash {
+    size_t operator()(const HKey& k) const {
+        uint64_t h = (uint64_t(k.prev) << 32) ^ (uint64_t(k.action) << 16) ^ k.cluster;
+        h ^= k.opp + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+        h ^= h >> 33; h *= 0xff51afd7ed558ccdull; h ^= h >> 33;
+        return static_cast<size_t>(h);
+    }
+};
+struct HFull {  // structural context (street << 8 | legal mask) + member key
+    uint16_t ctx = 0;
+    HKey m;
+    bool operator==(const HFull& o) const { return ctx == o.ctx && m == o.m; }
+};
+struct HFullHash {
+    size_t operator()(const HFull& k) const { return HKeyHash()(k.m) * 31 + k.ctx; }
+};
+struct HContext {
+    std::unordered_map<HKey, uint32_t, HKeyHash> member;  // explicit key -> bucket
+    uint32_t rest = kNone;
+};
+struct Trail {  // per seat: bucket and action of its last decision, history length after it, street of it
+    std::array<uint32_t, 2> prev{kNone, kNone};
+    std::array<uint8_t, 2> action{0xff, 0xff};
+    std::array<uint16_t, 2> since{0, 0};
+    std::array<uint8_t, 2> street{0, 0};
+};
+void trail_step(Trail& t, const State& before, int actor, Action a, uint32_t bucket) {
+    t.prev[actor] = bucket; t.action[actor] = a;
+    t.since[actor] = static_cast<uint16_t>(before.history.size() + 1); t.street[actor] = static_cast<uint8_t>(before.street);
+}
+// The hidden cards of `s` as held at r.street. Cards absent from `s` stay absent (the LBR passes states in which
+// the attacker's hidden cards are cleared).
+void sync_hidden(State& r, const State& s) {
+    for (int seat = 0; seat < 2; ++seat) {
+        const auto& h = s.players[seat].hidden;
+        r.players[seat].hidden.assign(h.begin(), h.begin() + std::min<size_t>(r.street == 7 ? 3 : 2, h.size()));
+    }
+}
+// The 5th-street root of `s`, with the later cards queued so that replaying s.history reproduces s (a missing 7th-street
+// hidden card is queued as a placeholder; sync_hidden removes it again).
+State root_of(const State& s) {
+    State r;
+    r.ante = s.ante; r.effective_stack = s.effective_stack; r.pot = 2 * s.ante;
+    for (int seat = 0; seat < 2; ++seat) {
+        const Player& p = s.players[seat];
+        Player& q = r.players[seat];
+        q.hidden.assign(p.hidden.begin(), p.hidden.begin() + std::min<size_t>(2, p.hidden.size()));
+        q.shown.assign(p.shown.begin(), p.shown.begin() + std::min<size_t>(3, p.shown.size()));
+        q.discarded = p.discarded; q.has_discard = p.has_discard; q.stack_cap = p.stack_cap; q.invested = s.ante;
+    }
+    for (int seat = 1; seat >= 0; --seat)
+        if (s.street == 7) r.simulation_deck.push_back(s.players[seat].hidden.size() > 2 ? s.players[seat].hidden[2] : Card{});
+    for (int seat = 1; seat >= 0; --seat) if (s.players[seat].shown.size() > 3) r.simulation_deck.push_back(s.players[seat].shown[3]);
+    reset_round(r, 5);
+    return r;
+}
+void put_hkey(std::ofstream& out, const HKey& m) { put(out, m.prev); put(out, m.action); put(out, m.cluster); put(out, m.opp); }
+HKey get_hkey(std::ifstream& in) { HKey m; get(in, m.prev); get(in, m.action); get(in, m.cluster); get(in, m.opp); return m; }
 
 // ---- 4th-street discard/reveal decision (12 actions), learned when --h4 learn -------------------------------------
 // Information state = (seat, own four cards up to suit relabeling) = (seat, make_h4_view(cards).key); the 12 actions
@@ -382,6 +466,9 @@ public:
     }
     bool has_h4() const { return h4_ != nullptr; }
     const H4Table* h4() const { return h4_.get(); }
+    // --partition history: cards at every decision (true) or only at the first decision of each street (false)
+    void set_history_cards(bool every) { hcards_every_ = every; }
+    bool history_cards_every() const { return hcards_every_; }
     std::array<double, H> h4_strategy(int seat, const std::vector<Card>& cards, bool average, bool* found = nullptr) const {
         return h4_->strategy(seat, h4_key(cards), average, found);
     }
@@ -391,6 +478,8 @@ public:
     // here, linear weight); the traverser enumerates its 12 actions, each followed by the betting traversal on the same
     // cards; the H4 regrets are applied with the betting regrets after the traversal (apply_regrets).
     double traverse_root(const std::vector<Card>& deck, int traverser, double weight, std::mt19937_64& rng, bool track) {
+        if (partition_ == Partition::History)
+            return traverse_h(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, traverser, weight, rng, track);
         if (!h4_) return traverse(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng, track);
         const auto cards = initial_cards(deck);
         const int opponent = 1 - traverser;
@@ -438,7 +527,7 @@ public:
     }
     std::array<double, A> strategy(const State& state, int viewer, bool average, bool* found = nullptr) const {
         const uint8_t mask = valid_mask(state, viewer);
-        const uint32_t b = lookup(atom_key(state, viewer));
+        const uint32_t b = partition_ == Partition::History ? hlookup(hkey_replay(state, viewer)) : lookup(atom_key(state, viewer));
         if (found) *found = b != kNone;
         if (b == kNone) return uniform_strategy(mask);
         return average ? normalized(buckets_[b].s, mask) : rm_plus(buckets_[b].q, mask);
@@ -481,6 +570,147 @@ public:
         traversal_gap_ += best;  // diagnostic only: sampled BR-gap proxy of the current policy on training deals
         return node;
     }
+    // bucket-history key of the actor's decision, given the trail of the hand so far
+    HFull hkey(const State& state, int viewer, const Trail& t) const {
+        HFull k;
+        k.ctx = static_cast<uint16_t>(state.street << 8 | valid_mask(state, viewer));
+        k.m.prev = t.prev[viewer]; k.m.action = t.action[viewer];
+        if (hcards_every_ || t.street[viewer] != state.street) k.m.cluster = atlas_->assign(state, viewer);
+        int tokens = 0;
+        for (size_t i = t.since[viewer]; i < state.history.size(); ++i) {
+            const Event& e = state.history[i];
+            if (++tokens > 12) throw std::runtime_error("opponent action run exceeds the history key capacity");
+            k.m.opp = k.m.opp << 5 | static_cast<uint64_t>((e.street - 5) * 8 + e.action + 1);
+        }
+        return k;
+    }
+    // the same key computed from the state alone, by replaying the hand from its 5th-street root (evaluation)
+    HFull hkey_replay(const State& state, int viewer) const {
+        State r = root_of(state);
+        Trail t;
+        for (const Event& e : state.history) {
+            if (e.actor == viewer) {
+                const uint32_t b = hlookup(hkey(r, viewer, t));
+                trail_step(t, r, viewer, e.action, b == kNone ? kUnseen : b);
+            }
+            step(r, e.actor, e.action);
+            sync_hidden(r, state);
+        }
+        return hkey(r, viewer, t);
+    }
+    uint32_t hresolve(const HContext& c, HKey m) const {
+        while (true) {
+            const auto it = c.member.find(m);
+            if (it != c.member.end()) return it->second;
+            if (m.prev == kNone || m.prev == kUnseen || parent_[m.prev] == kNone) return c.rest;
+            m.prev = parent_[m.prev];
+        }
+    }
+    uint32_t hlookup(const HFull& k) const {
+        const auto it = hctx_.find(k.ctx);
+        return it == hctx_.end() ? kNone : hresolve(it->second, k.m);
+    }
+    uint32_t hlookup_or_create(const HFull& k) {
+        auto [it, inserted] = hctx_.try_emplace(k.ctx);
+        if (inserted) it->second.rest = new_bucket();
+        return hresolve(it->second, k.m);
+    }
+    // external-sampling traversal with bucket-history keys (the trail carries each seat's last bucket and action)
+    double traverse_h(State state, Trail trail, int traverser, double weight, std::mt19937_64& rng, bool track) {
+        if (state.terminal) return terminal_net_search(state, traverser);
+        const int actor = state.actor;
+        const uint8_t mask = valid_mask(state, actor);
+        const HFull key = hkey(state, actor, trail);
+        const uint32_t b = hlookup_or_create(key);
+        const auto sigma = rm_plus(buckets_[b].q, mask);
+        if (actor != traverser) {
+            for (int a = 0; a < A; ++a) if (mask & (1u << a)) buckets_[b].s[a] += weight * sigma[a];
+            const Action a = sample_action(sigma, mask, rng);
+            trail_step(trail, state, actor, a, b);
+            step(state, actor, a);
+            return traverse_h(std::move(state), trail, traverser, weight, rng, track);
+        }
+        std::array<double, A> v{};
+        double node = 0;
+        for (int a = 0; a < A; ++a) {
+            if (!(mask & (1u << a))) continue;
+            State child = state;
+            Trail child_trail = trail;
+            trail_step(child_trail, state, actor, static_cast<Action>(a), b);
+            step(child, actor, static_cast<Action>(a));
+            v[a] = traverse_h(std::move(child), child_trail, traverser, weight, rng, track);
+            node += sigma[a] * v[a];
+        }
+        Bucket& bucket = buckets_[b];  // re-read: the recursion may have grown buckets_
+        if (!bucket.dirty) { bucket.dirty = true; touched_.push_back(b); }
+        AtomStats* st = track ? &hatoms_[key] : nullptr;
+        double best = -std::numeric_limits<double>::infinity();
+        for (int a = 0; a < A; ++a) {
+            if (!(mask & (1u << a))) continue;
+            const double r = v[a] - node;
+            bucket.pending[a] += r;
+            best = std::max(best, r);
+            if (st) { st->r[a] += r; st->sq[a] += r * r; }
+        }
+        if (st) st->visits += 1;
+        traversal_gap_ += best;
+        return node;
+    }
+    // History split: split() with history keys as the label units. Explicit entries not visited this epoch (in
+    // particular entries whose previous bucket has since been split) count as none, like the rest bucket's unseen keys.
+    int hsplit(double z) {
+        std::map<uint16_t, std::vector<std::pair<HKey, int>>> by_ctx;  // ordered: reproducible bucket ids
+        for (const auto& [k, st] : hatoms_) {
+            const uint8_t mask = k.ctx & 0xff;
+            int best = -1;
+            for (int a = 0; a < A; ++a) if ((mask & (1u << a)) && (best < 0 || st.r[a] > st.r[best])) best = a;
+            by_ctx[k.ctx].push_back({k.m, st.visits > 0 && st.r[best] > z * std::sqrt(st.sq[best]) ? best : -1});
+        }
+        int splits = 0;
+        for (auto& [ctx, visited] : by_ctx) {
+            const auto found = hctx_.find(ctx);
+            if (found == hctx_.end()) continue;
+            HContext& c = found->second;
+            std::sort(visited.begin(), visited.end());
+            std::unordered_map<HKey, int, HKeyHash> label_of(visited.begin(), visited.end());
+            std::vector<std::pair<HKey, uint32_t>> members(c.member.begin(), c.member.end());
+            std::sort(members.begin(), members.end());
+            std::map<uint32_t, std::set<int>> labels;  // bucket -> labels of its keys
+            labels[c.rest].insert(-1);                 // unseen keys
+            for (const auto& [m, b] : members) {
+                const auto it = label_of.find(m);
+                labels[b].insert(it == label_of.end() ? -1 : it->second);
+            }
+            std::vector<std::pair<HKey, uint32_t>> implicit;  // visited keys without an entry, with their bucket
+            for (const auto& [m, label] : visited) {
+                if (c.member.count(m)) continue;
+                const uint32_t b = hresolve(c, m);
+                implicit.push_back({m, b});
+                labels[b].insert(label);
+            }
+            std::map<uint32_t, std::map<int, uint32_t>> child;
+            for (const auto& [b, set] : labels) {
+                if (set.size() < 2) continue;
+                ++splits;
+                for (int label : set) child[b][label] = new_bucket(b);
+            }
+            if (child.empty()) continue;
+            for (const auto& [m, b] : members) {
+                const auto it = child.find(b);
+                if (it == child.end()) continue;
+                const auto l = label_of.find(m);
+                c.member[m] = it->second.at(l == label_of.end() ? -1 : l->second);
+            }
+            for (const auto& [m, b] : implicit) {  // unlabelled ones keep following their ancestor entry or the rest
+                const auto it = child.find(b);
+                const int label = label_of.at(m);
+                if (it != child.end() && label >= 0) c.member[m] = it->second.at(label);
+            }
+            const auto rest = child.find(c.rest);
+            if (rest != child.end()) c.rest = rest->second.at(-1);
+        }
+        return splits;
+    }
     // sum of max_a Q - E_sigma Q over the traverser's nodes since the last call (ante units)
     double take_traversal_gap() { const double g = traversal_gap_; traversal_gap_ = 0; return g; }
     // Untouched buckets have no pending regret, so only touched ones are updated (RM+).
@@ -497,6 +727,20 @@ public:
     struct Window { double L = 0, C = 0; size_t atoms = 0; };
     // sampled atom-level L and bucket-level C of the epoch's window sums (diagnostic)
     Window window() const {
+        if (partition_ == Partition::History) {
+            Window w; w.atoms = hatoms_.size();
+            std::unordered_map<uint32_t, std::array<double, A>> sums;
+            std::unordered_map<uint32_t, uint8_t> masks;
+            for (const auto& [k, st] : hatoms_) {
+                w.L += psi(st.r, k.ctx & 0xff);
+                const uint32_t b = hlookup(k);
+                auto& s = sums[b];
+                for (int a = 0; a < A; ++a) s[a] += st.r[a];
+                masks[b] = k.ctx & 0xff;
+            }
+            for (const auto& [b, s] : sums) w.C += psi(s, masks[b]);
+            return w;
+        }
         Window w; w.atoms = atoms_.size();
         std::unordered_map<uint32_t, std::array<double, A>> sums;
         std::unordered_map<uint32_t, uint8_t> masks;
@@ -519,6 +763,7 @@ public:
     // ASWISS refinement; returns the number of buckets split. Labels come from the window sums, from the
     // average-policy regrets `avg` (avg without window), or from the pair of both (the common refinement).
     int split(double z, bool inherit = false, const AtomMap* avg = nullptr, bool use_window = true) {
+        if (partition_ == Partition::History) return hsplit(z);
         struct Labels { int window = -1, average = -1; };
         std::unordered_map<InfoKey, Labels, InfoKeyHash> labels_of;
         if (use_window) for (const auto& [atom, st] : atoms_) labels_of[atom].window = atom_label(atom, st, z);
@@ -573,7 +818,7 @@ public:
         last_h4_splits_ = h4_ ? h4_->split(z, inherit) : 0;
         return splits;
     }
-    void clear_window() { atoms_.clear(); if (h4_) h4_->clear_window(); }
+    void clear_window() { atoms_.clear(); hatoms_.clear(); if (h4_) h4_->clear_window(); }
     int last_h4_splits() const { return last_h4_splits_; }
     size_t h4_live() const { return h4_ ? h4_->live() : 0; }
 
@@ -581,6 +826,13 @@ public:
     // Pending regrets are always zero between roots, so they are not stored.
     void save_state(std::ofstream& out) const {
         put(out, static_cast<uint8_t>(partition_));
+        if (partition_ == Partition::History) {
+            put(out, static_cast<uint8_t>(hcards_every_));
+            put_history(out);
+            put(out, static_cast<uint64_t>(hatoms_.size()));
+            for (const auto& [k, st] : hatoms_) { put(out, k.ctx); put_hkey(out, k.m); put(out, st.r); put(out, st.sq); put(out, st.visits); }
+            return;
+        }
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
         if (h4_) h4_->save_state(out);
         put(out, static_cast<uint64_t>(contexts_.size()));
@@ -597,6 +849,20 @@ public:
     void load_state(std::ifstream& in) {
         uint8_t partition; get(in, partition);
         if (partition != static_cast<uint8_t>(partition_)) throw std::runtime_error("checkpoint partition differs");
+        if (partition_ == Partition::History) {
+            uint8_t every; get(in, every);
+            if (bool(every) != hcards_every_) throw std::runtime_error("checkpoint --history-cards differs");
+            get_history(in);
+            uint64_t n; get(in, n);
+            hatoms_.clear();
+            for (uint64_t i = 0; i < n; ++i) {
+                HFull k; get(in, k.ctx); k.m = get_hkey(in);
+                AtomStats st; get(in, st.r); get(in, st.sq); get(in, st.visits);
+                hatoms_[k] = st;
+            }
+            touched_.clear();
+            return;
+        }
         uint8_t with_h4; get(in, with_h4);
         if (bool(with_h4) != bool(h4_)) throw std::runtime_error("checkpoint H4 mode differs");
         if (h4_) h4_->load_state(in);
@@ -625,6 +891,14 @@ public:
     // live buckets (referenced by a partition) per street 5/6/7
     std::array<size_t, 3> live_buckets() const {
         std::array<std::set<uint32_t>, 3> live;
+        if (partition_ == Partition::History) {  // referenced by a rest or an explicit entry (stale entries included)
+            for (const auto& [ctx, c] : hctx_) {
+                auto& s = live[(ctx >> 8) - 5];
+                s.insert(c.rest);
+                for (const auto& [m, b] : c.member) s.insert(b);
+            }
+            return {live[0].size(), live[1].size(), live[2].size()};
+        }
         for (const auto& [ctx, c] : contexts_) {
             auto& s = live[ctx.street - 5];
             if (c.rest != kNone) s.insert(c.rest);
@@ -632,10 +906,17 @@ public:
         }
         return {live[0].size(), live[1].size(), live[2].size()};
     }
-    size_t contexts() const { return contexts_.size(); }
+    size_t contexts() const { return partition_ == Partition::History ? hctx_.size() : contexts_.size(); }
     size_t bucket_records() const { return buckets_.size(); }  // live + retired (split parents are never freed)
     // approximate bytes of the training tables: bucket records, the atom window and the partition maps
     std::array<double, 3> table_megabytes() const {
+        if (partition_ == Partition::History) {
+            size_t members = 0;
+            for (const auto& [ctx, c] : hctx_) members += c.member.size();
+            constexpr double node = 2 * sizeof(void*);
+            return {buckets_.capacity() * sizeof(Bucket) / 1e6, hatoms_.size() * (sizeof(HFull) + sizeof(AtomStats) + node) / 1e6,
+                    (members * (sizeof(HKey) + sizeof(uint32_t) + node) + parent_.capacity() * sizeof(uint32_t)) / 1e6};
+        }
         size_t members = 0;
         for (const auto& [ctx, c] : contexts_) members += c.member.size();
         constexpr double node = 2 * sizeof(void*);  // hash-node link and cached hash
@@ -650,6 +931,11 @@ public:
         out.write("ASWSTUD2", 8);
         put(out, static_cast<uint8_t>(partition_));
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
+        if (partition_ == Partition::History) {  // every bucket record is kept: keys refer to retired buckets by id
+            put(out, static_cast<uint8_t>(hcards_every_));
+            put_history(out);
+            return;
+        }
         if (h4_) h4_->save(out);
         std::map<uint32_t, uint32_t> remap;  // live bucket -> compact id
         auto id = [&](uint32_t b) { return b == kNone ? kNone : remap.try_emplace(b, (uint32_t)remap.size()).first->second; };
@@ -681,6 +967,13 @@ public:
         if (version == "ASWSTUD2") get(in, with_h4);
         h4_.reset();
         if (with_h4) { h4_ = std::make_unique<H4Table>(partition_); h4_->load(in); }
+        if (partition_ == Partition::History) {
+            uint8_t every; get(in, every);
+            hcards_every_ = every;
+            get_history(in);
+            if (!in) throw std::runtime_error("truncated snapshot: " + path);
+            return;
+        }
         uint64_t n; get(in, n);
         contexts_.clear();
         for (uint64_t i = 0; i < n; ++i) {
@@ -712,7 +1005,43 @@ private:
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) m = std::max(m, x[a]);
         return m;
     }
-    uint32_t new_bucket() { buckets_.emplace_back(); return static_cast<uint32_t>(buckets_.size() - 1); }
+    uint32_t new_bucket(uint32_t parent = kNone) {
+        buckets_.emplace_back();
+        if (partition_ == Partition::History) parent_.push_back(parent);
+        return static_cast<uint32_t>(buckets_.size() - 1);
+    }
+    // history partition, genealogy and every bucket record (snapshots and checkpoints)
+    void put_history(std::ofstream& out) const {
+        std::vector<uint16_t> ids;
+        for (const auto& [ctx, c] : hctx_) ids.push_back(ctx);
+        std::sort(ids.begin(), ids.end());
+        put(out, static_cast<uint64_t>(ids.size()));
+        for (uint16_t ctx : ids) {
+            const HContext& c = hctx_.at(ctx);
+            put(out, ctx); put(out, c.rest);
+            std::vector<std::pair<HKey, uint32_t>> members(c.member.begin(), c.member.end());
+            std::sort(members.begin(), members.end());
+            put(out, static_cast<uint64_t>(members.size()));
+            for (const auto& [m, b] : members) { put_hkey(out, m); put(out, b); }
+        }
+        put(out, static_cast<uint64_t>(buckets_.size()));
+        for (size_t b = 0; b < buckets_.size(); ++b) { put(out, buckets_[b].q); put(out, buckets_[b].s); put(out, parent_[b]); }
+    }
+    void get_history(std::ifstream& in) {
+        uint64_t n; get(in, n);
+        hctx_.clear();
+        for (uint64_t i = 0; i < n; ++i) {
+            uint16_t ctx; get(in, ctx);
+            HContext c; get(in, c.rest);
+            uint64_t m; get(in, m);
+            for (uint64_t j = 0; j < m; ++j) { const HKey key = get_hkey(in); uint32_t b; get(in, b); c.member[key] = b; }
+            hctx_[ctx] = std::move(c);
+        }
+        get(in, n);
+        buckets_.assign(n, Bucket{});
+        parent_.assign(n, kNone);
+        for (uint64_t b = 0; b < n; ++b) { get(in, buckets_[b].q); get(in, buckets_[b].s); get(in, parent_[b]); }
+    }
 
     Partition partition_;
     const PowerAtlas* atlas_;
@@ -724,6 +1053,11 @@ private:
     std::vector<uint32_t> touched_;
     std::unordered_map<InfoKey, AtomStats, InfoKeyHash> atoms_;
     double traversal_gap_ = 0;
+    // --partition history
+    bool hcards_every_ = false;
+    std::unordered_map<uint16_t, HContext> hctx_;
+    std::vector<uint32_t> parent_;  // bucket -> the bucket it was split from (kNone: a context's first bucket)
+    std::unordered_map<HFull, AtomStats, HFullHash> hatoms_;
 };
 
 // frozen snapshot as a PolicyLBR target; with a learned H4 it also supplies the H4 likelihood used by H4PolicyLBR
@@ -825,7 +1159,8 @@ Partition parse_partition(const std::string& s) {
     if (s == "context") return Partition::Context;
     if (s == "atom") return Partition::Atom;
     if (s == "aswiss") return Partition::Aswiss;
-    throw std::runtime_error("--partition must be context, atom or aswiss");
+    if (s == "history") return Partition::History;
+    throw std::runtime_error("--partition must be context, atom, aswiss or history");
 }
 std::unique_ptr<PowerAtlas> load_atlas(const std::string& path, size_t cache) {
     if (path.empty()) return nullptr;
@@ -908,7 +1243,7 @@ int train(int argc, char** argv) {
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
-                                {"--avg-frac", "0.25"}});
+                                {"--avg-frac", "0.25"}, {"--history-cards", "street"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -919,7 +1254,12 @@ int train(int argc, char** argv) {
     if (label_rule != "window" && (o["--partition"] != "aswiss" || learn_h4))
         throw std::runtime_error("--label avg and window+avg need --partition aswiss and the heuristic H4");
     const double avg_frac = std::stod(o["--avg-frac"]);
+    if (o["--history-cards"] != "street" && o["--history-cards"] != "every")
+        throw std::runtime_error("--history-cards must be street or every");
+    if (partition == Partition::History && (learn_h4 || o["--inherit"] == "1"))
+        throw std::runtime_error("--partition history supports neither --h4 learn nor --inherit 1");
     Model model(partition, atlas.get(), learn_h4);
+    model.set_history_cards(o["--history-cards"] == "every");
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
     std::filesystem::create_directories(out);
@@ -933,7 +1273,8 @@ int train(int argc, char** argv) {
     cfg << "partition=" << o["--partition"] << ";atlas=" << std::filesystem::path(o["--atlas"]).filename().string() << ":"
         << file_size_or_zero(o["--atlas"]) << ";epoch0=" << epoch0 << ";z=" << o["--z"] << ";inherit=" << o["--inherit"]
         << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "")
-        << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "");
+        << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
+        << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -978,7 +1319,7 @@ int train(int argc, char** argv) {
         s.curve_bytes = file_size_or_zero(curve_path);
         write_checkpoint(out, config, s, model);
     };
-    const bool track = partition == Partition::Aswiss;
+    const bool track = partition == Partition::Aswiss || partition == Partition::History;
     uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
     while (s.t < T) {
         ++s.t;
@@ -1007,7 +1348,7 @@ int train(int argc, char** argv) {
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
             int splits = 0;
-            if (partition == Partition::Aswiss && label_rule == "window") splits = model.split(z, inherit);
+            if (track && label_rule == "window") splits = model.split(z, inherit);
             else if (partition == Partition::Aswiss) {
                 // method B: regrets of the frozen average policy from a separate sampled pass (deterministic per epoch)
                 AtomMap avg;
@@ -1177,8 +1518,64 @@ int self_test(int argc, char** argv) {
             }
         }
     }
+    // bucket-history keys, after splits: the key replayed from the state alone equals the key carried by the
+    // traversal trail; the root replay reproduces the state; snapshot round trip keeps every policy
+    for (bool every : {false, true}) {
+        Model hist(Partition::History, atlas.get());
+        hist.set_history_cards(every);
+        for (uint64_t t = 1; t <= 3000; ++t) {
+            auto deck = fresh_deck();
+            std::shuffle(deck.begin(), deck.end(), deal_rng);
+            for (int p = 0; p < 2; ++p) { hist.traverse_root(deck, p, static_cast<double>(t), rng, true); hist.apply_regrets(); }
+            if (t % 500 == 0) { hist.split(1.0); hist.clear_window(); }
+        }
+        hist.save("aswiss_stud_self_test.bin");
+        Model loaded(Partition::History, atlas.get());
+        loaded.load("aswiss_stud_self_test.bin");
+        if (loaded.history_cards_every() != every) throw std::runtime_error("history card mode lost in snapshot");
+        int decisions = 0, misses = 0;
+        for (int i = 0; i < 500; ++i) {
+            auto deck = fresh_deck();
+            std::shuffle(deck.begin(), deck.end(), deal_rng);
+            State s = sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte);
+            Trail trail;
+            while (!s.terminal) {
+                const int actor = s.actor;
+                const HFull key = hist.hkey(s, actor, trail);
+                if (!(hist.hkey_replay(s, actor) == key)) throw std::runtime_error("replayed history key differs from the trail key");
+                State lbr_view = s;  // as PolicyLBR asks the target: the other seat's hidden cards cleared
+                lbr_view.players[1 - actor].hidden.clear();
+                if (!(hist.hkey_replay(lbr_view, actor) == key)) throw std::runtime_error("history key depends on hidden cards of the other seat");
+                State r = root_of(s);
+                for (const Event& e : s.history) { step(r, e.actor, e.action); sync_hidden(r, s); }
+                for (int seat = 0; seat < 2; ++seat)
+                    if (r.players[seat].hidden != s.players[seat].hidden || r.players[seat].shown != s.players[seat].shown ||
+                        r.players[seat].invested != s.players[seat].invested || r.players[seat].round_bet != s.players[seat].round_bet)
+                        throw std::runtime_error("root replay changed a player");
+                if (r.pot != s.pot || r.street != s.street || r.actor != s.actor || r.highest_bet != s.highest_bet ||
+                    r.raise_count != s.raise_count || r.history.size() != s.history.size())
+                    throw std::runtime_error("root replay changed the betting state");
+                for (bool average : {true, false}) {
+                    bool f1 = false, f2 = false;
+                    if (hist.strategy(s, actor, average, &f1) != loaded.strategy(s, actor, average, &f2) || f1 != f2)
+                        throw std::runtime_error("history snapshot round trip changed a policy");
+                    misses += !f1;
+                }
+                const uint8_t mask = valid_mask(s, actor);
+                const Action a = sample_action(hist.strategy(s, actor, false), mask, rng);
+                const uint32_t b = hist.hlookup(key);
+                trail_step(trail, s, actor, a, b == kNone ? kUnseen : b);
+                step(s, actor, a);
+                ++decisions;
+            }
+        }
+        const auto live = hist.live_buckets();
+        std::cerr << "history (" << (every ? "cards every decision" : "cards per street") << "): " << decisions
+                  << " decisions checked, " << misses << " unseen policy lookups, buckets " << live[0] + live[1] + live[2]
+                  << ", contexts " << hist.contexts() << "\n";
+    }
     // H4: the learned-H4 root with the heuristic's choices is the engine's 5th-street root
-    auto same_state = [](const State& x, const State& y) {
+    auto same_state =[](const State& x, const State& y) {
         for (int seat = 0; seat < 2; ++seat) {
             const Player &a = x.players[seat], &b = y.players[seat];
             if (a.hidden != b.hidden || a.shown != b.shown || !(a.discarded == b.discarded) || a.invested != b.invested) return false;

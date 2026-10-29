@@ -1119,7 +1119,7 @@ int eval(int argc, char** argv) {
     uint64_t policy_queries = 0, policy_misses = 0;
     if (model.has_h4()) { const auto st = h4_lbr.stats(); policy_queries = st.policy_queries; policy_misses = st.policy_misses; }
     else { const auto st = lbr.stats(); policy_queries = st.policy_queries; policy_misses = st.policy_misses; }
-    std::cout << std::setprecision(9) << "{\"snapshot\":\"" << o["--snapshot"] << "\",\"policy\":\"" << o["--policy"]
+    std::cout << std::setprecision(9) << "{\"snapshot\":\"" << json_escape(o["--snapshot"]) << "\",\"policy\":\"" << o["--policy"]
               << "\",\"pairs\":" << pairs << ",\"particles\":" << o["--particles"] << ",\"seed\":" << seed
               << ",\"lbr_ante\":" << lm << ",\"lbr_se\":" << lse << ",\"gap_roots\":" << gap_roots
               << ",\"gap_proxy_ante\":" << gm << ",\"gap_proxy_se\":" << gse << ",\"policy_queries\":" << policy_queries

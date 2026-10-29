@@ -10,6 +10,7 @@ already present, so it can be rerun while training continues. Every snapshot use
 particles and gap deals.
 """
 import argparse, csv, json, os, subprocess
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
 ap = argparse.ArgumentParser()
@@ -67,7 +68,8 @@ for spec in a.runs:
 def run(job):
     d, (file, roots, kind, epoch, buckets), policy, partition, atlas = job
     stem = file[:-4]
-    cmd = [a.binary, "eval", "--partition", partition, "--snapshot", os.path.join(d, file), "--policy", policy,
+    # forward slashes: evaluators built before 2026-10-29 echo this path into their JSON output unescaped
+    cmd = [a.binary, "eval", "--partition", partition, "--snapshot", Path(d, file).as_posix(), "--policy", policy,
            "--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", str(a.gap_roots), "--seed", str(a.seed),
            "--pairs-csv", os.path.join(d, f"lbr_pairs{suffix}_{stem}_{policy}.csv")]
     if atlas: cmd += ["--atlas", atlas]

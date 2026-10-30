@@ -729,7 +729,7 @@ bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop |
 |---|---|
 | `log.csv` | epoch마다: bucket 수(street별), 분할 수, 원자 수, 샘플 L/C/H, 시간, 메모리(최대 RSS, 표 크기) |
 | `curve.csv` | 10만 roots마다: 학습 deal에서 잰 현재 정책의 샘플 BR-gap 근사치(평균, 표준오차), bucket 수, 최대 RSS. 학습 순회의 부산물이라 추가 계산이 없다 |
-| `snapshots.csv`, `snapshot_*.bin` | epoch 끝과 500만 roots마다의 정책 스냅숏(현재 표 + 평균 표 + 분할) |
+| `snapshots.csv`, `snapshot_*.bin` | epoch 끝과 500만 roots마다의 정책 스냅숏(현재 표 + 평균 표 + 분할). epoch 끝 스냅숏 `snapshot_k.bin`은 그 epoch의 분할로 학습한 표를 **분할하기 직전에** 저장한다. 그래서 `--epoch-only` 그림의 LBR은 모두 분할 직전 정책의 값이다 |
 | `eval.jsonl`, `lbr_pairs_*.csv` | `eval`/`final` 결과. 스냅숏 × 평균/현재 정책의 LBR(평균, 표준오차)과 BR-gap 근사치, 그리고 pair별 원자료(짝지은 차이 계산용) |
 | `results_s1_*.png` (12액션은 `results_h4_s1_*.png`) | `plot`이 그리는 그림: LBR과 근사치 학습 곡선, k-means 256 대비 차이와 비율, bucket 수, `curve.csv` 곡선, bucket 수 대비 LBR |
 

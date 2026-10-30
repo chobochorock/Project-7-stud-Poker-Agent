@@ -4,6 +4,7 @@ Usage: python eval_judgments.py TREE_DIR RUN [--delete]
 Gate judgments save policy_presplit_J_{avg,cur}.bin (the bucket average and current policies the judgment saw); epoch
 judgments point at the epoch checkpoint policy_{bucket,current}_K.bin. Writes RUN/judgments_expl.csv (the judgments.csv
 rows that split, plus expl_avg and expl_cur). --delete removes the presplit .bin files once they are evaluated.
+Incremental: rows already in judgments_expl.csv are kept and not evaluated again, so it can run while training.
 """
 import sys, json, csv, os
 import numpy as np
@@ -24,16 +25,20 @@ for k in range(W):
 chance[players != -1] = 0
 tree = (players, info, deg, children, chance, util); levels = tree_levels(tree)
 rows = [r for r in csv.DictReader(open(f"{run}/judgments.csv")) if r["presplit"] != "-"]
-done = []
-with open(f"{run}/judgments_expl.csv", "w", newline="") as f:
+out = f"{run}/judgments_expl.csv"
+old = {r["judgment"] for r in csv.DictReader(open(out))} if os.path.exists(out) else set()
+done, fresh = [], not os.path.exists(out)
+with open(out, "a", newline="") as f:
     w = csv.writer(f)
-    w.writerow(list(rows[0].keys()) + ["expl_avg", "expl_cur"] if rows else ["judgment"])
+    if fresh: w.writerow(list(rows[0].keys()) + ["expl_avg", "expl_cur"] if rows else ["judgment"])
     for r in rows:
+        if r["judgment"] in old: continue
         stem = r["presplit"]
         if stem.startswith("bucket_"):
             files = [f"{run}/policy_{stem}.bin", f"{run}/policy_current_{stem[len('bucket_'):]}.bin"]
         else:
             files = [f"{run}/policy_{stem}_avg.bin", f"{run}/policy_{stem}_cur.bin"]
+            if not all(os.path.exists(p) for p in files): break  # a row still being written
             done += files
         vals = [exploitability(tree, levels, np.fromfile(p).reshape(-1, W), counts) for p in files]
         w.writerow(list(r.values()) + [f"{v:.6g}" for v in vals]); f.flush()

@@ -6,7 +6,7 @@
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
 //                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
-//                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0]
+//                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0] [--gate-stat avg|iter]
 //                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
@@ -50,6 +50,8 @@
 // --gate-eps E (history keys, --label avg): judge (split) at an epoch end only when the bucket regret total of the
 //            average policy, rho_P/2 per root, estimated from the average-policy pass (cross-fitted between its two
 //            halves), is at most E; otherwise the epoch ends without a split. gate.csv logs every check.
+//            --gate-stat iter gates instead on the training iterates' regret since the last judgment, sum_B max(0,
+//            max_a R_B(a)) / roots / 2 from the sampled regrets MCCFR adds (no extra pass); both are logged.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -513,6 +515,18 @@ public:
     const H4Table* h4() const { return h4_.get(); }
     // --partition history: cards at every decision (true) or only at the first decision of each street (false)
     void set_history_cards(bool every) { hcards_every_ = every; }
+    // Regret sums of the training iterates since the last judgment, per bucket, before the RM+ clipping (the sampled
+    // counterfactual regrets MCCFR adds; unbiased for the iterates' regret). Kept only for --gate-eps, and checkpointed.
+    void track_iterate_regret(bool on) { track_rwin_ = on; }
+    void count_root() { if (track_rwin_) ++rwin_roots_; }
+    // sum_B max(0, max_a R_B(a)) / roots / 2 over the window (ante per root), then the window restarts if `reset`
+    double iterate_regret_half(bool reset) {
+        double total = 0;
+        for (const auto& r : rwin_) total += std::max(0.0, *std::max_element(r.begin(), r.end()));
+        const double v = rwin_roots_ ? total / static_cast<double>(rwin_roots_) / 2 : 0;
+        if (reset) { rwin_.assign(rwin_.size(), {}); rwin_roots_ = 0; }
+        return v;
+    }
     bool history_cards_every() const { return hcards_every_; }
     std::array<double, H> h4_strategy(int seat, const std::vector<Card>& cards, bool average, bool* found = nullptr) const {
         return h4_->strategy(seat, h4_key(cards), average, found);
@@ -881,8 +895,10 @@ public:
     double take_traversal_gap() { const double g = traversal_gap_; traversal_gap_ = 0; return g; }
     // Untouched buckets have no pending regret, so only touched ones are updated (RM+).
     void apply_regrets() {
+        if (track_rwin_ && rwin_.size() < buckets_.size()) rwin_.resize(buckets_.size());
         for (uint32_t b : touched_) {
             Bucket& bucket = buckets_[b];
+            if (track_rwin_) for (int a = 0; a < A; ++a) rwin_[b][a] += bucket.pending[a];
             for (int a = 0; a < A; ++a) { bucket.q[a] = std::max(0.0, bucket.q[a] + bucket.pending[a]); bucket.pending[a] = 0; }
             bucket.dirty = false;
         }
@@ -997,6 +1013,10 @@ public:
             put_history(out);
             put(out, static_cast<uint64_t>(hatoms_.size()));
             for (const auto& [k, st] : hatoms_) { put(out, k.ctx); put_hkey(out, k.m); put(out, st.r); put(out, st.sq); put(out, st.visits); }
+            if (track_rwin_) {
+                put(out, rwin_roots_); put(out, static_cast<uint64_t>(rwin_.size()));
+                for (const auto& r : rwin_) put(out, r);
+            }
             return;
         }
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
@@ -1025,6 +1045,11 @@ public:
                 HFull k; get(in, k.ctx); k.m = get_hkey(in);
                 AtomStats st; get(in, st.r); get(in, st.sq); get(in, st.visits);
                 hatoms_[k] = st;
+            }
+            if (track_rwin_) {
+                uint64_t m; get(in, rwin_roots_); get(in, m);
+                rwin_.assign(m, {});
+                for (auto& r : rwin_) get(in, r);
             }
             touched_.clear();
             return;
@@ -1223,6 +1248,9 @@ private:
     bool hcards_every_ = false;
     std::unordered_map<uint16_t, HContext> hctx_;
     std::vector<uint32_t> parent_;  // bucket -> the bucket it was split from (kNone: a context's first bucket)
+    bool track_rwin_ = false;
+    std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
+    uint64_t rwin_roots_ = 0;
     HMap hatoms_;
 };
 
@@ -1465,7 +1493,7 @@ int train(int argc, char** argv) {
                                 {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"},
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
                                 {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
-                                {"--backward-z", ""}, {"--gate-eps", "0"}});
+                                {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1492,10 +1520,13 @@ int train(int argc, char** argv) {
     const double backward_z = o["--backward-z"].empty() ? -1.0 : std::stod(o["--backward-z"]);
     const double gate_eps = std::stod(o["--gate-eps"]);
     const bool gated = gate_eps > 0;
+    if (o["--gate-stat"] != "avg" && o["--gate-stat"] != "iter") throw std::runtime_error("--gate-stat must be avg or iter");
+    const bool gate_iter = o["--gate-stat"] == "iter";
     if (gated && (partition != Partition::History || label_rule != "avg"))
         throw std::runtime_error("--gate-eps needs --partition history --label avg");
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
+    model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0);
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
     std::filesystem::create_directories(out);
@@ -1514,7 +1545,7 @@ int train(int argc, char** argv) {
         << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
                           o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] +
                           (o["--backward-z"].empty() ? "" : ";backward_z=" + o["--backward-z"]) : "")
-        << (gated ? ";gate_eps=" + o["--gate-eps"] : "");
+        << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1548,7 +1579,7 @@ int train(int argc, char** argv) {
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
         std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
-        if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,eps,judged\n";
+        if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,iterate_regret_half,eps,judged\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
@@ -1583,6 +1614,7 @@ int train(int argc, char** argv) {
         const bool in_window = track && (!label_cap || epoch_end - s.t < label_cap) &&
                                !(partition == Partition::History && label_rule == "avg");
         for (int p = 0; p < 2; ++p) { model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window); model.apply_regrets(); }
+        model.count_root();
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root
         s.curve_sum += gap; s.curve_sq += gap * gap; ++s.curve_roots;
         if (curve_every && s.t % curve_every == 0) {
@@ -1640,11 +1672,13 @@ int train(int argc, char** argv) {
                         if (a1 >= 0) cross += h[a1];
                     }
                     plain /= 2.0 * static_cast<double>(n); cross /= 2.0 * static_cast<double>(n);
-                    judge = cross <= gate_eps;
+                    const double iter = model.iterate_regret_half(false);
+                    judge = (gate_iter ? iter : cross) <= gate_eps;
+                    if (judge) model.iterate_regret_half(true);  // the window restarts at every judgment
                     std::ofstream(gate_path, std::ios::app) << s.k << ',' << s.t << ',' << live_total() << ',' << plain << ',' << cross
-                                                            << ',' << gate_eps << ',' << judge << '\n';
-                    std::cerr << "gate: rho_P/2 per root " << cross << " (plain " << plain << ") vs eps " << gate_eps
-                              << (judge ? ": judge\n" : ": no split this epoch\n");
+                                                            << ',' << iter << ',' << gate_eps << ',' << judge << '\n';
+                    std::cerr << "gate: rho_P/2 per root " << cross << " (plain " << plain << "), iterates' regret/2 " << iter
+                              << " vs eps " << gate_eps << (judge ? ": judge\n" : ": no split this epoch\n");
                 }
                 // backward split: replay the same pass (same deals and samples, same frozen partition) and sum the
                 // sub-keys of the keys visited at least --backward-min-visits times (rarer keys can hardly show two

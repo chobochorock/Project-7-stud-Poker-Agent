@@ -6,7 +6,7 @@
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
 //                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
-//                            [--backward-test pair|labels]
+//                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0]
 //                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
@@ -45,7 +45,11 @@
 //            at most --backward-max-subkeys (default 4M, about 0.8 GB) of them; later new sub-keys are dropped.
 //            --backward-test pair (default): a key is inconsistent only through a pair of sub-keys that each prefer their
 //            own label significantly, with the threshold raised for the number of sub-keys (see hbackward); labels:
-//            any two different significant labels (the first version).
+//            any two different significant labels (the first version). --backward-z Z: the base of the pair-test
+//            threshold (default --z); larger is less sensitive.
+// --gate-eps E (history keys, --label avg): judge (split) at an epoch end only when the bucket regret total of the
+//            average policy, rho_P/2 per root, estimated from the average-policy pass (cross-fitted between its two
+//            halves), is at most E; otherwise the epoch ends without a split. gate.csv logs every check.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -779,9 +783,10 @@ public:
     // pair_test: a key counts as inconsistent only through a pair of sub-keys i, j with different labels that each
     // prefer their own label to the other's: R_i(l_i) - R_i(l_j) > z_m (sqrt(Q_i(l_i)) + sqrt(Q_i(l_j))) and the same
     // for j (sqrt(sum (x-y)^2) <= sqrt(sum x^2) + sqrt(sum y^2), so the margin is conservative), where
-    // z_m = sqrt(z^2 + 2 ln m) for the m labelled sub-keys of the key (about the same false-positive rate per key
+    // z_m = sqrt(zb^2 + 2 ln m) (zb: --backward-z, default z) for the m labelled sub-keys of the key (about the same false-positive rate per key
     // however many sub-keys it has). Without pair_test any two different labels count.
-    Backward hbackward(double z, const SubMap& sub, bool pair_test = false) {
+    Backward hbackward(double z, const SubMap& sub, bool pair_test = false, double zb = -1) {
+        if (zb < 0) zb = z;
         Backward res;
         res.subkeys = sub.stats.size();
         struct Labelled { uint32_t p; int l; const AtomStats* st; };
@@ -811,7 +816,7 @@ public:
                 }
                 continue;
             }
-            const double zm = std::sqrt(z * z + 2 * std::log(static_cast<double>(v.size())));
+            const double zm = std::sqrt(zb * zb + 2 * std::log(static_cast<double>(v.size())));
             std::vector<char> confirmed(v.size(), 0);
             for (size_t i = 0; i < v.size(); ++i)
                 for (size_t j = i + 1; j < v.size(); ++j)
@@ -1313,8 +1318,10 @@ double avg_traverse(const Model& model, State state, int traverser, std::mt19937
 // `sub`, the traverser's regrets at the keys in `only` are also summed per (key, key of its previous decision); `pk`
 // carries each seat's previous key (ctx 0: none yet). `stats` may be null (a replay that only fills `sub`).
 using HSet = std::unordered_set<HFull, HFullHash>;
+using BucketHalves = std::unordered_map<uint32_t, std::array<double, 2 * A>>;  // bucket -> regret sums of halves 0 and 1
 double avg_traverse_h(const Model& model, State state, Trail trail, int traverser, std::mt19937_64& rng, HMap* stats,
-                      SubMap* sub = nullptr, const HSet* only = nullptr, std::array<HFull, 2> pk = {}) {
+                      SubMap* sub = nullptr, const HSet* only = nullptr, BucketHalves* halves = nullptr, int half = 0,
+                      std::array<HFull, 2> pk = {}) {
     if (state.terminal) return terminal_net_search(state, traverser);
     const int actor = state.actor;
     const uint8_t mask = valid_mask(state, actor);
@@ -1327,7 +1334,7 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         const Action a = sample_action(sigma, mask, rng);
         trail_step(trail, state, actor, a, seen);
         step(state, actor, a);
-        return avg_traverse_h(model, std::move(state), trail, traverser, rng, stats, sub, only, pk);
+        return avg_traverse_h(model, std::move(state), trail, traverser, rng, stats, sub, only, halves, half, pk);
     }
     std::array<double, A> v{};
     double node = 0;
@@ -1337,7 +1344,7 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         Trail child_trail = trail;
         trail_step(child_trail, state, actor, static_cast<Action>(a), seen);
         step(child, actor, static_cast<Action>(a));
-        v[a] = avg_traverse_h(model, std::move(child), child_trail, traverser, rng, stats, sub, only, pk);
+        v[a] = avg_traverse_h(model, std::move(child), child_trail, traverser, rng, stats, sub, only, halves, half, pk);
         node += sigma[a] * v[a];
     }
     AtomStats* st = stats ? &(*stats)[key] : nullptr;
@@ -1353,6 +1360,7 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         const double r = v[a] - node;
         if (st) { st->r[a] += r; st->sq[a] += r * r; }
         if (ss) { ss->r[a] += r; ss->sq[a] += r * r; }
+        if (halves && b != kNone) (*halves)[b][half * A + a] += r;
     }
     if (st) st->visits += 1;
     if (ss) ss->visits += 1;
@@ -1456,7 +1464,8 @@ int train(int argc, char** argv) {
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
                                 {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"},
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
-                                {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"}});
+                                {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
+                                {"--backward-z", ""}, {"--gate-eps", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1480,6 +1489,11 @@ int train(int argc, char** argv) {
     const size_t backward_max_subkeys = std::stoull(o["--backward-max-subkeys"]);
     if (o["--backward-test"] != "pair" && o["--backward-test"] != "labels") throw std::runtime_error("--backward-test must be pair or labels");
     const bool backward_pair_test = o["--backward-test"] == "pair";
+    const double backward_z = o["--backward-z"].empty() ? -1.0 : std::stod(o["--backward-z"]);
+    const double gate_eps = std::stod(o["--gate-eps"]);
+    const bool gated = gate_eps > 0;
+    if (gated && (partition != Partition::History || label_rule != "avg"))
+        throw std::runtime_error("--gate-eps needs --partition history --label avg");
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
     const std::string out = o.at("--out");
@@ -1498,12 +1512,14 @@ int train(int argc, char** argv) {
         << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
         << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "")
         << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
-                          o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] : "");
+                          o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] +
+                          (o["--backward-z"].empty() ? "" : ";backward_z=" + o["--backward-z"]) : "")
+        << (gated ? ";gate_eps=" + o["--gate-eps"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
-    const std::string backward_path = out + "/backward.csv";
+    const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv";
     LoopState s;
     s.L = epoch0;
     const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model) ||
@@ -1514,13 +1530,14 @@ int train(int argc, char** argv) {
         std::filesystem::resize_file(log_path, s.log_bytes);
         std::filesystem::resize_file(index_path, s.index_bytes);
         std::filesystem::resize_file(curve_path, s.curve_bytes);
-        if (backward) {  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
-            std::ifstream in(backward_path);
+        for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}}) {
+            if (!on) continue;  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
+            std::ifstream in(path);
             std::string line, kept;
             while (std::getline(in, line))
                 if (line.rfind("epoch", 0) == 0 || std::stoull(line.substr(0, line.find(','))) < s.k) kept += line + "\n";
             in.close();
-            std::ofstream(backward_path) << kept;
+            std::ofstream(path) << kept;
         }
         std::cerr << "resumed at root " << s.t << " (epoch " << s.k << ")\n";
     } else {
@@ -1531,6 +1548,7 @@ int train(int argc, char** argv) {
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
         std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
+        if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,eps,judged\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
@@ -1590,6 +1608,7 @@ int train(int argc, char** argv) {
             if (track && label_rule == "window") splits = model.split(z, inherit);
             else if (track && partition == Partition::History) {  // method B with bucket-history keys
                 HMap avg;
+                BucketHalves halves;
                 const uint64_t eval_seed = std::stoull(o["--seed"]) * 1000003ull + s.k;
                 std::mt19937_64 eval_rng(eval_seed);
                 uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
@@ -1598,7 +1617,34 @@ int train(int argc, char** argv) {
                     auto eval_deck = fresh_deck();
                     std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
                     for (int p = 0; p < 2; ++p)
-                        avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, &avg);
+                        avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, &avg,
+                                       nullptr, nullptr, gated ? &halves : nullptr, static_cast<int>(i & 1));
+                }
+                // --gate-eps: judge only when the bucket regret total of the average policy, rho_P/2 per root, is at most
+                // eps. rho_P = sum_B max(0, max_a r(B, a)) estimated from this pass: the plain estimate is biased upward
+                // by the noise of tens of thousands of bucket sums, so the gate uses the cross-fitted one (each bucket's
+                // best action chosen on one half of the roots, its regret measured on the other half, both ways).
+                bool judge = true;
+                if (gated) {
+                    double plain = 0, cross = 0;
+                    for (const auto& [b, h] : halves) {
+                        double best = 0, m0 = 0, m1 = 0;
+                        int a0 = -1, a1 = -1;
+                        for (int a = 0; a < A; ++a) {
+                            best = std::max(best, h[a] + h[A + a]);
+                            if (h[a] > m0) { m0 = h[a]; a0 = a; }
+                            if (h[A + a] > m1) { m1 = h[A + a]; a1 = a; }
+                        }
+                        plain += best;
+                        if (a0 >= 0) cross += h[A + a0];
+                        if (a1 >= 0) cross += h[a1];
+                    }
+                    plain /= 2.0 * static_cast<double>(n); cross /= 2.0 * static_cast<double>(n);
+                    judge = cross <= gate_eps;
+                    std::ofstream(gate_path, std::ios::app) << s.k << ',' << s.t << ',' << live_total() << ',' << plain << ',' << cross
+                                                            << ',' << gate_eps << ',' << judge << '\n';
+                    std::cerr << "gate: rho_P/2 per root " << cross << " (plain " << plain << ") vs eps " << gate_eps
+                              << (judge ? ": judge\n" : ": no split this epoch\n");
                 }
                 // backward split: replay the same pass (same deals and samples, same frozen partition) and sum the
                 // sub-keys of the keys visited at least --backward-min-visits times (rarer keys can hardly show two
@@ -1606,7 +1652,7 @@ int train(int argc, char** argv) {
                 SubMap sub;
                 sub.cap = backward_max_subkeys;
                 HSet frequent;
-                if (backward) {
+                if (backward && judge) {
                     for (const auto& [k, st] : avg) if (st.visits >= backward_min_visits) frequent.insert(k);
                     std::mt19937_64 replay_rng(eval_seed);
                     for (uint64_t i = 0; i < n; ++i) {
@@ -1617,11 +1663,11 @@ int train(int argc, char** argv) {
                                            nullptr, &sub, &frequent);
                     }
                 }
-                splits = model.hsplit(z, &avg, label_rule == "window+avg");
+                if (judge) splits = model.hsplit(z, &avg, label_rule == "window+avg");
                 std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys\n";
-                if (backward) {
+                if (backward && judge) {
                     const double rss = peak_rss_mb();  // includes the sub-key table, still alive here
-                    const auto br = model.hbackward(z, sub, backward_pair_test);
+                    const auto br = model.hbackward(z, sub, backward_pair_test, backward_z);
                     splits += br.splits;
                     std::ofstream(backward_path, std::ios::app) << s.k << ',' << s.t << ',' << avg.size() << ',' << frequent.size() << ','
                         << br.subkeys << ',' << sub.dropped << ',' << br.two_labels << ',' << br.inconsistent << ',' << br.pairs << ','

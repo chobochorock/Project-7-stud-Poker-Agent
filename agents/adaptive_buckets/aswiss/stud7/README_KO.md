@@ -440,6 +440,92 @@ python plot_stud.py runs results_stud_history_1m_seed1 --runs \
   - 학습 deal 경로는 전략이나 분할이 달라지는 순간부터 갈라진다.
 - LBR은 선형 축, 근사치만 log 축이다. 교차점이나 기울기로 외삽하지 않았다.
 
+## ASWISS = 이력 열쇠 + 방법 B + 역방향 분할 (seed 1, 5.11M roots, 완료 2026-10-30)
+
+mini-stud에서 역방향 분할이 열쇠 단위의 손실을 대부분 없앴다(`../README_KO.md`의 "역방향 분할과 ε 판정 문턱"). 그래서 이 조합을 ASWISS로 정하고, 7-stud에 표본 버전을 넣었다. 비교군 이름은 `hist_bb`, 학습 옵션은 `--backward 1`이다.
+
+**7-stud에서의 역방향 분할** (`aswiss_stud.cpp`의 `Model::hbackward`)
+- **진단 단위:** 7-stud의 정보집합은 학습 중 거의 다시 나오지 않는다. 그래서 한 열쇠의 멤버를 정보집합 대신 **같은 player의 직전 결정 열쇠**로 나눈다. (열쇠, 직전 열쇠) 쌍을 "부분 열쇠"라 부른다.
+- **판정:** 같은 열쇠로 들어오는 직전 열쇠들의 라벨이 갈리면, 그 직전 열쇠들이 함께 있던 bucket(정보가 합쳐진 지점)을 라벨별로 나눈다. 정방향 분할 뒤에 하며, 자식은 부모 표를 복사한다.
+- **부분 열쇠 통계:** 평균 전략 순회를 같은 난수로 한 번 더 재생해서 모은다.
+  - 32번 이상 방문한 열쇠(`--backward-min-visits`)의 부분 열쇠만, 최대 400만 개(`--backward-max-subkeys`, 약 0.8 GB)까지 모은다.
+  - 상한에 닿으면 먼저 본 것을 남기고 그 뒤 새 부분 열쇠는 버린다. 자주 나오는 것은 일찍 나온다. 버린 방문 수는 `backward.csv`에 남긴다.
+  - 32번 미만 열쇠를 빼도, 두 라벨이 나온 열쇠는 8번 기준과 거의 같았다(첫 두 epoch: 13 대 13, 45 대 47). 부분 열쇠는 37–60%로 줄었다.
+- **판정 규칙 두 가지:**
+  - **첫 규칙** (`--backward-test labels`): 부분 열쇠들의 유의한 라벨(z=2)이 둘 이상이면 나눈다.
+  - **교차 검정** (`--backward-test pair`, 기본): 라벨이 다른 두 부분 열쇠가 **서로 자기 라벨을 상대 라벨보다 유의하게 선호**해야 나눈다. 문턱은 √(z² + 2 ln m)로, 그 열쇠의 유의한 부분 열쇠 수 m만큼 올린다. 첫 규칙이 "감도가 약해 너무 쉽게 나눈다"는 지적에 따라 더했다.
+    - 첫 규칙의 문제는 두 가지다. 한 열쇠의 직전 열쇠가 평균 27개, 자주 나오는 열쇠는 수백 개 이상이라 우연히 다른 라벨이 나오기 쉽다. 그리고 "가장 좋은 행동의 후회가 0보다 큰가"만 보므로, 두 행동이 비슷하면 서로 다른 라벨을 받는다.
+- **검증:**
+  - `--backward 0`은 이전 코드와 log와 스냅숏이 바이트 단위로 같다.
+  - `labels` 모드는 첫 버전과 log, 스냅숏, `backward.csv`가 같다.
+  - 9만 roots에서 멈췄다가 재개한 실행이 끊지 않은 실행과 스냅숏, `backward.csv`, log가 같다. 다른 것은 power 군집 캐시 적중 수 열뿐이다(진단용, checkpoint에 없음).
+
+**판정 규칙의 차이** (epoch마다 두 라벨이 나온 열쇠 → 교차 검정을 통과한 열쇠, 역방향으로 나뉜 bucket)
+
+| roots | 첫 규칙: 두 라벨 열쇠 / 분할 | 교차 검정: 두 라벨 열쇠 → 통과 / 분할 |
+|---:|---:|---:|
+| 10k | 13 / 10 | 13 → 1 / 3 |
+| 70k | 247 / 207 | 446 → 47 / 64 |
+| 310k | 1,759 / 1,469 | 1,795 → 451 / 503 |
+| 1.27M | 5,010 / 3,910 | 6,973 → 1,679 / 1,563 |
+| 5.11M | 13,796 / 11,076 | 22,476 → 5,000 / 4,527 |
+
+- 교차 검정은 두 라벨 열쇠의 75–92%를 걸러 냈다. 두 실행은 첫 분할부터 분할이 달라지므로, 같은 열에서도 열쇠 집합이 같지 않다.
+
+**결과 (5.11M, 20,000 pair, 64 particles, 같은 deal과 LBR seed)** — 평가한 분할의 bucket 수. 비교군은 이전 5.11M 실행의 같은 조건 평가다(`runs_history_5m_summaries`).
+
+| 비교군 | bucket | 평균 정책 LBR | 현재 정책 LBR | 교차 검정 ASWISS − 비교군 (평균 / 현재, 같은 deal) |
+|---|---:|---:|---:|---:|
+| **ASWISS, 교차 검정** | 56,949 | **1.575 ± 0.146** | 1.671 ± 0.128 | – |
+| ASWISS, 첫 규칙 | 121,469 | 1.662 ± 0.199 | 1.479 ± 0.166 | −0.09 ± 0.24 / +0.19 ± 0.20 |
+| 이력 + B (`hist_b`) | 31,645 | 1.805 ± 0.156 | 1.668 ± 0.127 | **−0.23 ± 0.21** / +0.00 ± 0.17 |
+| 이력 + 구간 (`hist`) | 90,814 | 1.478 ± 0.155 | 1.454 ± 0.159 | +0.10 ± 0.21 / **+0.22 ± 0.20** |
+| k-means 1024 | 141,452 | 1.223 ± 0.136 | 1.370 ± 0.116 | **+0.35 ± 0.19** / **+0.30 ± 0.17** |
+| k-means 256 | 36,883 | 1.336 ± 0.135 | 1.343 ± 0.126 | **+0.24 ± 0.20** / **+0.33 ± 0.18** |
+
+**epoch 끝(분할 직전) LBR, `hist_b`와의 차이** (2,000 pair, 같은 deal, 평균 정책; 괄호는 현재 정책)
+
+| roots | 교차 검정 | 첫 규칙 |
+|---:|---:|---:|
+| 0.31M | +0.59 ± 0.78 (+1.21 ± 0.63) | +1.63 ± 1.09 (+2.00 ± 0.68) |
+| 0.63M | +1.22 ± 0.58 (+0.89 ± 0.50) | +0.60 ± 0.57 (+0.32 ± 0.44) |
+| 1.27M | −0.25 ± 0.74 (−0.25 ± 0.71) | −0.32 ± 0.71 (−0.55 ± 0.53) |
+| 2.55M | −0.43 ± 0.76 (−0.12 ± 0.42) | −0.63 ± 0.71 (+0.25 ± 0.69) |
+| 5.11M | −0.73 ± 0.69 (−0.35 ± 0.49) | −0.14 ± 0.98 (−0.40 ± 0.65) |
+
+![ASWISS(역방향 분할) 5.11M 파일럿과 100M 비교군: 평균/현재 정책 LBR, k-means 256과의 같은 deal 차이, bucket 수](results_stud_backward_5m_seed1_curves.png)
+
+**관찰** (seed 하나, 측정한 지점만)
+1. **5.11M에서 ASWISS(교차 검정)의 평균 정책은 `hist_b`보다 0.23 ± 0.21 낮다.** 95% 구간이 0을 겨우 벗어난다. 현재 정책은 같다(+0.00 ± 0.17).
+2. **교차 검정은 bucket을 절반 이하로 줄였고 값은 같았다.** 첫 규칙과의 차이는 −0.09 ± 0.24 / +0.19 ± 0.20으로 유의하지 않다. bucket은 56,949 대 121,469다.
+3. **초반에는 `hist_b`보다 나빴다.** 0.31–0.63M에서 +0.6–1.6이었다. bucket이 `hist_b`의 2–5배로 빨리 늘어 bucket당 학습량이 줄어든 시기다.
+4. **이 예산에서는 이력 비교군 모두 k-means보다 높다.** 교차 검정 ASWISS는 k-means 1024보다 +0.35 ± 0.19 높다. 이전 100M 실행에서 이력 열쇠는 1–5M에서 뒤지다가 100M에서 앞섰다. 그래서 5.11M 결과로 100M을 예측하지 않는다.
+5. **mini-stud만큼의 효과(열쇠만 쓸 때의 0.3배)는 나오지 않았다.** 후보 이유는 세 가지이고, 확인하지 않았다.
+   - 7-stud 열쇠는 street의 첫 결정마다 power 군집을 다시 넣어, 카드 쪽 열쇠 안 상쇄가 이미 줄어 있다.
+   - 부분 열쇠 진단에 표본 잡음이 있다.
+   - bucket이 늘면서 bucket당 학습량이 줄었다.
+6. **비용:**
+   - 5.11M 최대 RSS는 교차 검정 2.0 GB, 첫 규칙 2.7 GB다(`hist_b`는 0.90 GB).
+   - 부분 열쇠 상한(400만)은 2.55M부터 찼다. 5.11M에서 교차 검정은 방문 890만 번, 첫 규칙은 1,090만 번을 버렸다.
+   - 학습 시간은 교차 검정 5.11M에 8,780초다(이 환경, 다른 실행과 CPU 공유).
+7. **LBR 눈금:** 이 README의 모든 LBR은 64 particles다. 프로젝트의 resolver와 ReBeL 평가(240 particles, 10,000 hands)와 절대값을 비교하지 않는다.
+
+**재현**
+```bash
+./aswiss_stud train --partition history --history-cards street --label avg --label-cap 2560000 --backward 1 \
+  --atlas atlas/atlas_power1024_heur_eps20_seed37301.bin --roots 5110000 --seed 1 --snapshot-every 0 --out runs/history_bb_street_s1
+python evaluate.py ./aswiss_stud runs --runs history_bb_street_s1:history:atlas/atlas_power1024_heur_eps20_seed37301.bin --kinds epoch --min-roots 100000
+python evaluate.py ./aswiss_stud runs --runs history_bb_street_s1:history:atlas/atlas_power1024_heur_eps20_seed37301.bin --kinds epoch --epochs 8 --pairs 20000 --tag final
+```
+- 첫 규칙은 `--backward-test labels`를 더한다.
+- 원자료: `results_data/runs_backward_5m_summaries.tar.gz`. 두 파일럿(`history_bb_street_s1` = 교차 검정, `history_bbl_street_s1` = 첫 규칙)의 log, curve, `backward.csv`, 평가, pair별 LBR이 들어 있다.
+- 그림은 이 원자료와 `runs_100m_s1_summaries.tar.gz`를 한 폴더에 풀고 그린다.
+  `python plot_stud.py <폴더> results_stud_backward_5m_seed1 --epoch-only --baseline atom_k256_s1 --runs atom_k1024_s1:... history_street_s1:... history_b_street_s1:... history_bb_street_s1:... history_bbl_street_s1:... atom_k256_s1:...`
+- 100M: `run_100m.ps1 -Arms hist_bb -SnapshotEvery 0`(또는 `ARMS=hist_bb SNAPSHOT_EVERY=0 bash run_100m.sh`). 기본값이 교차 검정이다.
+  - 메모리는 5.11M의 비율로 보아 `hist_b`의 2–2.5배, 100M에 5–8 GB 정도로 본다(외삽, 불확실).
+  - 시간은 평균 전략 순회를 한 번 더 하므로 `hist_b`(14.1시간)보다 길다.
+  - 다른 비교군과 함께 돌리지 않는 것을 권한다.
+
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 
 **조건**
@@ -637,6 +723,7 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
   - 4구 heuristic 모드에서만 쓸 수 있다(`-H4 learn`과 함께 쓰면 학습기가 멈춘다).
   - 실행 예: `-Arms aswiss_b,aswiss_wb,aswiss,k341` (Linux: `ARMS="aswiss_b aswiss_wb aswiss k341"`).
   - 확인한 것: 기본 라벨 모드는 이전 학습기와 스냅숏이 바이트 단위로 같다. `window+avg` 모드도 중단 후 재개가 끊지 않은 실행과 바이트 단위로 같다. bash 스크립트로 두 비교군을 실제로 돌렸다.
+- **ASWISS 비교군 (2026-10-30 추가):** `hist_bb` = 이력 열쇠 + 방법 B + 역방향 분할(교차 검정)이다. 정의와 5.11M 파일럿 결과는 "ASWISS = 이력 열쇠 + 방법 B + 역방향 분할" 절에 있다. 메모리가 `hist_b`의 2–2.5배라 따로 돌리는 것을 권한다.
 - **bucket 이력 비교군 (2026-10-29 추가):** `hist`(구간 라벨), `hist_b`(방법 B 라벨), `hist_every`(카드를 모든 결정에)다. 열쇠의 정의는 "bucket 이력 열쇠" 절에 있다.
   - **라벨 표본 상한 2.56M roots(`--label-cap 2560000`):** 이력 열쇠는 원자와 달리 개수가 포화하지 않는다(epoch마다 약 1.8배). 그래서 epoch의 라벨 계산에 쓰는 roots를 2.56M으로 묶었다.
     - 구간 라벨은 epoch의 마지막 2.56M roots만 센다. 방법 B의 평균 전략 순회는 최대 2.56M roots다.

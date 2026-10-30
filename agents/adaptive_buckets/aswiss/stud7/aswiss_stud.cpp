@@ -6,6 +6,7 @@
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
 //                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
+//                            [--backward-test pair|labels]
 //                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
@@ -42,6 +43,9 @@
 //            section 8 in its sampled one-step form (Model::hbackward); backward.csv logs it per epoch. The sub-keys come
 //            from a replay of the average-policy pass, kept only for keys visited >= --backward-min-visits (default 32),
 //            at most --backward-max-subkeys (default 4M, about 0.8 GB) of them; later new sub-keys are dropped.
+//            --backward-test pair (default): a key is inconsistent only through a pair of sub-keys that each prefer their
+//            own label significantly, with the threshold raised for the number of sub-keys (see hbackward); labels:
+//            any two different significant labels (the first version).
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -771,15 +775,24 @@ public:
     // (after hsplit) is split by the marks: one child per set of labels, one for the unmarked keys and the rest. A pair
     // of sub-keys of one key with different labels that the sets leave together is separated by marks naming the key.
     // Children copy the tables of the bucket they split from: they share its label, only later keys change.
-    struct Backward { int splits = 0; size_t subkeys = 0, inconsistent = 0, pairs = 0; };
-    Backward hbackward(double z, const SubMap& sub) {
+    struct Backward { int splits = 0; size_t subkeys = 0, inconsistent = 0, pairs = 0, two_labels = 0; };
+    // pair_test: a key counts as inconsistent only through a pair of sub-keys i, j with different labels that each
+    // prefer their own label to the other's: R_i(l_i) - R_i(l_j) > z_m (sqrt(Q_i(l_i)) + sqrt(Q_i(l_j))) and the same
+    // for j (sqrt(sum (x-y)^2) <= sqrt(sum x^2) + sqrt(sum y^2), so the margin is conservative), where
+    // z_m = sqrt(z^2 + 2 ln m) for the m labelled sub-keys of the key (about the same false-positive rate per key
+    // however many sub-keys it has). Without pair_test any two different labels count.
+    Backward hbackward(double z, const SubMap& sub, bool pair_test = false) {
         Backward res;
         res.subkeys = sub.stats.size();
-        std::map<HFull, std::vector<std::pair<uint32_t, int>>, HFullLess> by_key;  // key -> (previous key id, label)
+        struct Labelled { uint32_t p; int l; const AtomStats* st; };
+        std::map<HFull, std::vector<Labelled>, HFullLess> by_key;
         for (const auto& [sk, st] : sub.stats) {
             const int l = hlabel(sk.k, st, z);
-            if (l >= 0) by_key[sk.k].push_back({sk.p, l});
+            if (l >= 0) by_key[sk.k].push_back({sk.p, l, &st});
         }
+        auto prefers = [](const AtomStats& st, int a, int b, double zt) {
+            return st.r[a] - st.r[b] > zt * (std::sqrt(st.sq[a]) + std::sqrt(st.sq[b]));
+        };
         std::map<uint32_t, uint32_t> coarse;                          // previous key id -> label bits
         std::map<uint32_t, std::vector<std::pair<uint32_t, int>>> fine;  // previous key id -> (key index, label)
         struct Pair { uint32_t lo, lo0, kid; int lam, lam0; };
@@ -787,13 +800,28 @@ public:
         uint32_t kid = 0;
         for (auto& [k, v] : by_key) {
             ++kid;
-            std::sort(v.begin(), v.end(), [&](const auto& x, const auto& y) { return HFullLess()(sub.prev[x.first], sub.prev[y.first]); });
-            if (std::all_of(v.begin(), v.end(), [&](const auto& e) { return e.second == v[0].second; })) continue;
-            ++res.inconsistent;
-            for (const auto& [p, l] : v) {
-                coarse[p] |= 1u << l;
-                if (l != v[0].second) pairs.push_back({p, v[0].first, kid, l, v[0].second});
+            std::sort(v.begin(), v.end(), [&](const auto& x, const auto& y) { return HFullLess()(sub.prev[x.p], sub.prev[y.p]); });
+            if (std::all_of(v.begin(), v.end(), [&](const auto& e) { return e.l == v[0].l; })) continue;
+            ++res.two_labels;
+            if (!pair_test) {
+                ++res.inconsistent;
+                for (const auto& e : v) {
+                    coarse[e.p] |= 1u << e.l;
+                    if (e.l != v[0].l) pairs.push_back({e.p, v[0].p, kid, e.l, v[0].l});
+                }
+                continue;
             }
+            const double zm = std::sqrt(z * z + 2 * std::log(static_cast<double>(v.size())));
+            std::vector<char> confirmed(v.size(), 0);
+            for (size_t i = 0; i < v.size(); ++i)
+                for (size_t j = i + 1; j < v.size(); ++j)
+                    if (v[i].l != v[j].l && prefers(*v[i].st, v[i].l, v[j].l, zm) && prefers(*v[j].st, v[j].l, v[i].l, zm)) {
+                        confirmed[i] = confirmed[j] = 1;
+                        pairs.push_back({v[i].p, v[j].p, kid, v[i].l, v[j].l});
+                    }
+            if (std::find(confirmed.begin(), confirmed.end(), 1) == confirmed.end()) continue;
+            ++res.inconsistent;
+            for (size_t i = 0; i < v.size(); ++i) if (confirmed[i]) coarse[v[i].p] |= 1u << v[i].l;
         }
         res.pairs = pairs.size();
         for (const Pair& q : pairs)
@@ -1428,7 +1456,7 @@ int train(int argc, char** argv) {
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
                                 {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"},
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
-                                {"--backward-max-subkeys", "4000000"}});
+                                {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1450,6 +1478,8 @@ int train(int argc, char** argv) {
         throw std::runtime_error("--backward 1 needs --partition history --label avg");
     const double backward_min_visits = std::stod(o["--backward-min-visits"]);
     const size_t backward_max_subkeys = std::stoull(o["--backward-max-subkeys"]);
+    if (o["--backward-test"] != "pair" && o["--backward-test"] != "labels") throw std::runtime_error("--backward-test must be pair or labels");
+    const bool backward_pair_test = o["--backward-test"] == "pair";
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
     const std::string out = o.at("--out");
@@ -1468,7 +1498,7 @@ int train(int argc, char** argv) {
         << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
         << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "")
         << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
-                          o["--backward-max-subkeys"] : "");
+                          o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1501,7 +1531,8 @@ int train(int argc, char** argv) {
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
         std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
-        if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,pairs,backward_splits,peak_rss_mb\n";
+        if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
+                                                       "backward_splits,peak_rss_mb\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
@@ -1590,10 +1621,11 @@ int train(int argc, char** argv) {
                 std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys\n";
                 if (backward) {
                     const double rss = peak_rss_mb();  // includes the sub-key table, still alive here
-                    const auto br = model.hbackward(z, sub);
+                    const auto br = model.hbackward(z, sub, backward_pair_test);
                     splits += br.splits;
                     std::ofstream(backward_path, std::ios::app) << s.k << ',' << s.t << ',' << avg.size() << ',' << frequent.size() << ','
-                        << br.subkeys << ',' << sub.dropped << ',' << br.inconsistent << ',' << br.pairs << ',' << br.splits << ',' << rss << '\n';
+                        << br.subkeys << ',' << sub.dropped << ',' << br.two_labels << ',' << br.inconsistent << ',' << br.pairs << ','
+                        << br.splits << ',' << rss << '\n';
                     std::cerr << "backward split: " << br.subkeys << " sub-keys, " << br.inconsistent << " keys with two labels, "
                               << br.splits << " buckets split\n";
                 }

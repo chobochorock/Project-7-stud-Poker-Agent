@@ -93,7 +93,7 @@ for ax, key, title in ((axes[0, 0], "expl_bucket_avg", "average policy"), (axes[
     draw_refs(ax, key)
     for u, label in UNITS:
         if ep[u]: ax.plot(col(ep[u]["e"], "iters"), col(ep[u]["e"], key), color=UNIT_COLOR[u], marker="o", ms=3.5, lw=1.4, label=label)
-    style(ax, f"Exploitability, {title} (judged at every epoch end)", ylabel="NashConv/2 (ante)")
+    style(ax, f"Exploitability, {title} (judged every epoch end)", ylabel="NashConv/2 (ante)")
 axes[0, 0].legend(fontsize=8, frameon=False)
 ax = axes[0, 2]
 for u, label in UNITS:
@@ -102,21 +102,22 @@ for u, label in UNITS:
         pts = [(int(r["iters"]), float(r[key]) / b[int(r["iters"])]) for r in ep[u]["e"] if int(r["iters"]) in b]
         if pts: ax.plot(*zip(*pts), color=UNIT_COLOR[u], ls=ls, marker="o", ms=3, lw=1.2, label=f"{label} ({suffix})")
 ax.axhline(1, color=INK, lw=0.8)
-style(ax, "Ratio to card k-means at shared checkpoints (below 1: better)", ylabel="exploitability / k-means")
+style(ax, "Ratio to card k-means, shared checkpoints (<1: better)", ylabel="exploitability / k-means")
 ax.legend(fontsize=7, frameon=False)
 ax = axes[1, 0]
 for u, label in UNITS:
     if ep[u]: ax.plot(col(ep[u]["e"], "iters"), col(ep[u]["e"], "buckets_after"), color=UNIT_COLOR[u], marker="o", ms=3.5, lw=1.4, label=label)
 ax.axhline(7051, color=INK, lw=0.8, ls="-"); ax.axhline(51114, color=INK, lw=0.8, ls=(0, (5, 3)))
-style(ax, "Buckets after each judgment (lines: k-means 7,051, perfect recall 51,114)", ylabel="buckets")
+style(ax, "Buckets after each judgment (k-means 7,051; perfect recall 51,114)", ylabel="buckets")
 ax = axes[1, 1]
 for u, label in UNITS:
     if ep[u] and ep[u]["j"]:
         j = ep[u]["j"]
-        ax.plot(col(j, "iters"), [max(v, 1e-6) for v in col(j, "HK_half")], color=UNIT_COLOR[u], marker="o", ms=3.5, lw=1.4,
-                label=f"{label}: within-key H_K/2")
+        if u != "i":  # identically 0 for information sets
+            ax.plot(col(j, "iters"), [max(v, 1e-6) for v in col(j, "HK_half")], color=UNIT_COLOR[u], marker="o", ms=3.5, lw=1.4,
+                    label=f"{label}: within-key H_K/2")
         ax.plot(col(j, "iters"), col(j, "G_half"), color=UNIT_COLOR[u], ls=(0, (2, 2)), lw=1.1, label=f"{label}: between keys G_B/2")
-style(ax, "Cancellation in the judged average policy (H_K = 0 for information sets; 0 drawn at 1e-6)", ylabel="ante")
+style(ax, "Cancellation at each judgment (zero drawn at 1e-6)", ylabel="ante")
 ax.legend(fontsize=7, frameon=False)
 ax = axes[1, 2]
 for name, label, c, ls in REFS:
@@ -125,7 +126,7 @@ for name, label, c, ls in REFS:
 for u, label in UNITS:
     if ep[u]:
         e = ep[u]["e"]; ax.plot(col(e, "buckets_after"), col(e, "expl_bucket_avg"), color=UNIT_COLOR[u], marker="o", ms=3.5, lw=1.2, label=label)
-style(ax, "Average-policy exploitability vs buckets (each checkpoint)", xlabel="buckets", ylabel="NashConv/2 (ante)")
+style(ax, "Average policy vs buckets (each checkpoint)", xlabel="buckets", ylabel="NashConv/2 (ante)")
 ax.legend(fontsize=7, frameon=False)
 note(fig); fig.tight_layout(rect=(0, 0.02, 1, 1)); fig.savefig(f"{OUT}_backward.png", dpi=110); plt.close(fig)
 
@@ -135,7 +136,7 @@ runs = {(u, s): run(u, s) for u, _ in UNITS for s, _ in SCHEDULES}
 for row, (u, ulabel) in enumerate(UNITS):
     for colno, key, title in ((0, "expl_bucket_avg", "average policy"), (1, "expl_current", "current policy")):
         ax = axes[row, colno]
-        if refs[BASE]: ax.plot(col(refs[BASE], "iters"), col(refs[BASE], key), color=INK, lw=1.1, label="card k-means (baseline)")
+        if refs[BASE]: ax.plot(col(refs[BASE], "iters"), col(refs[BASE], key), color=MUTED, lw=2.4, alpha=0.45, label="card k-means, fixed (baseline)")
         for s, slabel in SCHEDULES:
             r = runs[(u, s)]
             if not r: continue
@@ -150,8 +151,8 @@ for row, (u, ulabel) in enumerate(UNITS):
         if not r: continue
         c, ls = SCHED_STYLE[s]
         ax.plot(col(r["e"], "iters"), col(r["e"], "buckets_after"), color=c, ls=ls, lw=1.2, label=slabel)
-    ax.axhline(7051, color=INK, lw=0.8)
-    style(ax, f"{ulabel}: buckets (line: k-means 7,051)", ylabel="buckets")
+    ax.axhline(7051, color=MUTED, lw=2.4, alpha=0.45)
+    style(ax, f"{ulabel}: buckets (grey: k-means 7,051)", ylabel="buckets")
 axes[0, 0].legend(fontsize=7, frameon=False); axes[0, 2].legend(fontsize=7, frameon=False)
 note(fig); fig.tight_layout(rect=(0, 0.02, 1, 1)); fig.savefig(f"{OUT}_gate.png", dpi=100); plt.close(fig)
 
@@ -172,7 +173,7 @@ for ax, key, xkey, title in ((axes[0], "expl_bucket_avg", "expl_avg", "average p
             ax.scatter([float(x["buckets_before"]) for x in r["x"]], col(r["x"], xkey), color=c, marker=MARK[u], s=10, alpha=0.6)
     style(ax, f"Exploitability vs buckets, {title}: last checkpoint (large), judged before splits (small)", xlabel="buckets",
           ylabel="NashConv/2 (ante)")
-axes[1].legend(fontsize=7, frameon=False, ncol=3, title="marker: v info sets, s keys, o keys+backward; colour: schedule",
+axes[1].legend(fontsize=7, frameon=False, ncol=3, loc="upper right", title="marker: v info sets, s keys, o keys+backward; colour: schedule",
                title_fontsize=7)
 note(fig); fig.tight_layout(rect=(0, 0.03, 1, 1)); fig.savefig(f"{OUT}_frontier.png", dpi=110); plt.close(fig)
 print("missing:", sorted(set(missing)) or "none")

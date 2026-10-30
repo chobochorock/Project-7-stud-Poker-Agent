@@ -28,6 +28,7 @@ INK, MUTED, GRID, SURFACE = "#1f1f1e", "#6b6a64", "#e4e3de", "#fcfcfb"
 STYLE = {"atom_k1024": (INK, "o", (0, (5, 3))), "aswiss_b_": ("#6250d6", "v", "-"), "aswiss_wb_": ("#e87ba4", "^", (0, (6, 2))),
          "history_street": ("#1baf7a", "p", "-"), "history_every": ("#eda100", "h", (0, (6, 2))),
          "history_b_": ("#6250d6", "p", (0, (6, 2))), "history_wb_": ("#e87ba4", "p", (0, (2, 2))),
+         "history_bb_": ("#eb6834", "*", "-"),
          "aswiss": ("#eb6834", "s", "-"), "atom_kmatched": ("#2a78d6", "D", "-"),
          "atom_k341": ("#2a78d6", "D", "-"), "atom_k512": ("#1baf7a", "^", "-"), "atom_k256": (INK, "P", "-"),
          "context": (MUTED, "X", (0, (1, 2)))}
@@ -179,7 +180,10 @@ notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for 
     *(["Method B arms (*_b: labels from the split-time average policy; *_wb: window labels and B labels "
        "combined) spend an extra average-policy pass of 25% of each epoch's roots per seat at the epoch end (history arms: "
        "at most 2.56M roots); these traversals are not counted on the x axis."]
-      if any(r.startswith(("aswiss_b_", "aswiss_wb_", "history_b_", "history_wb_")) for r, *_ in SERIES) else []),
+      if any(r.startswith(("aswiss_b_", "aswiss_wb_", "history_b_", "history_wb_", "history_bb_")) for r, *_ in SERIES) else []),
+    *(["history_bb (ASWISS): method B labels plus the backward split, which splits a previous bucket when the keys "
+       "leading into one key carry different labels (sampled one-step version)."]
+      if any(r.startswith("history_bb_") for r, *_ in SERIES) else []),
     *(["History arms: bucket-history keys (previous own bucket and action, opponent actions since, power cluster at a "
        "street's first decision or at every decision), buckets start as one per (street, legal mask); no betting summary."]
       if any(r.startswith("history_") for r, *_ in SERIES) else []),

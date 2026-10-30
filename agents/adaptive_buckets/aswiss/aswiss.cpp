@@ -33,6 +33,15 @@
 // buckets of earlier decisions split; with one bucket per information set they identify information sets.
 // Every epoch end also logs, for the bucket average policy avg, rho(avg)/2 (an upper bound on its exploitability,
 // Lemma 7), rho_P(avg)/2, H(avg)/2 and the fraction of buckets whose members share a label under avg.
+// With --label avg every judgment goes through judge_avg and is logged in judgments.csv (rho/2 split into rho_P/2,
+// sum_B G_B/2 and the within-key cancellation sum_K H_K/2, ASWISS_HISTORY_PROOF_KO.md Theorem H1).
+// --backward 1 (with --unit history --label avg): also the backward split of section 8 (see judge_avg).
+// --gate-eps E: judge only when the abstract game is solved to E: every --gate-every iterations (default --epoch0)
+//            compute rho_P(avg)/2 exactly and judge when it is <= the threshold; epoch ends then only checkpoint and
+//            log (their `splits` counts the splits since the previous row). Threshold: E (--gate-decay none),
+//            E * sqrt(epoch0 / t) (sqrt_iters, t = iterations so far) or E / sqrt(1 + splitting judgments so far)
+//            (sqrt_rounds). Every check goes to gate.csv; a judgment that splits saves the policies it judged as
+//            policy_presplit_J_{avg,cur}.bin (eval_judgments.py evaluates them).
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -40,6 +49,8 @@
 #include <cstdio>
 #include <fstream>
 #include <map>
+#include <set>
+#include <tuple>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -257,6 +268,119 @@ inline double psi(const double* x, int n) {
     return m;
 }
 
+// Method B judgment on the exact regrets R of the bucket average policy (one row per information set, unpooled).
+// Forward split: every unit (information set, or bucket-history key with history) gets the label set of its regret sum;
+// a bucket whose units share no label is split by label, children restart their tables (as the epoch-end rule above).
+// Backward split (ASWISS_HISTORY_PROOF_KO.md section 8, needs history): a key whose members (information sets) share no
+// label hides cancellation H_K. For each member whose representative label (lowest of its set) differs from that of the
+// key's first member, walk both back to the closest earlier decision where their keys differ (they share every earlier
+// bucket, so the information was merged there) and mark the two keys of that decision with the members' labels. Each
+// marked bucket is split by the label sets of its keys (unmarked keys stay together); a pair the label sets leave
+// together is separated by marks naming the key as well, so every judged pair ends in different children. Children of
+// a backward-only split copy the parent's tables: they share the parent's label, only the memory of later keys changes.
+struct Judgment { int units = 0, forward = 0, backward = 0, splits = 0, inconsistent = 0; double rho = 0, keysum = 0, rhoP = 0; };
+Judgment judge_avg(vector<double> R, bool history, bool backward) {
+    Judgment j;
+    vector<int> key(nI);
+    if (history) j.units = history_keys(key);
+    else { j.units = nI; for (int I = 0; I < nI; ++I) key[I] = I; }
+    vector<uint32_t> raw(nI);
+    vector<double> bsum((size_t)B * W, 0.0);
+    vector<int> bcount(B, 0);
+    for (int I = 0; I < nI; ++I) {
+        raw[I] = label_set(&R[(size_t)I * W], counts[I], 0.0);
+        j.rho += psi(&R[(size_t)I * W], counts[I]);
+        for (int a = 0; a < counts[I]; ++a) bsum[(size_t)bucket[I] * W + a] += R[(size_t)I * W + a];
+        bcount[bucket[I]] = counts[I];
+    }
+    for (int b = 0; b < B; ++b) j.rhoP += psi(&bsum[(size_t)b * W], bcount[b]);
+    if (history) pool(R, key, j.units, W);
+    vector<int> first(j.units, -1);
+    for (int I = 0; I < nI; ++I) if (first[key[I]] < 0) { first[key[I]] = I; j.keysum += psi(&R[(size_t)I * W], counts[I]); }
+    // forward labels: the set of each unit's (pooled) regret, the member's child = its label shared by most members
+    vector<uint32_t> m1(nI), c1(B, ~0u);
+    vector<array<int, W + 1>> f1(B);
+    for (auto& f : f1) f.fill(0);
+    for (int I = 0; I < nI; ++I) {
+        m1[I] = label_set(&R[(size_t)I * W], counts[I], 0.0);
+        c1[bucket[I]] &= m1[I];
+        for (int l = 0; l <= W; ++l) f1[bucket[I]][l] += (m1[I] >> l) & 1;
+    }
+    auto pick = [](uint32_t m, const array<int, W + 1>& f) {
+        int best = -1;
+        for (int l = 0; l <= W; ++l) if (((m >> l) & 1) && (best < 0 || f[l] > f[best])) best = l;
+        return best;
+    };
+    // backward marks
+    vector<int> sig(nI, -1);
+    if (backward && history) {
+        vector<uint32_t> common(j.units, ~0u);
+        for (int I = 0; I < nI; ++I) common[key[I]] &= raw[I];
+        for (int K = 0; K < j.units; ++K) j.inconsistent += common[K] == 0;
+        auto rep = [](uint32_t m) { return __builtin_ctz(m); };
+        map<int, uint32_t> coarse;              // marked key -> labels wanted below it
+        map<int, vector<pair<int, int>>> fine;  // marked key -> (key below, label) for pairs coarse leaves together
+        struct Pair { int K, lo, lo0, lam, lam0; };
+        vector<Pair> pairs;
+        for (int I = 0; I < nI; ++I) {
+            const int K = key[I], I0 = first[K];
+            if (common[K] != 0 || I == I0) continue;
+            const int lam = rep(raw[I]), lam0 = rep(raw[I0]);
+            if (lam == lam0) continue;
+            int J = prev_info[I], J0 = prev_info[I0];
+            while (J >= 0 && key[J] == key[J0]) { J = prev_info[J]; J0 = prev_info[J0]; }
+            if (J < 0) throw runtime_error("two information sets with one key and no merge point");  // Lemma H3
+            coarse[key[J]] |= 1u << lam; coarse[key[J0]] |= 1u << lam0;
+            pairs.push_back({K, key[J], key[J0], lam, lam0});
+        }
+        for (const Pair& p : pairs)
+            if (coarse[p.lo] == coarse[p.lo0]) { fine[p.lo].push_back({p.K, p.lam}); fine[p.lo0].push_back({p.K, p.lam0}); }
+        vector<char> target(B, 0);
+        for (const auto& [k, m] : coarse) target[bucket[first[k]]] = 1;
+        map<vector<int>, int> ids;
+        vector<int> key_sig(j.units, -1);
+        for (int I = 0; I < nI; ++I) {
+            if (!target[bucket[I]]) continue;
+            const int k = key[I];
+            if (key_sig[k] < 0) {
+                vector<int> s{coarse.count(k) ? (int)coarse[k] : 0};
+                if (fine.count(k)) {
+                    auto& v = fine[k];
+                    sort(v.begin(), v.end()); v.erase(unique(v.begin(), v.end()), v.end());
+                    for (auto [K, l] : v) { s.push_back(K); s.push_back(l); }
+                }
+                key_sig[k] = ids.emplace(s, (int)ids.size()).first->second;
+            }
+            sig[I] = key_sig[k];
+        }
+    }
+    // children: (parent, forward label or -2 when the parent is not forward split, backward signature or -1)
+    map<tuple<int, int, int>, int> child;
+    vector<int> next(nI), keep, parent_of, children(B, 0);
+    int B2 = 0;
+    for (int I = 0; I < nI; ++I) {
+        int b = bucket[I];
+        int lab = c1[b] != 0 ? -2 : pick(m1[I], f1[b]) * 8;
+        auto ck = make_tuple(b, lab, sig[I]);
+        auto it = child.find(ck);
+        if (it == child.end()) { it = child.emplace(ck, B2++).first; keep.push_back(lab == -2 ? b : -1); ++children[b]; }
+        next[I] = it->second;
+    }
+    vector<set<int>> sigs(B);
+    for (int I = 0; I < nI; ++I) if (sig[I] >= 0) sigs[bucket[I]].insert(sig[I]);
+    for (int b = 0; b < B; ++b) {
+        j.forward += c1[b] == 0;
+        j.backward += sigs[b].size() > 1;
+        j.splits += children[b] > 1;
+    }
+    vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
+    for (int nb = 0; nb < B2; ++nb)
+        if (keep[nb] >= 0)
+            for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+    bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+    return j;
+}
+
 int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
@@ -288,6 +412,14 @@ int main(int argc, char** argv) {
     // replay sums every member exactly in the same iteration, so pooled squared sums would not be the key's variance;
     // the sampled window sums visit at most one member of a key per traversal (the key fixes the player's actions)
     if (history_unit && label_rule == "replay") throw runtime_error("--unit history does not support --label replay");
+    const bool backward = opt.count("--backward") && opt["--backward"] == "1";
+    const double gate_eps = opt.count("--gate-eps") ? stod(opt["--gate-eps"]) : 0.0, L0 = (double)L;
+    const long long gate_every = opt.count("--gate-every") ? stoll(opt["--gate-every"]) : L;
+    const string gate_decay = opt.count("--gate-decay") ? opt["--gate-decay"] : "none";
+    const bool gated = gate_eps > 0;
+    if (backward && !(history_unit && label_rule == "avg" && split)) throw runtime_error("--backward 1 needs --unit history --label avg");
+    if (gated && !(label_rule == "avg" && split)) throw runtime_error("--gate-eps needs --label avg --split cum");
+    if (gate_decay != "none" && gate_decay != "sqrt_iters" && gate_decay != "sqrt_rounds") throw runtime_error("unknown --gate-decay");
     if (history_unit) {
         prev_info = load<int32_t>(dir + "/prev.bin"); prev_action = load<int32_t>(dir + "/prev_action.bin");
         inc_code = load<int32_t>(dir + "/inc.bin"); timestep_of = load<int32_t>(dir + "/bucket_timestep.bin");
@@ -302,6 +434,21 @@ int main(int argc, char** argv) {
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     if (label_rule == "replay") { Rp.assign((size_t)nI * W, 0); Rp2.assign((size_t)nI * W, 0); Rit.assign((size_t)nI * W, 0); }
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
+    FILE* judgment_log = nullptr; FILE* gate_log = nullptr;
+    if (split && label_rule == "avg") {
+        judgment_log = fopen((out + "/judgments.csv").c_str(), "w");
+        fprintf(judgment_log, "judgment,iters,trigger,threshold,rho_half,HK_half,G_half,rhoP_half,buckets_before,buckets_after,"
+                              "splits,forward_splits,backward_splits,inconsistent_keys,units,presplit\n");
+    }
+    if (gated) { gate_log = fopen((out + "/gate.csv").c_str(), "w"); fprintf(gate_log, "iters,buckets,rhoP_half,threshold,passed\n"); }
+    int judgments = 0, rounds = 0, splits_since = 0;
+    // one row per judgment: exact rho/2 = sum_I psi(r_I)/2 = (rho_P + sum_B G_B + sum_K H_K)/2 of the policy judged
+    auto write_judgment = [&](const char* trigger, long long it, double thr, const Judgment& jd, int before, const string& stem) {
+        fprintf(judgment_log, "%d,%lld,%s,%.9g,%.9g,%.9g,%.9g,%.9g,%d,%d,%d,%d,%d,%d,%d,%s\n", judgments++, it, trigger, thr,
+                jd.rho / 2, (jd.rho - jd.keysum) / 2, (jd.keysum - jd.rhoP) / 2, jd.rhoP / 2, before, B, jd.splits, jd.forward,
+                jd.backward, jd.inconsistent, jd.units, stem.c_str());
+        fflush(judgment_log);
+    };
     fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units\n");
     auto t0 = chrono::steady_clock::now();
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
@@ -319,153 +466,198 @@ int main(int argc, char** argv) {
         }
         if (mode == "full") { full(0, 1, 1, 1, weight); apply_regrets(); }
         else for (int p = 0; p < 2; ++p) { es(0, p, weight); apply_regrets(); }
-        if (t != epoch_end && t != T) continue;
-        // window diagnostics from the per-infoset window sums (sampled in es mode)
-        vector<double> bsum((size_t)B * W, 0.0);
-        double Lw = 0, Cw = 0;
-        for (int I = 0; I < nI; ++I) {
-            Lw += psi(&Rw[(size_t)I * W], counts[I]);
-            for (int a = 0; a < counts[I]; ++a) bsum[(size_t)bucket[I] * W + a] += Rw[(size_t)I * W + a];
-        }
-        vector<int> bcount(B, 0);
-        for (int I = 0; I < nI; ++I) bcount[bucket[I]] = counts[I];
-        for (int b = 0; b < B; ++b) Cw += psi(&bsum[(size_t)b * W], bcount[b]);
-        // exact (time-subsampled) window L/C/H on the partition used during this epoch, and the cumulative
-        // bound exploitability(linear average) <= sum_I psi(sum_t t r_t(I)) / (2 sum_t t)
-        double eL = 0, eC = 0, eCum = 0;
-        if (exact_every > 0) {
-            vector<double> esum((size_t)B * W, 0.0);
+        const bool sched = t == epoch_end || t == T;
+        if (sched) {
+            // window diagnostics from the per-infoset window sums (sampled in es mode)
+            vector<double> bsum((size_t)B * W, 0.0);
+            double Lw = 0, Cw = 0;
             for (int I = 0; I < nI; ++I) {
-                eL += psi(&ExW[(size_t)I * W], counts[I]);
-                eCum += psi(&ExC[(size_t)I * W], counts[I]);
-                for (int a = 0; a < counts[I]; ++a) esum[(size_t)bucket[I] * W + a] += ExW[(size_t)I * W + a];
+                Lw += psi(&Rw[(size_t)I * W], counts[I]);
+                for (int a = 0; a < counts[I]; ++a) bsum[(size_t)bucket[I] * W + a] += Rw[(size_t)I * W + a];
             }
-            for (int b = 0; b < B; ++b) eC += psi(&esum[(size_t)b * W], bcount[b]);
-            fill(ExW.begin(), ExW.end(), 0);
-        }
-        // regrets of the bucket average policy (the checkpoint policy_bucket_k): certificate diagnostics, method B labels
-        vector<double> avg_pol = policy(S, true), Ravg((size_t)nI * W, 0.0);
-        exact_into(0, 1, 1, 1, avg_pol.data(), Ravg);
-        double rho = 0, rhoP = 0;
-        int consistent = 0;
-        {
-            vector<double> asum((size_t)B * W, 0.0);
-            vector<uint32_t> common(B, ~0u);
-            for (int I = 0; I < nI; ++I) {
-                rho += psi(&Ravg[(size_t)I * W], counts[I]);
-                for (int a = 0; a < counts[I]; ++a) asum[(size_t)bucket[I] * W + a] += Ravg[(size_t)I * W + a];
-                common[bucket[I]] &= label_set(&Ravg[(size_t)I * W], counts[I], 0.0);
-            }
-            for (int b = 0; b < B; ++b) { rhoP += psi(&asum[(size_t)b * W], bcount[b]); consistent += common[b] != 0; }
-        }
-        const int Bprev = B;  // partition of the epoch just finished
-        int splits = 0, units = nI;
-        if (split) {
-            if (history_unit) {  // pool every label input over the bucket-history key
-                vector<int> key;
-                units = history_keys(key);
-                pool(Rw, key, units, W); pool(Sq, key, units, W); pool(mass, key, units, 1); pool(Ravg, key, units, W);
-                if (label_rule == "replay") { pool(Rp, key, units, W); pool(Rp2, key, units, W); }
-            }
-            vector<int> label(nI, -1);
-            for (int I = 0; I < nI; ++I) {
-                if (mass[I] <= 0) continue;
-                const double* r = &Rw[(size_t)I * W]; int n = counts[I], best = 0;
-                for (int a = 1; a < n; ++a) if (r[a] > r[best]) best = a;
-                // es label tests on the window sum of sampled regrets for action `best` (n = visits this epoch):
-                //   normal:    R > z * sqrt(sum r^2)                                  (CLT approximation)
-                //   hoeffding: R > Delta_I * sqrt(2 n ln(1/d_k))                      (Azuma, increments in [-Delta_I, Delta_I])
-                //   bernstein: R > sqrt(2 n V ln(2/d_k)) + 7 w n ln(2/d_k) / (3(n-1)) (empirical Bernstein, w = 2 Delta_I)
-                // with d_k = delta / (k+1)^2, summable over epochs.
-                bool positive;
-                if (mode == "full") positive = r[best] / mass[I] > tol;
-                else if (test == "normal") positive = r[best] - z * sqrt(Sq[(size_t)I * W + best]) > 0;
-                else {
-                    double n = mass[I], dk = delta0 / ((k + 1.0) * (k + 1.0)), thr;
-                    if (test == "hoeffding") thr = delta_range[I] * sqrt(2 * n * std::log(1 / dk));
-                    else {
-                        if (n < 2) continue;
-                        double mean = r[best] / n, var = max(0.0, (Sq[(size_t)I * W + best] - n * mean * mean) / (n - 1));
-                        thr = sqrt(2 * n * var * std::log(2 / dk)) + 7 * (2 * delta_range[I]) * n * std::log(2 / dk) / (3 * (n - 1));
-                    }
-                    positive = r[best] > thr;
+            vector<int> bcount(B, 0);
+            for (int I = 0; I < nI; ++I) bcount[bucket[I]] = counts[I];
+            for (int b = 0; b < B; ++b) Cw += psi(&bsum[(size_t)b * W], bcount[b]);
+            // exact (time-subsampled) window L/C/H on the partition used during this epoch, and the cumulative
+            // bound exploitability(linear average) <= sum_I psi(sum_t t r_t(I)) / (2 sum_t t)
+            double eL = 0, eC = 0, eCum = 0;
+            if (exact_every > 0) {
+                vector<double> esum((size_t)B * W, 0.0);
+                for (int I = 0; I < nI; ++I) {
+                    eL += psi(&ExW[(size_t)I * W], counts[I]);
+                    eCum += psi(&ExC[(size_t)I * W], counts[I]);
+                    for (int a = 0; a < counts[I]; ++a) esum[(size_t)bucket[I] * W + a] += ExW[(size_t)I * W + a];
                 }
-                if (positive) label[I] = best;
+                for (int b = 0; b < B; ++b) eC += psi(&esum[(size_t)b * W], bcount[b]);
+                fill(ExW.begin(), ExW.end(), 0);
             }
-            // label sets: m1 (window rules, replay, avg) and m2 (avg, for window+avg); window = one label per set
-            bool two = label_rule == "window+avg";
-            vector<uint32_t> m1(nI), m2(two ? nI : 0);
-            for (int I = 0; I < nI; ++I) {
-                const size_t o = (size_t)I * W; const int n = counts[I];
-                if (label_rule == "window" || two) m1[I] = 1u << (label[I] + 1);
-                else if (label_rule == "window_tol") {
-                    double v = 0;
-                    for (int a = 0; a < n; ++a) v = max(v, Sq[o + a]);
-                    m1[I] = label_set(&Rw[o], n, mass[I] > 0 ? z * sqrt(v) : 0.0);
-                } else if (label_rule == "replay") {
-                    double x[W], v = 0;
-                    for (int a = 0; a < n; ++a) { x[a] = Rp[o + a] / replay_p; v = max(v, (1 - replay_p) / (replay_p * replay_p) * Rp2[o + a]); }
-                    m1[I] = label_set(x, n, z * sqrt(v));
-                } else m1[I] = label_set(&Ravg[o], n, 0.0);
-                if (two) m2[I] = label_set(&Ravg[o], n, 0.0);
+            // regrets of the bucket average policy (the checkpoint policy_bucket_k): certificate diagnostics, method B labels
+            vector<double> avg_pol = policy(S, true), Ravg((size_t)nI * W, 0.0);
+            exact_into(0, 1, 1, 1, avg_pol.data(), Ravg);
+            double rho = 0, rhoP = 0;
+            int consistent = 0;
+            {
+                vector<double> asum((size_t)B * W, 0.0);
+                vector<uint32_t> common(B, ~0u);
+                for (int I = 0; I < nI; ++I) {
+                    rho += psi(&Ravg[(size_t)I * W], counts[I]);
+                    for (int a = 0; a < counts[I]; ++a) asum[(size_t)bucket[I] * W + a] += Ravg[(size_t)I * W + a];
+                    common[bucket[I]] &= label_set(&Ravg[(size_t)I * W], counts[I], 0.0);
+                }
+                for (int b = 0; b < B; ++b) { rhoP += psi(&asum[(size_t)b * W], bcount[b]); consistent += common[b] != 0; }
             }
-            // per bucket: common label of each set family, and how many members carry each label
-            vector<uint32_t> c1(B, ~0u), c2(B, ~0u);
-            vector<array<int, W + 1>> f1(B), f2(two ? B : 0);
-            for (auto& f : f1) f.fill(0);
-            for (auto& f : f2) f.fill(0);
-            for (int I = 0; I < nI; ++I) {
-                int b = bucket[I];
-                c1[b] &= m1[I];
-                for (int l = 0; l <= W; ++l) f1[b][l] += (m1[I] >> l) & 1;
-                if (two) { c2[b] &= m2[I]; for (int l = 0; l <= W; ++l) f2[b][l] += (m2[I] >> l) & 1; }
+            const int Bprev = B;  // partition of the epoch just finished
+            int splits = 0, units = nI;
+            if (split && label_rule == "avg") {
+                // checkpoint policies BEFORE any split (they describe the epoch just finished)
+                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                if (!gated) {
+                    Judgment jd = judge_avg(Ravg, history_unit, backward);
+                    splits = jd.splits; units = jd.units;
+                    write_judgment("epoch", t, -1.0, jd, Bprev, "bucket_" + to_string(k));
+                } else {  // splits happen only at gate checks; this row reports those since the previous row
+                    splits = splits_since; splits_since = 0;
+                    if (history_unit) { vector<int> key; units = history_keys(key); }
+                }
+            } else if (split) {
+                if (history_unit) {  // pool every label input over the bucket-history key
+                    vector<int> key;
+                    units = history_keys(key);
+                    pool(Rw, key, units, W); pool(Sq, key, units, W); pool(mass, key, units, 1); pool(Ravg, key, units, W);
+                    if (label_rule == "replay") { pool(Rp, key, units, W); pool(Rp2, key, units, W); }
+                }
+                vector<int> label(nI, -1);
+                for (int I = 0; I < nI; ++I) {
+                    if (mass[I] <= 0) continue;
+                    const double* r = &Rw[(size_t)I * W]; int n = counts[I], best = 0;
+                    for (int a = 1; a < n; ++a) if (r[a] > r[best]) best = a;
+                    // es label tests on the window sum of sampled regrets for action `best` (n = visits this epoch):
+                    //   normal:    R > z * sqrt(sum r^2)                                  (CLT approximation)
+                    //   hoeffding: R > Delta_I * sqrt(2 n ln(1/d_k))                      (Azuma, increments in [-Delta_I, Delta_I])
+                    //   bernstein: R > sqrt(2 n V ln(2/d_k)) + 7 w n ln(2/d_k) / (3(n-1)) (empirical Bernstein, w = 2 Delta_I)
+                    // with d_k = delta / (k+1)^2, summable over epochs.
+                    bool positive;
+                    if (mode == "full") positive = r[best] / mass[I] > tol;
+                    else if (test == "normal") positive = r[best] - z * sqrt(Sq[(size_t)I * W + best]) > 0;
+                    else {
+                        double n = mass[I], dk = delta0 / ((k + 1.0) * (k + 1.0)), thr;
+                        if (test == "hoeffding") thr = delta_range[I] * sqrt(2 * n * std::log(1 / dk));
+                        else {
+                            if (n < 2) continue;
+                            double mean = r[best] / n, var = max(0.0, (Sq[(size_t)I * W + best] - n * mean * mean) / (n - 1));
+                            thr = sqrt(2 * n * var * std::log(2 / dk)) + 7 * (2 * delta_range[I]) * n * std::log(2 / dk) / (3 * (n - 1));
+                        }
+                        positive = r[best] > thr;
+                    }
+                    if (positive) label[I] = best;
+                }
+                // label sets: m1 (window rules, replay, avg) and m2 (avg, for window+avg); window = one label per set
+                bool two = label_rule == "window+avg";
+                vector<uint32_t> m1(nI), m2(two ? nI : 0);
+                for (int I = 0; I < nI; ++I) {
+                    const size_t o = (size_t)I * W; const int n = counts[I];
+                    if (label_rule == "window" || two) m1[I] = 1u << (label[I] + 1);
+                    else if (label_rule == "window_tol") {
+                        double v = 0;
+                        for (int a = 0; a < n; ++a) v = max(v, Sq[o + a]);
+                        m1[I] = label_set(&Rw[o], n, mass[I] > 0 ? z * sqrt(v) : 0.0);
+                    } else if (label_rule == "replay") {
+                        double x[W], v = 0;
+                        for (int a = 0; a < n; ++a) { x[a] = Rp[o + a] / replay_p; v = max(v, (1 - replay_p) / (replay_p * replay_p) * Rp2[o + a]); }
+                        m1[I] = label_set(x, n, z * sqrt(v));
+                    } else m1[I] = label_set(&Ravg[o], n, 0.0);
+                    if (two) m2[I] = label_set(&Ravg[o], n, 0.0);
+                }
+                // per bucket: common label of each set family, and how many members carry each label
+                vector<uint32_t> c1(B, ~0u), c2(B, ~0u);
+                vector<array<int, W + 1>> f1(B), f2(two ? B : 0);
+                for (auto& f : f1) f.fill(0);
+                for (auto& f : f2) f.fill(0);
+                for (int I = 0; I < nI; ++I) {
+                    int b = bucket[I];
+                    c1[b] &= m1[I];
+                    for (int l = 0; l <= W; ++l) f1[b][l] += (m1[I] >> l) & 1;
+                    if (two) { c2[b] &= m2[I]; for (int l = 0; l <= W; ++l) f2[b][l] += (m2[I] >> l) & 1; }
+                }
+                auto pick = [](uint32_t m, const array<int, W + 1>& f) {  // the member's label shared by most members
+                    int best = -1;
+                    for (int l = 0; l <= W; ++l) if (((m >> l) & 1) && (best < 0 || f[l] > f[best])) best = l;
+                    return best;
+                };
+                map<pair<int, int>, int> child;
+                vector<int> next(nI);
+                int B2 = 0;
+                vector<int> keep;  // parent of each unsplit new id, -1 for children
+                for (int I = 0; I < nI; ++I) {
+                    int b = bucket[I];
+                    bool s1 = c1[b] == 0, s2 = two && c2[b] == 0;
+                    int lab = !s1 && !s2 ? -2 : (s1 ? pick(m1[I], f1[b]) : 0) * 8 + (s2 ? pick(m2[I], f2[b]) : 0);
+                    auto key = make_pair(b, lab);
+                    auto it = child.find(key);
+                    if (it == child.end()) { it = child.emplace(key, B2++).first; keep.push_back(lab == -2 ? b : -1); }
+                    next[I] = it->second;
+                }
+                for (int b = 0; b < B; ++b) splits += c1[b] == 0 || (two && c2[b] == 0);
+                vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
+                for (int nb = 0; nb < B2; ++nb)
+                    if (keep[nb] >= 0)
+                        for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+                // checkpoint policies BEFORE applying the split (they describe the epoch just finished)
+                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+            } else {
+                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
             }
-            auto pick = [](uint32_t m, const array<int, W + 1>& f) {  // the member's label shared by most members
-                int best = -1;
-                for (int l = 0; l <= W; ++l) if (((m >> l) & 1) && (best < 0 || f[l] > f[best])) best = l;
-                return best;
-            };
-            map<pair<int, int>, int> child;
-            vector<int> next(nI);
-            int B2 = 0;
-            vector<int> keep;  // parent of each unsplit new id, -1 for children
-            for (int I = 0; I < nI; ++I) {
-                int b = bucket[I];
-                bool s1 = c1[b] == 0, s2 = two && c2[b] == 0;
-                int lab = !s1 && !s2 ? -2 : (s1 ? pick(m1[I], f1[b]) : 0) * 8 + (s2 ? pick(m2[I], f2[b]) : 0);
-                auto key = make_pair(b, lab);
-                auto it = child.find(key);
-                if (it == child.end()) { it = child.emplace(key, B2++).first; keep.push_back(lab == -2 ? b : -1); }
-                next[I] = it->second;
-            }
-            for (int b = 0; b < B; ++b) splits += c1[b] == 0 || (two && c2[b] == 0);
-            vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
-            for (int nb = 0; nb < B2; ++nb)
-                if (keep[nb] >= 0)
-                    for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
-            // checkpoint policies BEFORE applying the split (they describe the epoch just finished)
-            save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
-            save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
-            bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
-        } else {
-            save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
-            save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+            save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
+            double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+            double len = (double)(t - epoch_start);
+            fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
+                    eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
+                    rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev, units);
+            fflush(log);
+            fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
+                    k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);
+            epoch_start = t;
+            fill(Rw.begin(), Rw.end(), 0); fill(Sq.begin(), Sq.end(), 0); fill(mass.begin(), mass.end(), 0);
+            if (label_rule == "replay") { fill(Rp.begin(), Rp.end(), 0); fill(Rp2.begin(), Rp2.end(), 0); }
+            ++k; L *= 2; epoch_end = t + L;
+            if (epoch_end > T) epoch_end = T;
         }
-        save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
-        double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-        double len = (double)(t - epoch_start);
-        fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
-                eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
-                rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev, units);
-        fflush(log);
-        fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
-                k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);
-        epoch_start = t;
-        fill(Rw.begin(), Rw.end(), 0); fill(Sq.begin(), Sq.end(), 0); fill(mass.begin(), mass.end(), 0);
-        if (label_rule == "replay") { fill(Rp.begin(), Rp.end(), 0); fill(Rp2.begin(), Rp2.end(), 0); }
-        ++k; L *= 2; epoch_end = t + L;
-        if (epoch_end > T) epoch_end = T;
+        if (gated && t % gate_every == 0 && t != T) {  // gate check: judge only when rho_P(avg)/2 <= threshold
+            vector<double> gpol = policy(S, true), gR((size_t)nI * W, 0.0);
+            exact_into(0, 1, 1, 1, gpol.data(), gR);
+            vector<double> gsum((size_t)B * W, 0.0);
+            vector<int> gcount(B, 0);
+            for (int I = 0; I < nI; ++I) {
+                for (int a = 0; a < counts[I]; ++a) gsum[(size_t)bucket[I] * W + a] += gR[(size_t)I * W + a];
+                gcount[bucket[I]] = counts[I];
+            }
+            double grhoP = 0;
+            for (int b = 0; b < B; ++b) grhoP += psi(&gsum[(size_t)b * W], gcount[b]);
+            const double thr = gate_eps * (gate_decay == "sqrt_iters" ? sqrt(L0 / (double)t)
+                                           : gate_decay == "sqrt_rounds" ? 1 / sqrt(rounds + 1.0) : 1.0);
+            const bool pass = grhoP / 2 <= thr;
+            fprintf(gate_log, "%lld,%d,%.9g,%.9g,%d\n", t, B, grhoP / 2, thr, (int)pass);
+            fflush(gate_log);
+            if (pass) {
+                const vector<double> gcur = current_policy();
+                const int Bb = B;
+                Judgment jd = judge_avg(gR, history_unit, backward);
+                string stem = "-";
+                if (jd.splits > 0) {  // the policies the judgment saw, for the pre-split evaluation
+                    stem = "presplit_" + to_string(judgments);
+                    save(out + "/policy_" + stem + "_avg.bin", gpol); save(out + "/policy_" + stem + "_cur.bin", gcur);
+                    splits_since += jd.splits; ++rounds;
+                }
+                write_judgment("gate", t, thr, jd, Bb, stem);
+            }
+        }
     }
     save(out + "/final_bucket_map.bin", bucket);
     fclose(log);
+    if (judgment_log) fclose(judgment_log);
+    if (gate_log) fclose(gate_log);
 }

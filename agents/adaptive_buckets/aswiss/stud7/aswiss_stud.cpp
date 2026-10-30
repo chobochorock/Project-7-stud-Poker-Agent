@@ -5,7 +5,8 @@
 //                            [--z 2] [--inherit 0] [--seed 1] [--power-cache 1000000] [--checkpoint-every 1000000]
 //                            [--snapshot-every 0] [--curve-every 10000] [--h4 heuristic|learn]
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
-//                            [--label-cap 0] [--backward 0] [--backward-min-visits 8] --out DIR
+//                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
+//                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
@@ -39,7 +40,8 @@
 //            the memory of long runs; it also stops the detection threshold from shrinking once epochs exceed N.
 // --backward 1 (history keys, --label avg): after each forward split, the backward split of ASWISS_HISTORY_PROOF_KO.md
 //            section 8 in its sampled one-step form (Model::hbackward); backward.csv logs it per epoch. The sub-keys come
-//            from a replay of the average-policy pass, kept only for keys visited >= --backward-min-visits (default 8).
+//            from a replay of the average-policy pass, kept only for keys visited >= --backward-min-visits (default 32),
+//            at most --backward-max-subkeys (default 4M, about 0.8 GB) of them; later new sub-keys are dropped.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -215,6 +217,8 @@ struct SubMap {
     std::unordered_map<HFull, uint32_t, HFullHash> ids;
     std::vector<HFull> prev;
     std::unordered_map<SubKey, struct AtomStats, SubKeyHash> stats;
+    size_t cap = SIZE_MAX;  // no new sub-key once this many are held (frequent ones appear early); their visits are dropped
+    uint64_t dropped = 0;
     uint32_t id(const HFull& k) {
         const auto [it, fresh] = ids.try_emplace(k, static_cast<uint32_t>(prev.size()));
         if (fresh) prev.push_back(k);
@@ -1309,7 +1313,13 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         node += sigma[a] * v[a];
     }
     AtomStats* st = stats ? &(*stats)[key] : nullptr;
-    AtomStats* ss = sub && prev_key.ctx != 0 && (!only || only->count(key)) ? &sub->stats[SubKey{key, sub->id(prev_key)}] : nullptr;
+    AtomStats* ss = nullptr;
+    if (sub && prev_key.ctx != 0 && (!only || only->count(key))) {
+        const SubKey sk{key, sub->id(prev_key)};
+        if (const auto it = sub->stats.find(sk); it != sub->stats.end()) ss = &it->second;
+        else if (sub->stats.size() < sub->cap) ss = &sub->stats[sk];
+        else ++sub->dropped;
+    }
     for (int a = 0; a < A; ++a) {
         if (!(mask & (1u << a))) continue;
         const double r = v[a] - node;
@@ -1417,7 +1427,8 @@ int train(int argc, char** argv) {
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
                                 {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"},
-                                {"--backward", "0"}, {"--backward-min-visits", "8"}});
+                                {"--backward", "0"}, {"--backward-min-visits", "32"},
+                                {"--backward-max-subkeys", "4000000"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1438,6 +1449,7 @@ int train(int argc, char** argv) {
     if (backward && (partition != Partition::History || label_rule != "avg"))
         throw std::runtime_error("--backward 1 needs --partition history --label avg");
     const double backward_min_visits = std::stod(o["--backward-min-visits"]);
+    const size_t backward_max_subkeys = std::stoull(o["--backward-max-subkeys"]);
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
     const std::string out = o.at("--out");
@@ -1455,7 +1467,8 @@ int train(int argc, char** argv) {
         << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "")
         << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
         << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "")
-        << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] : "");
+        << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
+                          o["--backward-max-subkeys"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1488,7 +1501,7 @@ int train(int argc, char** argv) {
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
         std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
-        if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,keys_two_labels,pairs,backward_splits,peak_rss_mb\n";
+        if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,pairs,backward_splits,peak_rss_mb\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
@@ -1557,9 +1570,10 @@ int train(int argc, char** argv) {
                         avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, &avg);
                 }
                 // backward split: replay the same pass (same deals and samples, same frozen partition) and sum the
-                // sub-keys of the keys visited at least --backward-min-visits times; rarer keys cannot show two
-                // significant sub-key labels, and skipping them bounds the memory
+                // sub-keys of the keys visited at least --backward-min-visits times (rarer keys can hardly show two
+                // significant sub-key labels), up to --backward-max-subkeys sub-keys
                 SubMap sub;
+                sub.cap = backward_max_subkeys;
                 HSet frequent;
                 if (backward) {
                     for (const auto& [k, st] : avg) if (st.visits >= backward_min_visits) frequent.insert(k);
@@ -1579,7 +1593,7 @@ int train(int argc, char** argv) {
                     const auto br = model.hbackward(z, sub);
                     splits += br.splits;
                     std::ofstream(backward_path, std::ios::app) << s.k << ',' << s.t << ',' << avg.size() << ',' << frequent.size() << ','
-                        << br.subkeys << ',' << br.inconsistent << ',' << br.pairs << ',' << br.splits << ',' << rss << '\n';
+                        << br.subkeys << ',' << sub.dropped << ',' << br.inconsistent << ',' << br.pairs << ',' << br.splits << ',' << rss << '\n';
                     std::cerr << "backward split: " << br.subkeys << " sub-keys, " << br.inconsistent << " keys with two labels, "
                               << br.splits << " buckets split\n";
                 }

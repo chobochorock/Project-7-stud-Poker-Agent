@@ -6,8 +6,9 @@ REF_DIR holds the matched laptop arms (runs_100m_s1_summaries: history_b_street_
 --ungated NAME=DIR adds an ungated run folder whose rho.jsonl comes from `evaluate.py --rho-only`.
 Every epoch-end snapshot is taken before that epoch's judgment, so each point is "the policy right before a split"
 when the gate passed (filled marker) or "the policy when the gate held the split back" (hollow marker).
-Writes OUT_PREFIX.png: average / current LBR, the regret total rho_P/2 with each arm's eps, buckets, LBR against
-rho_P/2, and the paired LBR difference to k-means 1024 (same deals).
+Writes OUT_PREFIX.png: average / current LBR (log-log), the regret total rho_P/2 with each arm's eps (and the
+iterate-regret statistic for --gate-stat iter runs), buckets, LBR against rho_P/2, the paired LBR difference to
+k-means 1024 (same deals), and the LBR ratio to k-means 1024 at shared epoch budgets for both policies.
 """
 import argparse, csv, json, math, os
 import matplotlib
@@ -74,7 +75,7 @@ def style(ax, title, ylabel, logy=False, xlabel="training roots (5th-street deal
     for side in ("top", "right"): ax.spines[side].set_visible(False)
 
 
-fig, axes = plt.subplots(3, 2, figsize=(16, 16))
+fig, axes = plt.subplots(4, 2, figsize=(16, 21))
 for col, pol in ((0, "average"), (1, "current")):
     ax = axes[0, col]
     for (n, label, c, ls) in REFS:
@@ -91,9 +92,11 @@ for col, pol in ((0, "average"), (1, "current")):
             ax.plot(x, y, marker="o", ms=6, color=c, mfc=c if (not judged or judged.get(x, False)) else SURFACE, mew=1.2)
         f = evals(d, "_final").get((pol, max(xs)))
         if f: ax.errorbar([max(xs) * 1.08], [f["lbr_ante"]], yerr=[1.96 * f["lbr_se"]], color=c, marker="D", ms=6, mfc=SURFACE, capsize=2)
-    style(ax, f"{pol.capitalize()} policy: LBR at epoch ends (filled: a split followed; hollow: gate held; diamond: 20,000 pairs)",
-          "LBR, ante/hand")
-    ax.set_ylim(0, None)
+    ys_all = [l.get_ydata() for l in ax.get_lines() if len(l.get_ydata())]
+    logy = all(min(y) > 0 for y in ys_all)  # never hide a non-positive LBR on a log axis
+    style(ax, f"{pol.capitalize()} policy: LBR at epoch ends (filled: a split followed; hollow: gate held; diamond: 20,000 pairs)"
+          + ("" if logy else " [linear y: some LBR <= 0]"), "LBR, ante/hand" + (" (log)" if logy else ""), logy=logy)
+    if not logy: ax.set_ylim(min(0, *[min(y) for y in ys_all]), None)
 axes[0, 0].legend(fontsize=7, frameon=False)
 ax = axes[1, 0]
 for i, (n, d, rho, judged, eps, stat, gstat) in enumerate(runs):
@@ -102,7 +105,13 @@ for i, (n, d, rho, judged, eps, stat, gstat) in enumerate(runs):
         xs = sorted(rho); ax.plot(xs, [max(rho[x], 1e-3) for x in xs], color=c, lw=1.2, label=labels.get(n, n))
         for x in xs: ax.plot(x, max(rho[x], 1e-3), marker="o", ms=6, color=c, mfc=c if (not judged or judged.get(x)) else SURFACE)
     if eps and stat == "rho_cross_half": ax.axhline(eps, color=c, lw=0.8, ls=(0, (4, 3)))
-style(ax, "Regret total of the average policy, rho_P/2 per root (cross-fitted); dashed: each arm's eps", "ante per root", logy=True)
+    if eps and stat != "rho_cross_half" and gstat:
+        xs = sorted(gstat)
+        ax.plot(xs, [max(gstat[x], 1e-3) for x in xs], color=c, lw=1.0, ls=(0, (1, 1.5)), marker="s", ms=4,
+                label=labels.get(n, n) + ": iterate-regret statistic (the gate it uses)")
+        ax.axhline(eps, color=c, lw=0.8, ls=(0, (1, 1.5)))
+style(ax, "Regret total of the average policy, rho_P/2 per root (cross-fitted); dashed: each arm's eps; dotted: iterate statistic",
+      "ante per root", logy=True)
 ax.legend(fontsize=7, frameon=False)
 ax = axes[1, 1]
 for i, (n, d, rho, judged, eps, stat, gstat) in enumerate(runs):
@@ -137,8 +146,24 @@ for i, (n, d, rho, judged, eps, stat, gstat) in enumerate(runs):
         xs, ms, es = zip(*pts); ax.errorbar(xs, ms, yerr=es, color=c, marker="o", ms=4, lw=1.1, capsize=2, label=labels.get(n, n))
 ax.axhline(0, color=INK, lw=0.8)
 style(ax, "Average-policy LBR minus k-means 1024, same 2,000 deals (95%)", "LBR difference, ante/hand")
+for col, pol in ((0, "average"), (1, "current")):
+    ax = axes[3, col]
+    for i, (n, d, rho, judged, eps, stat, gstat) in enumerate(runs):
+        c = COLORS[i % len(COLORS)]
+        pts = [(x, v["lbr_ante"] / bev[(p, x)]["lbr_ante"]) for (p, x), v in sorted(evals(d).items(), key=lambda kv: kv[0][1])
+               if p == pol and (p, x) in bev and bev[(p, x)]["lbr_ante"] > 0]
+        if pts: ax.plot(*zip(*pts), color=c, marker="o", ms=4, lw=1.1, label=labels.get(n, n))
+    for (n, label, c, ls) in REFS:
+        if n == "atom_k1024_s1": continue
+        pts = [(x, v["lbr_ante"] / bev[(p, x)]["lbr_ante"]) for (p, x), v in sorted(refs[n].items(), key=lambda kv: kv[0][1])
+               if p == pol and x <= 5.2e6 and (p, x) in bev and bev[(p, x)]["lbr_ante"] > 0]
+        if pts: ax.plot(*zip(*pts), color=c, ls=ls, lw=1.1, label=label)
+    ax.axhline(1, color=INK, lw=0.8)
+    style(ax, f"{pol.capitalize()} policy: LBR / k-means 1024 LBR at shared epoch budgets (2,000 pairs, same deals)", "ratio (log)", logy=True)
+    if col == 0: ax.legend(fontsize=7, frameon=False)
 fig.text(0.01, 0.005, "Heads-up 7-stud from 5th street, heuristic H4, seed 1. LBR: engine PolicyLBR, 64 particles, same deals and seed for "
          "every snapshot (2,000 pairs; diamonds 20,000). rho_P/2: gated runs from their gate.csv (the epoch-end average-policy "
-         "pass), ungated runs from evaluate.py --rho-only (128,000 roots).", color=MUTED, fontsize=8)
-fig.tight_layout(rect=(0, 0.015, 1, 1)); fig.savefig(f"{a.out}.png", dpi=105)
+         "pass), ungated runs from evaluate.py --rho-only (128,000 roots).\nEvaluation is matched; training keys differ "
+         "(bucket history vs k-means atoms).", color=MUTED, fontsize=8)
+fig.tight_layout(rect=(0, 0.02, 1, 1)); fig.savefig(f"{a.out}.png", dpi=105)
 print("saved", f"{a.out}.png")

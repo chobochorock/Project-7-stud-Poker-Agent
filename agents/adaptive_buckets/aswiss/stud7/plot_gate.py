@@ -59,7 +59,7 @@ for spec in a.ungated:
     rho = {int(r["roots"]): float(r["rho_cross_half"]) for r in map(json.loads, open(f"{d}/rho.jsonl"))} \
         if os.path.exists(f"{d}/rho.jsonl") else {}
     runs.append((name, d, rho, {}, None, None, {}))
-REFS = [("history_b_street_s1", "history keys + B (ungated)", "#6250d6", (0, (6, 2))),
+REFS = [("history_b_street_s1", "bucket history + B, no backward split (ungated)", "#6250d6", (0, (6, 2))),
         ("atom_k1024_s1", "k-means 1024 = baseline", INK, "-"), ("atom_k256_s1", "k-means 256", MUTED, (0, (1, 2)))]
 refs = {n: evals(os.path.join(a.ref_dir, n)) for n, *_ in REFS}
 
@@ -86,7 +86,7 @@ for col, pol in ((0, "average"), (1, "current")):
         e = sorted((k[1], v) for k, v in evals(d).items() if k[0] == pol)
         if not e: continue
         xs = [x for x, _ in e]; ys = [v["lbr_ante"] for _, v in e]; err = [1.96 * v["lbr_se"] for _, v in e]
-        lab = labels.get(n, n) + (f" (gate {stat.split('_')[0]} <= {eps:g})" if eps else " (no gate)")
+        lab = labels.get(n, n) + (f" (gate {stat.split('_')[0]} <= {eps:g})" if eps else "" if n in labels else " (no gate)")
         ax.errorbar(xs, ys, yerr=err, color=c, lw=1.2, capsize=2, label=lab)
         for x, y in zip(xs, ys):
             ax.plot(x, y, marker="o", ms=6, color=c, mfc=c if (not judged or judged.get(x, False)) else SURFACE, mew=1.2)

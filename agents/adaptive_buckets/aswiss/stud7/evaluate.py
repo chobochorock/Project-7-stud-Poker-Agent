@@ -2,12 +2,15 @@
 
 Usage: python evaluate.py BINARY RUNS_DIR --runs NAME:PARTITION:ATLAS ... [--kinds epoch periodic] [--min-roots 0]
        [--epochs K ...] [--latest] [--workers 4] [--pairs 2000] [--particles 64] [--gap-roots 4000]
-       [--seed 2026102701] [--tag TAG]
+       [--seed 2026102701] [--tag TAG] [--rho-roots 0] [--rho-only]
 Snapshots come from RUNS_DIR/NAME/snapshots.csv (written by `aswiss_stud train`); older runs without it fall back to
 snapshot_K.bin plus log.csv. --epochs keeps only those epoch snapshots, --latest only the newest snapshot.
 Appends one JSON line per (snapshot, policy) to RUNS_DIR/NAME/eval.jsonl (eval_TAG.jsonl with --tag), skipping rows
 already present, so it can be rerun while training continues. Every snapshot uses the same LBR deals, LBR seed,
 particles and gap deals.
+--rho-roots N: also the bucket regret total rho_P/2 of the average policy (history partition; the --gate-eps statistic)
+from N sampled roots, stored with the average-policy row. --rho-only: only that statistic, for snapshots already
+evaluated, into rho.jsonl (rho_TAG.jsonl), one row per snapshot.
 """
 import argparse, csv, json, os, subprocess
 from pathlib import Path
@@ -24,6 +27,7 @@ ap.add_argument("--workers", type=int, default=4)
 ap.add_argument("--pairs", type=int, default=2000); ap.add_argument("--particles", type=int, default=64)
 ap.add_argument("--gap-roots", type=int, default=4000); ap.add_argument("--seed", type=int, default=2026102701)
 ap.add_argument("--tag", default="")
+ap.add_argument("--rho-roots", type=int, default=0); ap.add_argument("--rho-only", action="store_true")
 a = ap.parse_args()
 suffix = f"_{a.tag}" if a.tag else ""
 
@@ -55,12 +59,12 @@ for spec in a.runs:
     if not any(os.path.exists(os.path.join(d, f)) for f in ("snapshots.csv", "log.csv")):
         print(f"skipped {name}: no run folder with log.csv in {a.runs_dir} (arm not trained here?)", flush=True)
         continue
-    have = done(os.path.join(d, f"eval{suffix}.jsonl"))
+    have = done(os.path.join(d, f"{'rho' if a.rho_only else 'eval'}{suffix}.jsonl"))
     snaps = [s for s in snapshots(d, partition) if s[2] in a.kinds and s[1] >= a.min_roots]
     if a.epochs is not None: snaps = [s for s in snaps if s[2] == "epoch" and s[3] in a.epochs]
     if a.latest and snaps: snaps = [max(snaps, key=lambda s: s[1])]
     for snap in snaps:
-        for policy in ("average", "current"):
+        for policy in (("average",) if a.rho_only else ("average", "current")):
             if (snap[0], policy) not in have:
                 jobs.append((d, snap, policy, partition, atlas))
 
@@ -70,15 +74,20 @@ def run(job):
     stem = file[:-4]
     # forward slashes: evaluators built before 2026-10-29 echo this path into their JSON output unescaped
     cmd = [a.binary, "eval", "--partition", partition, "--snapshot", Path(d, file).as_posix(), "--policy", policy,
-           "--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", str(a.gap_roots), "--seed", str(a.seed),
-           "--pairs-csv", os.path.join(d, f"lbr_pairs{suffix}_{stem}_{policy}.csv")]
+           "--seed", str(a.seed)]
+    if a.rho_only: cmd += ["--pairs", "0", "--gap-roots", "0", "--rho-roots", str(a.rho_roots or 128000)]
+    else:
+        cmd += ["--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", str(a.gap_roots),
+                "--pairs-csv", os.path.join(d, f"lbr_pairs{suffix}_{stem}_{policy}.csv")]
+        if a.rho_roots: cmd += ["--rho-roots", str(a.rho_roots)]
     if atlas: cmd += ["--atlas", atlas]
     row = json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
     row.update(run=os.path.basename(d), file=file, roots=roots, kind=kind, epoch=epoch, buckets=buckets)
-    with open(os.path.join(d, f"eval{suffix}.jsonl"), "a") as out:
+    with open(os.path.join(d, f"{'rho' if a.rho_only else 'eval'}{suffix}.jsonl"), "a") as out:
         out.write(json.dumps(row) + "\n")
-    print(row["run"], file, policy, f"LBR {row['lbr_ante']:.3f} +- {row['lbr_se']:.3f}", f"gap {row['gap_proxy_ante']:.1f}",
-          flush=True)
+    if a.rho_only: print(row["run"], file, f"rho_P/2 {row.get('rho_cross_half')} (plain {row.get('rho_plain_half')})", flush=True)
+    else: print(row["run"], file, policy, f"LBR {row['lbr_ante']:.3f} +- {row['lbr_se']:.3f}", f"gap {row['gap_proxy_ante']:.1f}",
+                flush=True)
 
 
 print(f"{len(jobs)} evaluations", flush=True)

@@ -9,7 +9,7 @@
 //                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0] [--gate-stat avg|iter]
 //                            --out DIR
 //                            (rerun the same command to resume)
-// Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000]
+// Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000] [--rho-roots 0]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
 //
@@ -1347,6 +1347,25 @@ double avg_traverse(const Model& model, State state, int traverser, std::mt19937
 // carries each seat's previous key (ctx 0: none yet). `stats` may be null (a replay that only fills `sub`).
 using HSet = std::unordered_set<HFull, HFullHash>;
 using BucketHalves = std::unordered_map<uint32_t, std::array<double, 2 * A>>;  // bucket -> regret sums of halves 0 and 1
+// rho_P/2 per root from n roots split into two halves: {plain, cross-fitted}. plain = sum_B max(0, max_a R_B(a)) is
+// biased upward by sampling noise; cross-fitted takes each bucket's best action on one half and its regret on the
+// other, both ways (no selection bias; slightly low).
+std::pair<double, double> rho_estimates(const BucketHalves& halves, uint64_t n) {
+    double plain = 0, cross = 0;
+    for (const auto& [b, h] : halves) {
+        double best = 0, m0 = 0, m1 = 0;
+        int a0 = -1, a1 = -1;
+        for (int a = 0; a < A; ++a) {
+            best = std::max(best, h[a] + h[A + a]);
+            if (h[a] > m0) { m0 = h[a]; a0 = a; }
+            if (h[A + a] > m1) { m1 = h[A + a]; a1 = a; }
+        }
+        plain += best;
+        if (a0 >= 0) cross += h[A + a0];
+        if (a1 >= 0) cross += h[a1];
+    }
+    return {plain / (2.0 * static_cast<double>(n)), cross / (2.0 * static_cast<double>(n))};
+}
 double avg_traverse_h(const Model& model, State state, Trail trail, int traverser, std::mt19937_64& rng, HMap* stats,
                       SubMap* sub = nullptr, const HSet* only = nullptr, BucketHalves* halves = nullptr, int half = 0,
                       std::array<HFull, 2> pk = {}) {
@@ -1658,20 +1677,7 @@ int train(int argc, char** argv) {
                 // best action chosen on one half of the roots, its regret measured on the other half, both ways).
                 bool judge = true;
                 if (gated) {
-                    double plain = 0, cross = 0;
-                    for (const auto& [b, h] : halves) {
-                        double best = 0, m0 = 0, m1 = 0;
-                        int a0 = -1, a1 = -1;
-                        for (int a = 0; a < A; ++a) {
-                            best = std::max(best, h[a] + h[A + a]);
-                            if (h[a] > m0) { m0 = h[a]; a0 = a; }
-                            if (h[A + a] > m1) { m1 = h[A + a]; a1 = a; }
-                        }
-                        plain += best;
-                        if (a0 >= 0) cross += h[A + a0];
-                        if (a1 >= 0) cross += h[a1];
-                    }
-                    plain /= 2.0 * static_cast<double>(n); cross /= 2.0 * static_cast<double>(n);
+                    const auto [plain, cross] = rho_estimates(halves, n);
                     const double iter = model.iterate_regret_half(false);
                     judge = (gate_iter ? iter : cross) <= gate_eps;
                     if (judge) model.iterate_regret_half(true);  // the window restarts at every judgment
@@ -1752,7 +1758,8 @@ int train(int argc, char** argv) {
 int eval(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--snapshot", ""}, {"--policy", "average"},
                                 {"--pairs", "2000"}, {"--particles", "64"}, {"--gap-roots", "4000"},
-                                {"--seed", "2026102701"}, {"--power-cache", "1000000"}, {"--pairs-csv", ""}});
+                                {"--seed", "2026102701"}, {"--power-cache", "1000000"}, {"--pairs-csv", ""},
+                                {"--rho-roots", "0"}});
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     Model model(parse_partition(o["--partition"]), atlas.get());
     model.load(o.at("--snapshot"));
@@ -1785,6 +1792,7 @@ int eval(int argc, char** argv) {
     }
     const double lbr_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     auto mean_se = [](const std::vector<double>& x) {
+        if (x.empty()) return std::make_pair(0.0, 0.0);
         const double m = std::accumulate(x.begin(), x.end(), 0.0) / x.size();
         double v = 0;
         for (double y : x) v += (y - m) * (y - m);
@@ -1817,6 +1825,22 @@ int eval(int argc, char** argv) {
         gap_traverse(model, average, root, 1, gap_rng, gap1);
         gaps.push_back((gap0 + gap1) / 2.0);
     }
+    // --rho-roots N (history partition, average policy): the bucket regret total rho_P/2 of the evaluated policy from N
+    // sampled roots (own deals and seed), the statistic the --gate-eps gate uses; -1 when not computed
+    const uint64_t rho_roots = std::stoull(o["--rho-roots"]);
+    double rho_plain = -1, rho_cross = -1;
+    if (rho_roots && average && parse_partition(o["--partition"]) == Partition::History && !model.has_h4()) {
+        BucketHalves halves;
+        std::mt19937_64 rho_rng(seed ^ 0x3c6ef372fe94f82bull);
+        for (uint64_t i = 0; i < rho_roots; ++i) {
+            auto deck = fresh_deck();
+            std::shuffle(deck.begin(), deck.end(), rho_rng);
+            for (int p = 0; p < 2; ++p)
+                avg_traverse_h(model, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, p, rho_rng, nullptr,
+                               nullptr, nullptr, &halves, static_cast<int>(i & 1));
+        }
+        std::tie(rho_plain, rho_cross) = rho_estimates(halves, rho_roots);
+    }
     const auto [lm, lse] = mean_se(paired);
     const auto [gm, gse] = mean_se(gaps);
     uint64_t policy_queries = 0, policy_misses = 0;
@@ -1827,7 +1851,8 @@ int eval(int argc, char** argv) {
               << ",\"lbr_ante\":" << lm << ",\"lbr_se\":" << lse << ",\"gap_roots\":" << gap_roots
               << ",\"gap_proxy_ante\":" << gm << ",\"gap_proxy_se\":" << gse << ",\"policy_queries\":" << policy_queries
               << ",\"policy_misses\":" << policy_misses << ",\"lbr_seconds\":" << lbr_seconds
-              << ",\"h4\":\"" << (model.has_h4() ? "learned" : "heuristic") << "\",\"h4_buckets\":" << model.h4_live() << "}\n";
+              << ",\"h4\":\"" << (model.has_h4() ? "learned" : "heuristic") << "\",\"h4_buckets\":" << model.h4_live() << ",\"rho_roots\":" << rho_roots << ",\"rho_plain_half\":" << rho_plain
+              << ",\"rho_cross_half\":" << rho_cross << "}\n";
     return 0;
 }
 

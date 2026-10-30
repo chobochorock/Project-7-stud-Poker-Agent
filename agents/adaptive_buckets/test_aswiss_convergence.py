@@ -11,6 +11,9 @@ Section 9 (fixed-strategy labels), on small random two-player zero-sum games sol
 6. Counterexamples (Proposition B4): an abstract optimum with consistent labels and NashConv 1; the CFR average whose
    off-path counterfactual regret never vanishes while NashConv -> 0.
 7. Noise-tolerant label sets (Lemma 9).
+ASWISS_HISTORY_PROOF_KO.md (bucket-history keys + split-time average-policy labels):
+8. Counterexample (Proposition H4): a game where the keys merge the private card after a dominant first move, the
+   key-level labels stay consistent, the bucket-level regret of the CFR+ average goes to 0, and NashConv stays at 1.
 Run: python -m unittest agents.adaptive_buckets.test_aswiss_convergence -v
 """
 import unittest
@@ -271,3 +274,67 @@ class TolerantLabels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistoryKeyCounterexample(unittest.TestCase):
+    """Chance deals P1 a card H or L (1/2 each, P2 does not see it). P1 checks or bets (bet: P1 gets -10). After a
+    check P2 checks (showdown: +1 for H, -1 for L) or bets; then P1 calls (+2 for H, -3 for L) or folds (-1).
+    Initial partition = (player, action set, own decision index): B1 = {I1_H, I1_L}, B2 = {I2_H, I2_L}, J alone.
+    The decision-2 key (B1, check, "P2 bet") is the same for both cards, so B2 is one key and can never split."""
+    SD, CALL, FOLD, BET = {"H": 1.0, "L": -1.0}, {"H": 2.0, "L": -3.0}, -1.0, -10.0
+
+    def u1(self, s1, x, y, card):  # P1 payoff for one card under lifted strategies (s1 = P(check), x = P(call), y = P(bet))
+        cont = (1 - y) * self.SD[card] + y * (x * self.CALL[card] + (1 - x) * self.FOLD)
+        return (1 - s1) * self.BET + s1 * cont
+
+    def regrets(self, s1, x, y):  # counterfactual regrets per information set, actions in order
+        r = {}
+        for c in "HL":
+            q2 = np.array([self.CALL[c], self.FOLD])                       # (call, fold)
+            r["I2_" + c] = 0.5 * y * (q2 - (x * q2[0] + (1 - x) * q2[1]))
+            check = (1 - y) * self.SD[c] + y * (x * self.CALL[c] + (1 - x) * self.FOLD)
+            q1 = np.array([check, self.BET])                               # (check, bet)
+            r["I1_" + c] = 0.5 * (q1 - (s1 * q1[0] + (1 - s1) * q1[1]))
+        qj = np.array([sum(-0.5 * s1 * self.SD[c] for c in "HL"),         # P2 payoff = -P1 payoff; (check, bet)
+                       sum(-0.5 * s1 * (x * self.CALL[c] + (1 - x) * self.FOLD) for c in "HL")])
+        r["J"] = qj - (y * qj[1] + (1 - y) * qj[0])
+        return r
+
+    def nashconv(self, s1, x, y):
+        u = sum(0.5 * self.u1(s1, x, y, c) for c in "HL")
+        br1 = sum(0.5 * max(self.BET, max(self.u1(1, xx, y, c) for xx in (0, 1))) for c in "HL")
+        worst = min(sum(0.5 * self.u1(s1, x, yy, c) for c in "HL") for yy in (0, 1))
+        return (br1 - u) + (u - worst)
+
+    def test_fixed_point_is_exploitable(self):
+        r = self.regrets(1.0, 1.0, 1.0)
+        self.assertAlmostEqual(self.nashconv(1.0, 1.0, 1.0), 1.0)
+        pooled = {"B1": r["I1_H"] + r["I1_L"], "B2": r["I2_H"] + r["I2_L"], "J": r["J"]}
+        self.assertAlmostEqual(sum(psi(v) for v in pooled.values()), 0.0)            # rho_P = 0
+        self.assertEqual(labels(r["I1_H"]) & labels(r["I1_L"]), {0, -1})          # B1 keys share {check, none}
+        self.assertAlmostEqual(H([r["I2_H"], r["I2_L"]]), 1.0)                      # within-key cancellation = NashConv
+        self.assertEqual(labels(r["I2_H"]) & labels(r["I2_L"]), set())             # information-set labels would split B2
+
+    def test_cfr_plus_on_buckets_converges_to_it(self):
+        Q = {b: np.zeros(2) for b in ("B1", "B2", "J")}
+        S = {b: np.zeros(2) for b in ("B1", "B2", "J")}
+        def strat(q):
+            p = np.maximum(q, 0)
+            return p / p.sum() if p.sum() > 0 else np.full(2, 0.5)
+        for t in range(1, 20001):
+            for player in (1, 2):                                                  # alternating updates
+                sig = {b: strat(Q[b]) for b in Q}
+                r = self.regrets(sig["B1"][0], sig["B2"][0], sig["J"][1])
+                if player == 1:
+                    Q["B1"] = np.maximum(Q["B1"] + r["I1_H"] + r["I1_L"], 0)
+                    Q["B2"] = np.maximum(Q["B2"] + r["I2_H"] + r["I2_L"], 0)
+                else:
+                    Q["J"] = np.maximum(Q["J"] + r["J"], 0)
+                for b in Q:
+                    S[b] += t * sig[b]
+        avg = {b: S[b] / S[b].sum() for b in S}
+        s1, x, y = avg["B1"][0], avg["B2"][0], avg["J"][1]
+        self.assertGreater(min(s1, x, y), 0.999)
+        r = self.regrets(s1, x, y)
+        self.assertLess(psi(r["I1_H"] + r["I1_L"]) + psi(r["I2_H"] + r["I2_L"]) + psi(r["J"]), 1e-3)
+        self.assertGreater(self.nashconv(s1, x, y), 0.99)

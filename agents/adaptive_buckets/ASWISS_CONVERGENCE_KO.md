@@ -2,6 +2,8 @@
 
 작성: 2026-10-27 (§9 추가: 2026-10-28)
 
+> **2026-10-30 명칭 변경.** "ASWISS"는 이제 bucket 이력 열쇠와 분할 시점의 고정 평균 전략을 함께 쓰는 방법만을 가리킨다. 그 증명 초안은 [ASWISS_HISTORY_PROOF_KO.md](ASWISS_HISTORY_PROOF_KO.md)에 있다. 이 문서의 정리들은 라벨 단위가 원 정보집합인 **정보집합 단위 변형**(정리 1, A, B1–B3)과 원자 단위의 **휴리스틱 가속 변형**(정리 3)에 대한 것이다. 새 문서는 이 문서의 Lemma 7, Lemma 9, Prop B2, 명제 B4를 그대로 쓴다.
+
 **이 문서의 위치**
 - [REGRET_SPACE_ABSTRACTION_KO.md](REGRET_SPACE_ABSTRACTION_KO.md) §4의 Theorem 4.2는 "H 역치 + 추적 표본" 분할 규칙에 대한 것이다.
 - 실제로 구현하고 실험한 규칙은 이와 다른 **누적 regret 라벨 분할**이다(`aswiss/aswiss.cpp`, `aswiss/gated.cpp`, `aswiss/stud7/aswiss_stud.cpp`).

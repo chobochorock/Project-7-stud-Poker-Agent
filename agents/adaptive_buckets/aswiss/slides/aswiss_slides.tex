@@ -1,0 +1,569 @@
+% ASWISS 알고리즘 설명 슬라이드 (Beamer, metropolis)
+% 빌드: xelatex aswiss_slides.tex  (두 번 실행; 그래프 데이터는 data/, make_data.py로 다시 만들 수 있음)
+% 글꼴: 라틴 문자 Latin Modern Sans, 수식 Computer Modern, 한글 나눔바른고딕. 바꾸려면 아래 "글꼴" 줄만 고친다.
+\documentclass[aspectratio=169,11pt]{beamer}
+\usetheme[progressbar=frametitle,numbering=fraction,block=fill]{metropolis}
+\usefonttheme[onlymath]{serif}
+
+% 글꼴
+\usepackage{fontspec}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+\usepackage{kotex}
+\setsanshangulfont{NanumBarunGothic}
+\setmainhangulfont{NanumMyeongjo}
+\setmonohangulfont{NanumGothicCoding}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{fillbetween}
+
+% 색
+\definecolor{ink}{HTML}{1B2430}
+\definecolor{paper}{HTML}{F7F6F2}
+\definecolor{accentblue}{HTML}{2A6FDB}
+\definecolor{deepblue}{HTML}{1F5BBF}
+\definecolor{accentorange}{HTML}{D9622B}
+\definecolor{deeporange}{HTML}{B4501F}
+\definecolor{muted}{HTML}{4A5563}
+\definecolor{tintblue}{HTML}{DCE7F8}
+\definecolor{tintorange}{HTML}{F8E3D7}
+\definecolor{softgray}{HTML}{ECEFF3}
+\definecolor{linegray}{HTML}{D9DCD6}
+\definecolor{kmgray}{HTML}{7D8794}
+\setbeamercolor{normal text}{fg=ink,bg=paper}
+\setbeamercolor{frametitle}{fg=paper,bg=ink}
+\setbeamercolor{alerted text}{fg=deeporange}
+\setbeamercolor{example text}{fg=deepblue}
+\setbeamercolor{progress bar}{fg=accentorange,bg=softgray}
+\setbeamercolor{title separator}{fg=accentorange}
+\setbeamercolor{block title}{fg=ink,bg=softgray}
+\setbeamercolor{block body}{fg=ink,bg=softgray!45}
+\setbeamercolor{block title alerted}{fg=ink,bg=tintorange}
+\setbeamercolor{block body alerted}{fg=ink,bg=tintorange!45}
+\setbeamercolor{block title example}{fg=ink,bg=tintblue}
+\setbeamercolor{block body example}{fg=ink,bg=tintblue!45}
+\setbeamercolor{itemize item}{fg=accentorange}
+\setbeamercolor{enumerate item}{fg=deeporange}
+
+\newcommand{\sigmabar}{\bar\sigma}
+\newcommand{\stepbox}[4]{\parbox[t][2.75cm]{2.2cm}{\raggedright\textcolor{#1}{\textbf{#2}}\\[2pt]{\small\textbf{#3}}\\[3pt]#4}}
+\newcommand{\Pc}{\mathcal P}
+\tikzset{
+  box/.style={draw=linegray,fill=white,rounded corners=3pt,inner sep=5pt,align=left},
+  bluebox/.style={fill=tintblue,rounded corners=3pt,inner sep=5pt,align=left},
+  orangebox/.style={fill=tintorange,rounded corners=3pt,inner sep=5pt,align=left},
+  arr/.style={-{Stealth[length=2.6mm]},thick,draw=muted},
+}
+\pgfplotsset{
+  slideplot/.style={grid=major,grid style={linegray},axis line style={muted},tick label style={font=\scriptsize},
+    label style={font=\small},legend cell align=left,
+    legend style={font=\scriptsize,draw=none,fill=paper,fill opacity=0.9,text opacity=1}},
+}
+
+\title{ASWISS}
+\subtitle{Abstraction Split WIth Sampling by Strategy\\[2pt]학습한 전략이 스스로 추상화를 나누게 한다}
+\date{2026년 11월}
+\author{}
+\institute{졸업 논문 연구 · 2인 영합 불완전정보 게임의 적응형 추상화}
+
+\begin{document}
+
+\maketitle
+
+% ---------------------------------------------------------------- 1. 문제
+\begin{frame}{큰 게임은 추상화 없이는 풀 수 없다}
+\begin{columns}[T,onlytextwidth]
+\column{0.31\textwidth}
+\begin{block}{정보집합이 너무 많다}
+\small 세븐 포커에서는 같은 정보집합이 학습 중 거의 다시 나오지 않는다. 정보집합마다 표를 둘 수 없다.
+\end{block}
+\column{0.31\textwidth}
+\begin{block}{묶는 기준이 해와 무관하다}
+\small k-means 카드 군집 $\times$ 베팅 요약처럼 미리 정한 기준으로 묶는다. 무엇을 합쳐도 되는지는 게임의 해가 정한다.
+\end{block}
+\column{0.31\textwidth}
+\begin{exampleblock}{ASWISS의 질문}
+\small 가장 거친 추상화에서 시작해, 학습한 전략이 “다르게 두고 싶다”고 말하는 곳만 나누면 어떨까?
+\end{exampleblock}
+\end{columns}
+\note{큰 게임은 추상화가 필요하다. 기존 방식은 카드 군집과 베팅 요약 같은 고정 휴리스틱으로 묶는데, 그 기준은 해를 보지 않는다. ASWISS는 가장 거친 추상화에서 출발해 학습한 전략의 후회가 갈리는 곳만 나눈다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 2. 한 라운드
+\begin{frame}{한 라운드: 학습하고, 고정하고, 나눈다}
+\small 시작: 가장 거친 분할 $\Pc_0$ = (플레이어, 행동집합, 자기 결정 순번)
+\vspace{6pt}
+
+\centering
+\begin{tikzpicture}[font=\footnotesize]
+\node[box]       (b1) at (0,0)     {\stepbox{deepblue}{1}{학습}{CFR+로 bucket 단위 전략을 학습 (큰 게임은 MCCFR+)}};
+\node[box]       (b2) at (2.75,0)  {\stepbox{deepblue}{2}{고정}{그 시점의 평균 전략 $\sigmabar$을 고정}};
+\node[box]       (b3) at (5.5,0)   {\stepbox{deepblue}{3}{라벨}{bucket 이력마다 $\sigmabar$의 후회가 가장 큰 행동}};
+\node[bluebox]   (b4) at (8.25,0)  {\stepbox{deepblue}{4}{정방향 분할}{한 bucket 안에서 라벨이 갈리면 라벨별로 나눈다}};
+\node[orangebox] (b5) at (11,0)  {\stepbox{deeporange}{5}{역방향 분할}{이력 안에서 갈리면 정보가 합쳐진 앞 bucket을 나눈다}};
+\foreach \a/\b in {b1/b2,b2/b3,b3/b4,b4/b5} \draw[arr] (\a) -- (\b);
+\draw[arr,draw=deepblue] (b5.south) -- ++(0,-0.4) -| node[pos=0.25,below=2pt,font=\small,text=ink] {다시 학습한다. 아무것도 나뉘지 않으면 멈춘다 \textbf{(정지 상태)}} (b1.south);
+\end{tikzpicture}
+\note{한 라운드는 다섯 단계다. 현재 분할에서 학습하고, 평균 전략을 고정하고, bucket 이력마다 라벨을 붙인 뒤, 정방향과 역방향 분할을 한다. 나뉜 것이 없으면 멈춘다. 실험에서는 epoch(두 배 간격)마다 판정했다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 3. 용어
+\section{구성 요소}
+\begin{frame}{bucket과 bucket 이력}
+\begin{columns}[T,onlytextwidth]
+\column{0.42\textwidth}
+\centering
+\begin{tikzpicture}[font=\small,node distance=0.42cm]
+\node[box,text width=4.5cm] (d1) {\textbf{결정 1} · bucket $B_2$\\{\footnotesize\color{muted} 관측: 내 카드}};
+\node[box,text width=4.5cm,below=0.75cm of d1] (d2) {\textbf{결정 2} · bucket $B_5$\\{\footnotesize\color{muted} $B_2$로 온 다른 손들과 함께 묶여 있다}};
+\node[bluebox,text width=4.5cm,below=0.75cm of d2] (d3) {\textbf{결정 3의 bucket 이력}\\\textcolor{deepblue}{$(\,B_5,\ \text{콜},\ \text{새 카드}\,)$}};
+\draw[arr] (d1) -- node[right,font=\footnotesize,text=muted] {체크 · 새 관측: 상대 베팅} (d2);
+\draw[arr] (d2) -- node[right,font=\footnotesize,text=muted] {콜 · 새 관측: 새 카드} (d3);
+\end{tikzpicture}
+\column{0.54\textwidth}
+\textbf{bucket}\\
+{\small\color{muted} 후회 표와 평균 표를 함께 쓰는 정보집합의 묶음. 추상 게임의 정보집합이다.}
+\smallskip
+
+\textbf{bucket 이력} $\kappa(I)$\\
+{\small\color{muted} (지나온 bucket, 둔 행동, 그 뒤 새 관측). 과거는 bucket 번호로만 기억한다.}
+\smallskip
+
+\textbf{두 단위의 역할}\\
+{\small\color{muted} 라벨은 bucket 이력 단위로 모으고, 전략은 bucket 단위로 공유한다. 같은 bucket 이력은 늘 같은 bucket에 있다.}
+\smallskip
+
+{\footnotesize 7-stud 구현은 직전 bucket 하나만 기억한다. 앞 bucket이 나뉘면 뒤 결정의 bucket 이력도 따라서 잘게 나뉜다.}
+\end{columns}
+\note{bucket은 전략을 공유하는 단위이고, bucket 이력은 지나온 bucket과 행동, 새 관측으로 만든 키다. 과거의 카드는 bucket 번호로만 기억되므로 앞 bucket이 나뉘면 뒤의 bucket 이력도 세분된다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 4. 라벨
+\begin{frame}{라벨: 고정한 평균 전략이 바꾸고 싶은 방향}
+\begin{columns}[T,onlytextwidth]
+\column{0.5\textwidth}
+\[
+r^{\sigmabar}(K,a)=\sum_{I\in K}\Bigl(v^{\sigmabar}_I(a)-v^{\sigmabar}_I\Bigr)
+\]
+\[
+\lambda(K)=\arg\max_a r^{\sigmabar}(K,a)
+\]
+\small
+\begin{itemize}
+\item $v_I$: 상대와 우연의 도달확률로 가중한 반사실 가치
+\item 모든 후회가 $0$ 이하면 “없음” (지금 전략이 최선)
+\item 7-stud는 평균 전략으로 두는 순회 표본으로 추정하고, 유의하지 않으면 “없음” ($z=2$)
+\end{itemize}
+\column{0.46\textwidth}
+\vspace{4pt}
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrrrl}
+\toprule
+bucket 이력 & 폴드 & 콜 & 레이즈 & 라벨\\
+\midrule
+$K_1$ & $-0.40$ & $+0.70$ & $+0.10$ & \textcolor{deepblue}{콜}\\
+$K_2$ & $-0.20$ & $+0.35$ & $-0.05$ & \textcolor{deepblue}{콜}\\
+$K_3$ & $+0.55$ & $-0.30$ & $-0.60$ & \textcolor{deeporange}{폴드}\\
+$K_4$ & $0.00$ & $-0.15$ & $-0.25$ & \textcolor{muted}{없음}\\
+\bottomrule
+\end{tabular}
+
+\vspace{4pt}
+{\scriptsize\color{muted} 표의 수치는 설명을 위한 예시 값이다.}
+\end{columns}
+\note{라벨은 분할 시점에 고정한 평균 전략 아래의 순간 반사실 후회로 정한다. 같은 bucket 이력의 정보집합들의 후회를 더해 가장 큰 행동을 라벨로 쓴다. 정보집합 하나에 대해 평균 전략의 업데이트 방향을 bucket 판별에 쓰자는 원래 아이디어가 이 부분이다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 5. 정방향
+\begin{frame}{정방향 분할: 한 bucket 안에서 라벨이 갈리면 나눈다}
+\centering
+\begin{tikzpicture}[font=\small]
+\node[box,text width=3.9cm] (p) {\textbf{bucket $B$}\\[4pt]
+  \tikz\node[bluebox,text width=3.5cm]{$K_1$ · 라벨 콜};\\[3pt]
+  \tikz\node[bluebox,text width=3.5cm]{$K_2$ · 라벨 콜};\\[3pt]
+  \tikz\node[orangebox,text width=3.5cm]{$K_3$ · 라벨 폴드};};
+\node[bluebox,text width=4.3cm,right=2.2cm of p.north east,anchor=north west] (c1) {\textbf{자식 $B_{\text{콜}}=\{K_1,K_2\}$}\\{\footnotesize 콜을 원하는 이력끼리}};
+\node[orangebox,text width=4.3cm,below=0.5cm of c1] (c2) {\textbf{자식 $B_{\text{폴드}}=\{K_3\}$}\\{\footnotesize 폴드를 원하는 이력}};
+\draw[arr] (p.east) -- (c1.west);
+\draw[arr] (p.east) -- (c2.west);
+\end{tikzpicture}
+
+\vspace{14pt}
+\begin{columns}[T,onlytextwidth]
+\column{0.31\textwidth}\small\textcolor{accentblue}{\rule{\linewidth}{1.5pt}}\\ 공통 라벨이 하나도 없을 때만 나눈다
+\column{0.31\textwidth}\small\textcolor{accentblue}{\rule{\linewidth}{1.5pt}}\\ 같은 bucket 이력은 절대 갈라지지 않는다
+\column{0.31\textwidth}\small\textcolor{accentblue}{\rule{\linewidth}{1.5pt}}\\ 자식은 표를 새로 시작한다. bucket 안 상쇄 $G_B$가 0이 된다
+\end{columns}
+\note{한 bucket 안의 bucket 이력들이 공유하는 라벨이 없으면 라벨별로 자식 bucket을 만든다. 같은 bucket 이력은 늘 같은 자식으로 간다. 인증식의 bucket 안 상쇄 항이 0이 된다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 6. H4
+\begin{frame}{정방향 분할만으로는 멈출 수 있다 (명제 H4)}
+\begin{columns}[T,onlytextwidth]
+\column{0.5\textwidth}
+\small
+\begin{enumerate}
+\item 카드 H 또는 L을 받는다 (각 $\tfrac12$).
+\item \textbf{결정 1:} bucket $B_1=\{H,L\}$. 둘 다 체크가 최선이라 라벨이 같고, 나뉘지 않는다.
+\item \textbf{결정 2} (체크 뒤 상대 베팅): 카드는 $B_1$에 합쳐졌으므로 H와 L의 bucket 이력이 같다.
+\end{enumerate}
+\column{0.46\textwidth}
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrl}
+\toprule
+결정 2 & 폴드의 후회 & 라벨\\
+\midrule
+카드 H & $-1.5$ & 콜\\
+카드 L & $+1.0$ & \textcolor{deeporange}{폴드}\\
+\midrule
+bucket 이력 (합) & $-0.5$ & 콜: 나뉘지 않음\\
+\bottomrule
+\end{tabular}
+\end{columns}
+\vspace{10pt}
+\begin{alertblock}{같은 bucket 이력 안의 상쇄}
+\small L은 폴드하고 싶지만 H와 상쇄되어 보이지 않는다. 그래서 $\mathrm{NashConv}=1$에서 영원히 멈춘다.
+Leduc에서도 정방향만 쓰면 $\Pc_0$에서 한 번도 나누지 못하고 exploitability 2.93에 머물렀다.
+\end{alertblock}
+\note{첫 결정에서 H와 L 모두 체크가 최선이라 B1이 나뉘지 않는다. 둘째 결정에서는 카드가 이미 B1에 합쳐져 H와 L이 같은 bucket 이력을 가지므로, L의 폴드 선호가 H와 상쇄되어 보이지 않는다. 이 반례의 추상화는 트리 구조, 즉 완전 기억이다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 7. 역방향
+\begin{frame}{역방향 분할: 정보가 합쳐진 지점을 나눈다}
+\begin{columns}[T,onlytextwidth]
+\column{0.42\textwidth}
+\centering
+\begin{tikzpicture}[font=\small]
+\node[orangebox,text width=5cm,align=center] (a) {결정 1의 $B_1=\{H,L\}$을 나눈다};
+\node[box,text width=2.2cm,align=center,below left=0.7cm and -2.45cm of a] (h) {$B_1^{H}$};
+\node[box,text width=2.2cm,align=center,below right=0.7cm and -2.45cm of a] (l) {$B_1^{L}$};
+\node[bluebox,text width=5cm,below=2.05cm of a] (b) {결정 2의 bucket 이력이 갈라진다\\[2pt]
+  {\footnotesize $(B_1^{H},\text{체크},\text{상대 베팅})\to$ 콜}\\
+  {\footnotesize $(B_1^{L},\text{체크},\text{상대 베팅})\to$ 폴드}};
+\draw[arr] (a) -- (h); \draw[arr] (a) -- (l);
+\draw[arr] (h) -- (h|-b.north); \draw[arr] (l) -- (l|-b.north);
+\end{tikzpicture}
+\column{0.54\textwidth}
+\small
+\begin{enumerate}
+\item \textbf{진단} · 같은 bucket 이력 안 정보집합들의 라벨에 공통 원소가 없다 ($H_K>0$).
+\item \textbf{합쳐진 지점} · 두 정보집합의 과거를 거슬러 올라가 bucket 이력이 처음 같아지는 결정 (보조정리 H3).
+\item \textbf{분할} · 그 결정의 bucket을 아래에서 필요한 라벨별로 나눈다. 뒤 결정의 bucket 이력이 따라 갈라진다.
+\end{enumerate}
+\vspace{4pt}
+{\footnotesize\color{muted} 7-stud는 정보집합이 반복되지 않아 직전 결정의 bucket 이력(세부 이력)으로 묶어 진단한다. 두 세부 이력이 서로 자기 라벨을 유의하게 선호할 때만 나눈다 (교차 검정).}
+\end{columns}
+\note{같은 bucket 이력 안에서 정보집합끼리 원하는 행동이 다르면, 두 정보집합의 과거를 거슬러 올라가 bucket 이력이 처음 같아진 결정을 찾고 그 bucket을 나눈다. bucket 이력에 직전 bucket이 들어 있기 때문에 이 지점을 찾을 수 있다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 8. 인증식
+\section{이론}
+\begin{frame}{인증식 (정리 H1)}
+\[
+\mathrm{NashConv}(\sigma)\;\le\;
+\underbrace{\rho_{\Pc}(\sigma)}_{\text{bucket 후회}}
+\;+\;\underbrace{\textstyle\sum_B G_B}_{\text{bucket 안 상쇄}}
+\;+\;\underbrace{\textstyle\sum_K H_K}_{\text{이력 안 상쇄}}
+\]
+\vspace{2pt}
+\begin{columns}[T,onlytextwidth]
+\column{0.31\textwidth}
+\textbf{$\rho_{\Pc}$}\\
+{\small bucket별 후회의 합}\\
+{\small\color{muted} 학습기가 줄인다}
+\column{0.31\textwidth}
+\textbf{\textcolor{deepblue}{$\sum_B G_B$}}\\
+{\small 한 bucket 안에서 서로 다른 bucket 이력끼리 상쇄된 후회}\\
+{\small\color{muted} 정방향 분할이 0으로}
+\column{0.31\textwidth}
+\textbf{\textcolor{deeporange}{$\sum_K H_K$}}\\
+{\small 같은 bucket 이력 안에서 정보집합끼리 상쇄된 후회}\\
+{\small\color{muted} 역방향 분할이 0으로}
+\end{columns}
+\vspace{10pt}
+\begin{exampleblock}{정리 H5}
+\small 정지 상태($G=0$, $H=0$)에서 학습기가 $\rho_{\Pc}\le\varepsilon$인 전략을 주면, 원 게임에서 $\mathrm{NashConv}\le\varepsilon$이다.
+\end{exampleblock}
+\note{원 게임의 NashConv는 정보집합별 후회의 합으로 위에서 막히고, 그 합은 bucket 후회, bucket 안 상쇄, 이력 안 상쇄로 정확히 나뉜다. 세 항을 각각 학습기, 정방향 분할, 역방향 분할이 맡는다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 9. 이론 결과
+\begin{frame}{이론 결과 한눈에 보기}
+\footnotesize
+\setlength{\tabcolsep}{4pt}\begin{tabular}{p{2.9cm}p{7.9cm}p{2.3cm}}
+\toprule
+결과 & 내용 & 상태\\
+\midrule
+정리 H1 · 인증 & $\mathrm{NashConv}\le\rho_{\Pc}+\sum_B G_B+\sum_K H_K$, 어떤 lifting된 전략에도 성립 & \textcolor{deepblue}{증명}\\
+정리 H2 · 종료 & 분할은 많아야 $N-\lvert\Pc_0\rvert$번. 라벨을 추정해도 같다 & \textcolor{deepblue}{증명}\\
+명제 H4 · 반례 & 정방향 분할만으로는 $\mathrm{NashConv}=1$에서 멈추는 게임이 있다 & \textcolor{deepblue}{증명, 수치 확인}\\
+정리 H5 · 역방향 분할 & 학습기가 $\rho_{\Pc}\le\varepsilon$를 주면 $\mathrm{NashConv}\le\varepsilon$로 멈춘다 & \textcolor{deeporange}{조건부, 수치 확인}\\
+정리 H6 · 표본 판정 & 표본 라벨이면 좋은 사건 위에서 거짓 분할이 없고 인증에 $4\sum_K\eta_K$가 더해진다 & \textcolor{deepblue}{증명}\\
+보조정리 H7 · 트리 & 모든 bucket의 부모(직전 bucket, 행동)가 하나뿐 $\Leftrightarrow$ 추상화의 완전 기억 & \textcolor{deepblue}{증명, 수치 확인}\\
+\midrule
+학습기 조건 & CFR 평균은 자기가 가지 않는 곳의 후회 때문에 $\rho_{\Pc}\le\varepsilon$를 맞추지 못한다 & \textcolor{deeporange}{미해결}\\
+\bottomrule
+\end{tabular}
+
+\vspace{1pt}
+{\scriptsize\color{muted} $N$ = 정보집합 수. 수치 확인: 반례 게임, mini-stud, Kuhn·Leduc. 추상화 없는 Leduc에서도 CFR+ 평균의 $\rho/2$는 0.0855에서 멈췄다 (그때 exploitability 0.000067).}
+\note{인증식, 유한 종료, 반례, 표본 판정, 트리와 완전 기억의 동치는 증명되어 있다. 균형으로의 수렴은 학습기 조건 아래에서만 성립하는데, 표준 CFR 평균은 자기가 가지 않는 정보집합의 전략을 고치지 않아 이 조건을 맞추지 못한다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 10. 의사코드
+\begin{frame}{알고리즘 (라운드 형식)}
+\begin{columns}[T,onlytextwidth]
+\column{0.6\textwidth}
+\begin{beamercolorbox}[wd=\linewidth,sep=8pt,rounded=true]{block body}
+\small
+\begin{tabular}{@{}l@{}}
+$\Pc\leftarrow\Pc_0$ \\
+\textbf{repeat} \\
+\hspace*{1.4em}$\sigmabar\leftarrow\textsc{Learn}(\Pc)$ \quad{\color{muted}CFR+ / MCCFR+} \\
+\hspace*{1.4em}\textbf{for each} bucket 이력 $K$: \\
+\hspace*{2.8em}$\lambda(K)\leftarrow\arg\max_a r^{\sigmabar}(K,a)$ 또는 없음 \\
+\hspace*{1.4em}\textcolor{deepblue}{\textbf{정방향}}: 이력들이 공통 라벨을 갖지 않는 bucket을 \\
+\hspace*{2.8em}라벨별로 나눈다 \\
+\hspace*{1.4em}\textcolor{deeporange}{\textbf{역방향}}: 멤버의 라벨이 갈리는 $K$마다 \\
+\hspace*{2.8em}정보가 합쳐진 지점의 bucket을 나눈다 \\
+\textbf{until} 아무것도 나뉘지 않음 \\
+\textbf{return} $\sigmabar$
+\end{tabular}
+\end{beamercolorbox}
+\column{0.36\textwidth}
+\small
+\textbf{$\Pc_0$}\\ {\footnotesize\color{muted} (플레이어, 행동집합, 자기 결정 순번)이 같은 정보집합을 하나로}
+\smallskip
+
+\textbf{\textsc{Learn}}\\ {\footnotesize\color{muted} 이론: $\rho_{\Pc}\le\varepsilon$를 만드는 학습기로 가정. 실험: 문턱 없이 epoch(두 배 간격)마다 판정}
+\smallskip
+
+\textbf{라벨}\\ {\footnotesize\color{muted} 분할 시점 평균 전략 $\sigmabar$의 순간 반사실 후회}
+\smallskip
+
+\textbf{정지 상태}\\ {\footnotesize\color{muted} 아무것도 나뉘지 않은 판정, 즉 $G=0$이고 $H=0$}
+\end{columns}
+\note{논문의 기본 알고리즘으로 증명할 형태다. 분할은 정보집합을 옮기지 않고 bucket만 쪼개므로 분할 횟수는 유한하다. 실험에서는 판정 문턱 없이 epoch마다 판정했다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 11. mini-stud
+\section{실험}
+\begin{frame}{mini-stud: 역방향 분할이 손실을 되찾았다}
+{\footnotesize\color{muted} 정보집합 51,114개 · 4,096만 반복 · seed 3개 평균 · 평균 정책의 exploitability (정확한 값, 낮을수록 좋음)}
+
+\centering
+\begin{tikzpicture}
+\begin{axis}[xbar,width=11.6cm,height=4.6cm,xmin=0,xmax=0.43,ymin=0.4,ymax=4.6,
+  ytick={1,2,3,4},yticklabels={k-means 고정 추상화,{bucket 이력, 정방향만},{\textbf{ASWISS (이력 + 역방향)}},{정보집합 단위 (비교용)}},
+  y tick label style={font=\small,align=right},axis x line=none,axis y line*=left,axis line style={muted},
+  bar width=0.48cm,nodes near coords,nodes near coords align={horizontal},
+  every node near coord/.append style={font=\small,/pgf/number format/fixed,/pgf/number format/fixed zerofill,/pgf/number format/precision=4}]
+\addplot[fill=muted,draw=none,bar shift=0pt] coordinates {(0.3476,1)};
+\addplot[fill=accentorange,draw=none,bar shift=0pt] coordinates {(0.0929,2)};
+\addplot[fill=accentblue,draw=none,bar shift=0pt] coordinates {(0.0277,3)};
+\addplot[fill=kmgray!70,draw=none,bar shift=0pt] coordinates {(0.0211,4)};
+\end{axis}
+\end{tikzpicture}
+
+\raggedright
+\begin{columns}[T,onlytextwidth]
+\column{0.48\textwidth}
+\begin{exampleblock}{3.4배 낮아짐}
+\footnotesize bucket 이력 단위에서 역방향 분할을 더하자 0.0929 $\to$ 0.0277
+\end{exampleblock}
+\column{0.48\textwidth}
+\begin{exampleblock}{정지 상태 도달}
+\footnotesize $\varepsilon=0.2$ 문턱 비교군: 2,900만–3,050만 반복에 $G=0$, $H=0$. 실제 0.034–0.038 $\le$ 인증 0.19–0.20
+\end{exampleblock}
+\end{columns}
+\vspace{3pt}
+{\scriptsize\color{muted} 정보집합 단위 라벨이 조금 더 낮지만, 큰 게임에서는 정보집합이 반복되지 않아 쓸 수 없다.}
+\note{mini-stud는 정보집합을 모두 열거할 수 있어 정확한 exploitability를 잴 수 있다. bucket 이력 단위에서 역방향 분할을 더하자 3.4배 낮아졌다. 정보집합 단위 라벨이 0.0211로 조금 더 좋지만 큰 게임에서는 쓸 수 없다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 12. Leduc
+\begin{frame}{Leduc: 무작위 추상화에서 시작해도 균형으로 갔다}
+\begin{columns}[T,onlytextwidth]
+\column{0.6\textwidth}
+\begin{tikzpicture}
+\begin{axis}[slideplot,xmode=log,ymode=log,width=8.2cm,height=6.2cm,ymin=3e-5,ymax=6,
+  xlabel={CFR+ 반복 수},ylabel={평균 정책 exploitability (chip)},
+  legend to name=leducleg,legend columns=1]
+\addplot[name path=kmmax,draw=none,forget plot] table[x=iters,y=kmmax]{data/leduc_conv.dat};
+\addplot[name path=kmmin,draw=none,forget plot] table[x=iters,y=kmmin]{data/leduc_conv.dat};
+\addplot[kmgray,fill opacity=0.18,forget plot] fill between[of=kmmax and kmmin];
+\addplot[name path=amax,draw=none,forget plot] table[x=iters,y=aswissmax]{data/leduc_conv.dat};
+\addplot[name path=amin,draw=none,forget plot] table[x=iters,y=aswissmin]{data/leduc_conv.dat};
+\addplot[accentblue,fill opacity=0.2,forget plot] fill between[of=amax and amin];
+\addplot[ink,very thick] table[x=iters,y=ref]{data/leduc_conv.dat};
+\addlegendentry{추상화 없는 CFR+}
+\addplot[accentblue,very thick] table[x=iters,y=aswiss]{data/leduc_conv.dat};
+\addlegendentry{ASWISS, 무작위 출발 20개 (중앙값)}
+\addplot[accentblue,very thick,densely dotted] table[x=iters,y=p0]{data/leduc_conv.dat};
+\addlegendentry{ASWISS, 가장 거친 $\Pc_0$에서}
+\addplot[kmgray,very thick,dashed] table[x=iters,y=km]{data/leduc_conv.dat};
+\addlegendentry{같은 bucket 수의 k-means}
+\addplot[accentorange,very thick] table[x=iters,y=fwdtree]{data/leduc_conv.dat};
+\addlegendentry{정방향만 + 트리 유지, $\Pc_0$에서}
+\end{axis}
+\end{tikzpicture}
+
+{\scriptsize\color{muted} 띠: 무작위 출발 20개의 최소–최대. 정확한 CFR+, 정보집합 288개.}
+\column{0.37\textwidth}
+\ref{leducleg}
+\medskip
+
+{\large\textbf{\textcolor{deepblue}{21 / 21}}}\\
+{\footnotesize\color{muted} $\Pc_0$와 무작위 출발 모두 정지 상태}
+\smallskip
+
+{\large\textbf{\textcolor{deepblue}{0.000067}}}\\
+{\footnotesize\color{muted} 65.5만 반복 뒤 = 추상화 없는 CFR+}
+\smallskip
+
+{\large\textbf{\textcolor{deepblue}{203–270}}}\\
+{\footnotesize\color{muted} 최종 bucket (288개 중) · 같은 수의 k-means 0.14–0.88}
+\end{columns}
+\note{Leduc 홀덤에서 정확한 CFR+로 돌렸다. 역방향 분할이 있는 ASWISS는 가장 거친 분할과 무작위 출발 20개 모두 정지 상태에 도달했고, 최종 exploitability는 추상화 없는 CFR+와 같았다. 같은 bucket 수의 k-means보다 세 자릿수 이상 낮다. Kuhn에서도 모두 수렴했다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 13. 트리 가설
+\begin{frame}{트리 구조는 학습기를 돕고, 분할은 역방향이 끝낸다}
+\begin{columns}[T,onlytextwidth]
+\column{0.62\textwidth}
+\begin{tikzpicture}
+\begin{axis}[slideplot,xmode=log,ymode=log,width=8.4cm,height=5.8cm,ymin=2e-6,ymax=2,
+  xlabel={CFR+ 반복 수},ylabel={$D/2$ (chip)},
+  legend style={at={(0.02,0.02)},anchor=south west}]
+\addplot[name path=fmax,draw=none,forget plot] table[x=iters,y=freemax]{data/leduc_gain.dat};
+\addplot[name path=fmin,draw=none,forget plot] table[x=iters,y=freemin]{data/leduc_gain.dat};
+\addplot[accentorange,fill opacity=0.2,forget plot] fill between[of=fmax and fmin];
+\addplot[name path=tmax,draw=none,forget plot] table[x=iters,y=treemax]{data/leduc_gain.dat};
+\addplot[name path=tmin,draw=none,forget plot] table[x=iters,y=treemin]{data/leduc_gain.dat};
+\addplot[accentblue,fill opacity=0.2,forget plot] fill between[of=tmax and tmin];
+\addplot[ink,very thick] table[x=iters,y=ref]{data/leduc_gain.dat};
+\addlegendentry{추상화 없음}
+\addplot[accentblue,very thick] table[x=iters,y=tree]{data/leduc_gain.dat};
+\addlegendentry{트리: 부모 bucket 하나 (완전 기억)}
+\addplot[accentorange,very thick] table[x=iters,y=free]{data/leduc_gain.dat};
+\addlegendentry{자유: 과거를 무작위로 섞음}
+\end{axis}
+\end{tikzpicture}
+
+{\scriptsize\color{muted} Leduc, 고정 추상화 96 bucket, seed 10개. $D$: bucket 하나만 바꿔 얻는 이득의 합 (0이면 추상 게임을 푼 것).}
+\column{0.34\textwidth}
+\small
+\begin{tabular}{lrr}
+\toprule
+65.5만 반복 & 트리 & 자유\\
+\midrule
+$D/2$ & \textcolor{deepblue}{0.00008} & \textcolor{deeporange}{0.26}\\
+exploitability & 1.81 & 1.74\\
+\bottomrule
+\end{tabular}
+\medskip
+
+\begin{alertblock}{분할의 수렴은 별개}
+\footnotesize 트리라고 원 게임 성능이 좋아지지는 않았다. 정방향만 쓰고 트리를 지키면 $\Pc_0$에서 멈췄고 (2.93), 역방향 분할이 있으면 트리 여부와 상관없이 21/21이 수렴했다.
+\end{alertblock}
+\end{columns}
+\note{각 bucket이 직전 bucket 하나만 부모로 갖는 트리 구조는 추상화의 완전 기억과 같다(보조정리 H7). 이때 CFR+는 추상 게임을 풀지만, 과거를 무작위로 섞으면 0.2 근처에서 멈춘다. 분할 과정의 수렴은 별개로, 명제 H4의 반례도 트리 추상화다. 직전 bucket의 역할은 정보가 합쳐진 지점을 찾게 해 주는 데 있다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 14. 7-stud
+\begin{frame}{7-stud: bucket 이력은 고정 추상화를 넘었다}
+\begin{columns}[T,onlytextwidth]
+\column{0.49\textwidth}
+\textbf{\textcolor{deepblue}{100M roots · 노트북 실행}}\\[3pt]
+\scriptsize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrr}
+\toprule
+비교군 & bucket & 평균 정책 LBR\\
+\midrule
+bucket 이력 + 방법 B & 861,446 & \textcolor{deepblue}{$1.060\pm0.143$}\\
+bucket 이력 + 구간 라벨 & 1,274,437 & \textcolor{deepblue}{$1.023\pm0.140$}\\
+k-means 1024 & 145,410 & $1.282\pm0.130$\\
+k-means 256 & 37,249 & $1.603\pm0.156$\\
+\bottomrule
+\end{tabular}
+
+\vspace{5pt}
+방법 B $-$ k-means 1024 $=-0.22\ [-0.41,-0.04]$ (같은 deal로 짝지은 차이). 역방향 분할은 아직 없는 버전이다.
+\column{0.49\textwidth}
+\textbf{\textcolor{deeporange}{5.11M roots · ASWISS 완성형 시범}}\\[3pt]
+\scriptsize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lrr}
+\toprule
+비교군 & bucket & 평균 정책 LBR\\
+\midrule
+ASWISS (역방향 포함) & 56,949 & \textcolor{deepblue}{$1.575\pm0.146$}\\
+역방향 없음 (방법 B) & 31,645 & $1.805\pm0.156$\\
+k-means 1024 & 141,452 & $1.223\pm0.136$\\
+\bottomrule
+\end{tabular}
+
+\vspace{5pt}
+역방향 효과 $-0.23\pm0.21$. 이 학습량에서는 아직 k-means 1024보다 $+0.35\pm0.19$ 높다. 완성형의 100M은 아직 돌리지 않았다.
+\end{columns}
+\vfill
+{\scriptsize\color{muted} LBR: exploitability의 근사 하한 (PolicyLBR, 64 particles, 20,000 pair, 낮을수록 좋음). 헤즈업, 5구부터 학습, 4구 버림·공개는 휴리스틱, seed 1.}
+\note{실제 크기의 7-stud에서는 LBR로 비교한다. 1억 roots에서는 bucket 이력을 쓴 비교군이 모든 고정 k-means보다 유의하게 낮았지만 역방향 분할이 없는 버전이다. 완성형은 511만 roots 시범만 했고, 아직 k-means 1024보다 높다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 15. 문턱
+\begin{frame}{판정을 미루면 손해였다 (\texorpdfstring{$\varepsilon$}{epsilon} 문턱 실험)}
+{\footnotesize\color{muted} 7-stud 5.11M roots · 평균 정책 LBR, 20,000 pair (낮을수록 좋음) · 괄호: 마지막 bucket 수}
+
+\centering
+\begin{tikzpicture}
+\begin{axis}[xbar,width=11.8cm,height=5.4cm,xmin=0,xmax=4.75,ymin=0.4,ymax=6.6,
+  ytick={1,...,6},yticklabels={{k-means 1024 (141,452)},{$\rho\le1$ (343)},{$\rho\le3$ (956)},{$\rho\le10$ (5,210)},{반복 후회 $\le20$ (29,698)},{\textbf{문턱 없음 (56,949)}}},
+  y tick label style={font=\small,align=right},axis x line=none,axis y line*=left,axis line style={muted},
+  bar width=0.42cm,nodes near coords,nodes near coords align={horizontal},
+  every node near coord/.append style={font=\small,/pgf/number format/fixed,/pgf/number format/fixed zerofill,/pgf/number format/precision=3}]
+\addplot[fill=muted,draw=none,bar shift=0pt] coordinates {(1.223,1)};
+\addplot[fill=accentorange,draw=none,bar shift=0pt] coordinates {(4.030,2) (3.317,3) (2.479,4)};
+\addplot[fill=kmgray!70,draw=none,bar shift=0pt] coordinates {(1.862,5)};
+\addplot[fill=accentblue,draw=none,bar shift=0pt] coordinates {(1.575,6)};
+\end{axis}
+\end{tikzpicture}
+
+\raggedright\footnotesize
+\begin{columns}[T,onlytextwidth]
+\column{0.48\textwidth} \textcolor{accentorange}{\rule{\linewidth}{1.5pt}}\\ $\rho$가 작아도 좋은 정책이 아니다. $\varepsilon=1$은 bucket 36개, $\rho=0.86$에서 통과했지만 LBR은 7.5로 같은 시점 k-means의 7.6배였다.
+\column{0.48\textwidth} \textcolor{accentblue}{\rule{\linewidth}{1.5pt}}\\ 문턱은 언제 판정할지의 조건이지 성능 지표가 아니다. 증명에서는 학습기 조건으로 쓰고, 실험에서는 매 epoch 판정했다.
+\end{columns}
+\note{이론 버전은 학습기가 bucket 후회를 줄인 뒤에 판정한다. 7-stud에서 문턱을 걸어 보니, 기다리는 동안 bucket이 수십에서 수백 개에 묶여 LBR이 높게 남았다. 거친 추상화에서는 나머지 두 상쇄 항이 커서 정책이 좋아지지 않는다.}
+\end{frame}
+
+% ---------------------------------------------------------------- 16. 정리
+\section{정리}
+\begin{frame}{정리와 다음 단계}
+\begin{columns}[T,onlytextwidth]
+\column{0.47\textwidth}
+\textbf{\textcolor{deepblue}{확인된 것}}
+\small
+\begin{itemize}
+\item[\textcolor{deepblue}{\checkmark}] Kuhn·Leduc: $\Pc_0$와 무작위 출발 모두 정지 상태, 추상화 없는 CFR+와 같은 값
+\item[\textcolor{deepblue}{\checkmark}] mini-stud: 역방향 분할로 bucket 이력 단위 손실의 대부분을 회복
+\item[\textcolor{deepblue}{\checkmark}] 7-stud 100M: bucket 이력이 모든 고정 k-means보다 낮은 LBR
+\end{itemize}
+\column{0.47\textwidth}
+\textbf{\textcolor{deeporange}{남은 것}}
+\small
+\begin{itemize}
+\item 7-stud에서 역방향 분할을 넣은 ASWISS의 100M 실행
+\item 카드 휴리스틱(power 군집) 제거: 카드를 한 장씩 관측으로
+\item 학습기 조건을 경로 밖 후회 없이 다시 쓰기 (도달 가중 이득 $D$)
+\item 표본 학습기 MCCFR+의 수렴 보장
+\end{itemize}
+\end{columns}
+\note{작은 게임에서는 어떤 출발점에서도 균형으로 수렴했고, 큰 게임에서는 bucket 이력이 고정 추상화를 넘었다. 남은 것은 완성형을 큰 게임에서 길게 돌리는 것, 카드 휴리스틱을 없애는 것, 학습기 조건을 CFR이 실제로 만족하는 형태로 다시 쓰는 것이다.}
+\end{frame}
+
+\end{document}

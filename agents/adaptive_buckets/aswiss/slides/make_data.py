@@ -1,7 +1,7 @@
 """Data files for the pgfplots charts of aswiss_slides.tex, from the Kuhn/Leduc runs (small/run_small.sh output, or
 ../results_data/small_games_summaries.tar.gz extracted).
 
-Usage: python make_data.py OUT     writes data/leduc_conv.dat and data/leduc_gain.dat
+Usage: python make_data.py OUT     writes plotdata/leduc_conv.dat and plotdata/leduc_gain.dat
 leduc_conv.dat: average-policy exact exploitability per epoch end: unabstracted CFR+, ASWISS (forward + backward, no
 closure) from the 20 random starts (median, min, max), ASWISS from P0, forward-only + tree closure from P0, and the
 k-means baselines matched to the 20 ASWISS runs (median, min, max).
@@ -35,7 +35,7 @@ km, k0, k1, nk = many(K, r"aswiss_bwd_c0_(tree|free)_f0\.3_s\d+", "exploitabilit
 _, p0 = col(f"{R}/aswiss_bwd_c0_P0", "exploitability.csv", "expl_bucket_avg")
 _, fw = col(f"{R}/aswiss_fwd_c1_P0", "exploitability.csv", "expl_bucket_avg")
 assert na == nk == 20, (na, nk)
-with open(f"{HERE}/data/leduc_conv.dat", "w") as f:
+with open(f"{HERE}/plotdata/leduc_conv.dat", "w") as f:
     f.write("iters ref aswiss aswissmin aswissmax p0 fwdtree km kmmin kmmax\n")
     for row in zip(x, ref, am, a0, a1, p0, fw, km, k0, k1):
         f.write(" ".join(f"{v:.6g}" for v in row) + "\n")
@@ -43,7 +43,7 @@ x, ref = col(f"{R}/ref", "onpath.csv", "gain_half")
 tm, t0, t1, nt = many(R, r"fixed_tree_f0\.3_s\d+", "onpath.csv", "gain_half")
 fm, f0, f1, nf = many(R, r"fixed_free_f0\.3_s\d+", "onpath.csv", "gain_half")
 assert nt == nf == 10
-with open(f"{HERE}/data/leduc_gain.dat", "w") as f:
+with open(f"{HERE}/plotdata/leduc_gain.dat", "w") as f:
     f.write("iters ref tree treemin treemax free freemin freemax\n")
     for row in zip(x, ref, tm, t0, t1, fm, f0, f1):
         f.write(" ".join(f"{v:.6g}" for v in row) + "\n")

@@ -2,7 +2,7 @@
 
 - `aswiss_slides.tex`: Beamer(metropolis 테마) 원고, 16:9. 도식은 TikZ, 그래프는 pgfplots, 표는 booktabs로 그린다. 각 frame에 `\note{}`로 발표자 노트가 있다.
 - `aswiss_slides.pdf`: 컴파일한 결과(표지, 본문 16장, 절 구분 4장).
-- `data/`: Leduc 그래프 두 장의 데이터. `make_data.py`가 Kuhn·Leduc 실행 결과(`../small/run_small.sh`의 출력, 또는 `../results_data/small_games_summaries.tar.gz`를 푼 폴더)에서 만든다.
+- `plotdata/`: Leduc 그래프 두 장의 데이터. `make_data.py`가 Kuhn·Leduc 실행 결과(`../small/run_small.sh`의 출력, 또는 `../results_data/small_games_summaries.tar.gz`를 푼 폴더)에서 만든다.
 
 ## 빌드
 

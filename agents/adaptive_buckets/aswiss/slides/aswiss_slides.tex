@@ -394,21 +394,21 @@ $\Pc\leftarrow\Pc_0$ \\
 \begin{axis}[slideplot,xmode=log,ymode=log,width=8.2cm,height=6.2cm,ymin=3e-5,ymax=6,
   xlabel={CFR+ 반복 수},ylabel={평균 정책 exploitability (chip)},
   legend to name=leducleg,legend columns=1]
-\addplot[name path=kmmax,draw=none,forget plot] table[x=iters,y=kmmax]{data/leduc_conv.dat};
-\addplot[name path=kmmin,draw=none,forget plot] table[x=iters,y=kmmin]{data/leduc_conv.dat};
+\addplot[name path=kmmax,draw=none,forget plot] table[x=iters,y=kmmax]{plotdata/leduc_conv.dat};
+\addplot[name path=kmmin,draw=none,forget plot] table[x=iters,y=kmmin]{plotdata/leduc_conv.dat};
 \addplot[kmgray,fill opacity=0.18,forget plot] fill between[of=kmmax and kmmin];
-\addplot[name path=amax,draw=none,forget plot] table[x=iters,y=aswissmax]{data/leduc_conv.dat};
-\addplot[name path=amin,draw=none,forget plot] table[x=iters,y=aswissmin]{data/leduc_conv.dat};
+\addplot[name path=amax,draw=none,forget plot] table[x=iters,y=aswissmax]{plotdata/leduc_conv.dat};
+\addplot[name path=amin,draw=none,forget plot] table[x=iters,y=aswissmin]{plotdata/leduc_conv.dat};
 \addplot[accentblue,fill opacity=0.2,forget plot] fill between[of=amax and amin];
-\addplot[ink,very thick] table[x=iters,y=ref]{data/leduc_conv.dat};
+\addplot[ink,very thick] table[x=iters,y=ref]{plotdata/leduc_conv.dat};
 \addlegendentry{추상화 없는 CFR+}
-\addplot[accentblue,very thick] table[x=iters,y=aswiss]{data/leduc_conv.dat};
+\addplot[accentblue,very thick] table[x=iters,y=aswiss]{plotdata/leduc_conv.dat};
 \addlegendentry{ASWISS, 무작위 출발 20개 (중앙값)}
-\addplot[accentblue,very thick,densely dotted] table[x=iters,y=p0]{data/leduc_conv.dat};
+\addplot[accentblue,very thick,densely dotted] table[x=iters,y=p0]{plotdata/leduc_conv.dat};
 \addlegendentry{ASWISS, 가장 거친 $\Pc_0$에서}
-\addplot[kmgray,very thick,dashed] table[x=iters,y=km]{data/leduc_conv.dat};
+\addplot[kmgray,very thick,dashed] table[x=iters,y=km]{plotdata/leduc_conv.dat};
 \addlegendentry{같은 bucket 수의 k-means}
-\addplot[accentorange,very thick] table[x=iters,y=fwdtree]{data/leduc_conv.dat};
+\addplot[accentorange,very thick] table[x=iters,y=fwdtree]{plotdata/leduc_conv.dat};
 \addlegendentry{정방향만 + 트리 유지, $\Pc_0$에서}
 \end{axis}
 \end{tikzpicture}
@@ -440,17 +440,17 @@ $\Pc\leftarrow\Pc_0$ \\
 \begin{axis}[slideplot,xmode=log,ymode=log,width=8.4cm,height=5.8cm,ymin=2e-6,ymax=2,
   xlabel={CFR+ 반복 수},ylabel={$D/2$ (chip)},
   legend style={at={(0.02,0.02)},anchor=south west}]
-\addplot[name path=fmax,draw=none,forget plot] table[x=iters,y=freemax]{data/leduc_gain.dat};
-\addplot[name path=fmin,draw=none,forget plot] table[x=iters,y=freemin]{data/leduc_gain.dat};
+\addplot[name path=fmax,draw=none,forget plot] table[x=iters,y=freemax]{plotdata/leduc_gain.dat};
+\addplot[name path=fmin,draw=none,forget plot] table[x=iters,y=freemin]{plotdata/leduc_gain.dat};
 \addplot[accentorange,fill opacity=0.2,forget plot] fill between[of=fmax and fmin];
-\addplot[name path=tmax,draw=none,forget plot] table[x=iters,y=treemax]{data/leduc_gain.dat};
-\addplot[name path=tmin,draw=none,forget plot] table[x=iters,y=treemin]{data/leduc_gain.dat};
+\addplot[name path=tmax,draw=none,forget plot] table[x=iters,y=treemax]{plotdata/leduc_gain.dat};
+\addplot[name path=tmin,draw=none,forget plot] table[x=iters,y=treemin]{plotdata/leduc_gain.dat};
 \addplot[accentblue,fill opacity=0.2,forget plot] fill between[of=tmax and tmin];
-\addplot[ink,very thick] table[x=iters,y=ref]{data/leduc_gain.dat};
+\addplot[ink,very thick] table[x=iters,y=ref]{plotdata/leduc_gain.dat};
 \addlegendentry{추상화 없음}
-\addplot[accentblue,very thick] table[x=iters,y=tree]{data/leduc_gain.dat};
+\addplot[accentblue,very thick] table[x=iters,y=tree]{plotdata/leduc_gain.dat};
 \addlegendentry{트리: 부모 bucket 하나 (완전 기억)}
-\addplot[accentorange,very thick] table[x=iters,y=free]{data/leduc_gain.dat};
+\addplot[accentorange,very thick] table[x=iters,y=free]{plotdata/leduc_gain.dat};
 \addlegendentry{자유: 과거를 무작위로 섞음}
 \end{axis}
 \end{tikzpicture}

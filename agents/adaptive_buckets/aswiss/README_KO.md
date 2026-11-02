@@ -516,6 +516,16 @@ python agents/adaptive_buckets/aswiss/plot_backward.py RUNS_DIR REF_DIR results_
 - 원자료: `results_data/backward_small.tar.gz`(34개 실행의 `log.csv`, `judgments.csv`, `gate.csv`, `exploitability.csv`, `judgments_expl.csv`). 풀면 `runs_bw/`가 나오고, 위 명령으로 그림이 바이트 단위로 같게 다시 그려진다.
 - ε=0.2 비교군은 분할 직전 정책 파일이 판정마다 3.2MB씩 생긴다(실행 하나에 600–700번). `--delete`로 평가 후 지운다.
 
+## Kuhn·Leduc와 트리 닫기 (2026-11-02, 완료된 실험)
+
+자세한 설정, 표, 그림은 [`small/README_KO.md`](small/README_KO.md)에 있다. 정확한 전체 트리 CFR+로 65만 5,350반복을 돌렸다. 무작위 추상화는 시드 10개, 평가는 정확한 exploitability다.
+
+- **학습기:** 트리 추상화(모든 bucket이 부모 bucket·행동을 하나만 가짐, 즉 완전 기억)에서는 CFR+가 추상 게임을 풀었다. bucket 이탈 이득 D/2가 7e-05까지 줄었다. 같은 bucket 수의 무작위 불완전 기억 추상화에서는 0.2–0.26에서 멈췄다.
+- **분할 과정:** 역방향 분할이 있으면 Leduc의 P₀와 무작위 출발 20개가 모두 정지 상태에 도달했다. exploitability는 추상화 없는 CFR+와 같았다(6.7e-05–7.8e-05).
+  - 정방향만 쓰고 트리를 지키면 P₀에서 한 번도 분할하지 못하고 2.93에 머물렀다. 명제 H4가 Leduc에서 재현된 것이다.
+- **트리 닫기** (`--tree-closure 1`, 새 옵션)는 수렴을 바꾸지 않고 bucket을 288개 전부로 늘렸다. 닫기 없는 ASWISS는 203–270개에서 멈췄고, 같은 bucket 수의 k-means(0.14–0.88)보다 3–4 자릿수 낮았다.
+- **Kuhn:** 모든 경우 정보집합 12개를 모두 나누고 추상화 없는 CFR+와 같은 값으로 수렴했다.
+
 ## 비교 조건과 남은 차이
 
 - **평가:** 모든 방식은 같은 정확한 BR 평가기, 같은 seed, 같은 반복 수로 평가했다. LBR이나 Local BR-gap이 아니다.

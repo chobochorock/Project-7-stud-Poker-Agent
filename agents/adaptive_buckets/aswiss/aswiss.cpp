@@ -42,6 +42,11 @@
 //            E * sqrt(epoch0 / t) (sqrt_iters, t = iterations so far) or E / sqrt(1 + splitting judgments so far)
 //            (sqrt_rounds). Every check goes to gate.csv; a judgment that splits saves the policies it judged as
 //            policy_presplit_J_{avg,cur}.bin (eval_judgments.py evaluates them).
+// --tree-closure 1: keep the abstract game a tree. At the start and after every judgment, divide each bucket by the
+//            (bucket of its members' previous own decision, action taken there), parents first, so every bucket has
+//            one parent bucket and action; by induction its members then share their whole own past in buckets (the
+//            abstraction has perfect recall). Divided buckets keep the parent's tables. Needs prev.bin/prev_action.bin
+//            (export_history.py); every division is logged in closure.csv.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -381,6 +386,28 @@ Judgment judge_avg(vector<double> R, bool history, bool backward) {
     return j;
 }
 
+// --tree-closure: the coarsest refinement of the partition whose buckets each have one (parent bucket, action).
+// history_order lists earlier decisions first, so a parent's new bucket is known before its children's.
+int tree_close() {
+    map<tuple<int, int, int>, int> ids;
+    vector<int> next(nI), keep, pieces(B, 0);
+    for (int I : history_order) {
+        const int p = prev_info[I];
+        auto k = make_tuple(bucket[I], p >= 0 ? next[p] : -1, p >= 0 ? prev_action[I] : -1);
+        auto [it, fresh] = ids.emplace(k, (int)keep.size());
+        if (fresh) { keep.push_back(bucket[I]); ++pieces[bucket[I]]; }
+        next[I] = it->second;
+    }
+    int divided = 0;
+    for (int b = 0; b < B; ++b) divided += pieces[b] > 1;
+    const int B2 = (int)keep.size();
+    vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
+    for (int nb = 0; nb < B2; ++nb)
+        for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+    bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+    return divided;
+}
+
 int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
@@ -420,7 +447,8 @@ int main(int argc, char** argv) {
     if (backward && !(history_unit && label_rule == "avg" && split)) throw runtime_error("--backward 1 needs --unit history --label avg");
     if (gated && !(label_rule == "avg" && split)) throw runtime_error("--gate-eps needs --label avg --split cum");
     if (gate_decay != "none" && gate_decay != "sqrt_iters" && gate_decay != "sqrt_rounds") throw runtime_error("unknown --gate-decay");
-    if (history_unit) {
+    const bool closure = opt.count("--tree-closure") && opt["--tree-closure"] == "1";
+    if (history_unit || closure) {
         prev_info = load<int32_t>(dir + "/prev.bin"); prev_action = load<int32_t>(dir + "/prev_action.bin");
         inc_code = load<int32_t>(dir + "/inc.bin"); timestep_of = load<int32_t>(dir + "/bucket_timestep.bin");
         vector<int> depth(nI, 0);
@@ -431,6 +459,18 @@ int main(int argc, char** argv) {
     }
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+    FILE* closure_log = nullptr;
+    auto close_tree = [&](long long it) {
+        if (!closure) return;
+        const int before = B, divided = tree_close();
+        fprintf(closure_log, "%lld,%d,%d,%d\n", it, before, B, divided);
+        fflush(closure_log);
+    };
+    if (closure) {
+        closure_log = fopen((out + "/closure.csv").c_str(), "w");
+        fprintf(closure_log, "iters,buckets_before,buckets_after,divided\n");
+        close_tree(0);
+    }
     Strue.assign((size_t)nI * W, 0); ExW.assign((size_t)nI * W, 0); ExC.assign((size_t)nI * W, 0); Rw.assign((size_t)nI * W, 0); Sq.assign((size_t)nI * W, 0); mass.assign(nI, 0);
     if (label_rule == "replay") { Rp.assign((size_t)nI * W, 0); Rp2.assign((size_t)nI * W, 0); Rit.assign((size_t)nI * W, 0); }
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
@@ -514,6 +554,7 @@ int main(int argc, char** argv) {
                 save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
                 if (!gated) {
                     Judgment jd = judge_avg(Ravg, history_unit, backward);
+                    close_tree(t);
                     splits = jd.splits; units = jd.units;
                     write_judgment("epoch", t, -1.0, jd, Bprev, "bucket_" + to_string(k));
                 } else {  // splits happen only at gate checks; this row reports those since the previous row
@@ -646,6 +687,7 @@ int main(int argc, char** argv) {
                 const vector<double> gcur = current_policy();
                 const int Bb = B;
                 Judgment jd = judge_avg(gR, history_unit, backward);
+                close_tree(t);
                 string stem = "-";
                 if (jd.splits > 0) {  // the policies the judgment saw, for the pre-split evaluation
                     stem = "presplit_" + to_string(judgments);
@@ -660,4 +702,5 @@ int main(int argc, char** argv) {
     fclose(log);
     if (judgment_log) fclose(judgment_log);
     if (gate_log) fclose(gate_log);
+    if (closure_log) fclose(closure_log);
 }

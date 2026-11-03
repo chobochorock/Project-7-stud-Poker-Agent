@@ -658,6 +658,20 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
   --labels gate_e10_s1="eps 10" gate_e3_s1="eps 3" gate_e1_s1="eps 1" gate_e3z3_s1="eps 3, backward z=3" gate_it20_s1="iterate regret, eps 20" ASWISS_ungated="ASWISS, no gate"
 ```
 
+## 혼합 평균 (`--avg-fill plain`, 2026-11-03 추가, 100M 실행 대기)
+
+개념과 다른 게임의 결과는 [`../AVG_FILL_KO.md`](../AVG_FILL_KO.md)에 있다.
+- **7-stud 구현:** 평균 전략 순회(라벨, 문턱, 역방향 세부 이력에 쓰는 순회)에서 탐색자의 자기 도달확률을 경로를 따라 곱한다(평균 전략 기준). 10⁻⁴(`--avg-fill-reach`) 미만이 된 탐색자 노드에서는 그 bucket의 현재 전략 단순 평균으로 가치를 계산한다. 상대 노드는 평균 전략 그대로 표본을 뽑는다.
+  - 단순 평균은 학습 중 지연 누적으로 쌓는다. 후회가 바뀌기 직전에 그동안의 가중치 × 전략을 더하므로 추가 순회가 없다.
+  - 메모리는 bucket당 72바이트 늘어난다(100만 bucket이면 약 70MB).
+  - 스냅숏과 평가는 평균 전략 그대로다.
+- **기록:** `fill.csv` = `epoch,roots,buckets,traverser_nodes,filled_nodes`(그 epoch 평균 전략 순회의 탐색자 노드 수와 그중 단순 평균을 쓴 수).
+- **검증:**
+  - 옵션을 끄면 이전 학습기와 스냅숏, log, `backward.csv`가 같다(15만 roots).
+  - 옵션을 켜고 7만 roots에서 멈췄다가 재개한 실행이 끊지 않은 31만 roots 실행과 스냅숏, `fill.csv`, `backward.csv`가 같다. 단순 평균은 checkpoint에 저장된다.
+- **짧은 확인** (seed 1): 단순 평균으로 계산한 탐색자 노드 비율이 1만 roots 10%, 3만 28%, 7만 48%, 15만 31%, 31만 23%였다. 15만 roots의 bucket은 1,498개(옵션 없이 1,526개)다.
+- **100M 비교군:** `hist_bbf`(= `hist_bb` + `--avg-fill plain`). 효과를 보려면 `hist_bb`도 함께 돌린다. 둘 다 아직 100M을 돌리지 않았다.
+
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 
 **조건**
@@ -856,6 +870,7 @@ python plot_stud.py runs_h4 results_stud_h4_seed1 --baseline atom_k256_h4_s1 --r
   - 실행 예: `-Arms aswiss_b,aswiss_wb,aswiss,k341` (Linux: `ARMS="aswiss_b aswiss_wb aswiss k341"`).
   - 확인한 것: 기본 라벨 모드는 이전 학습기와 스냅숏이 바이트 단위로 같다. `window+avg` 모드도 중단 후 재개가 끊지 않은 실행과 바이트 단위로 같다. bash 스크립트로 두 비교군을 실제로 돌렸다.
 - **ASWISS 비교군 (2026-10-30 추가):** `hist_bb` = bucket 이력 + 방법 B + 역방향 분할(교차 검정)이다. 정의와 5.11M 파일럿 결과는 "ASWISS = bucket 이력 + 방법 B + 역방향 분할" 절에 있다. 메모리가 `hist_b`의 2–2.5배라 따로 돌리는 것을 권한다.
+- **혼합 평균 비교군 (2026-11-03 추가):** `hist_bbf` = `hist_bb` + `--avg-fill plain`이다. "혼합 평균" 절과 `../AVG_FILL_KO.md`에 설명이 있다. 메모리는 `hist_bb`와 거의 같다(bucket당 72바이트 추가). `hist_bb`와 함께 돌리면 두 배가 필요하므로(100M에 합계 10–16 GB로 추정), RAM이 부족하면 하나씩 돌린다.
 - **bucket 이력 비교군 (2026-10-29 추가):** `hist`(구간 라벨), `hist_b`(방법 B 라벨), `hist_every`(카드를 모든 결정에)다. bucket 이력의 정의는 "bucket 이력" 절에 있다.
   - **라벨 표본 상한 2.56M roots(`--label-cap 2560000`):** bucket 이력은 원자와 달리 개수가 포화하지 않는다(epoch마다 약 1.8배). 그래서 epoch의 라벨 계산에 쓰는 roots를 2.56M으로 묶었다.
     - 구간 라벨은 epoch의 마지막 2.56M roots만 센다. 방법 B의 평균 전략 순회는 최대 2.56M roots다.

@@ -528,6 +528,8 @@ python agents/adaptive_buckets/aswiss/plot_backward.py RUNS_DIR REF_DIR results_
 
 ## 혼합 평균(`--avg-fill`)과 ε/√s 판정 문턱 (2026-11-03, 완료된 실험)
 
+짧은 설명은 [`AVG_FILL_KO.md`](AVG_FILL_KO.md)에 있다. 7-stud 학습기의 같은 옵션은 `stud7/README_KO.md`의 "혼합 평균" 절에 있다.
+
 ### 구조: 라벨이 평균 전략의 어디를 읽는가
 
 학습기는 bucket마다 표 두 개를 둔다.

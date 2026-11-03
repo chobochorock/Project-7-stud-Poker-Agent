@@ -7,6 +7,7 @@
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
 //                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
 //                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0] [--gate-stat avg|iter]
+//                            [--avg-fill none|plain] [--avg-fill-reach 1e-4]
 //                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000] [--rho-roots 0]
@@ -52,6 +53,12 @@
 //            halves), is at most E; otherwise the epoch ends without a split. gate.csv logs every check.
 //            --gate-stat iter gates instead on the training iterates' regret since the last judgment, sum_B max(0,
 //            max_a R_B(a)) / roots / 2 from the sampled regrets MCCFR adds (no extra pass); both are logged.
+// --avg-fill plain (history keys, --label avg): CFR's average adds weight x own reach x strategy, so where the average
+//            policy stopped going it stays at early iterations. The average-policy pass (labels, gate, backward sub-keys)
+//            then uses, at the traverser's nodes whose own reach under the average policy along the path is below
+//            --avg-fill-reach (1e-4), the plain average of that bucket's current strategies (linear in t, not weighted
+//            by reach), kept lazily without an extra pass. The policy itself (snapshots, evaluation) is unchanged: those
+//            nodes carry no realization weight. fill.csv logs the pass's traverser nodes and how many were filled.
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -518,6 +525,19 @@ public:
     // Regret sums of the training iterates since the last judgment, per bucket, before the RM+ clipping (the sampled
     // counterfactual regrets MCCFR adds; unbiased for the iterates' regret). Kept only for --gate-eps, and checkpointed.
     void track_iterate_regret(bool on) { track_rwin_ = on; }
+    // --avg-fill plain: plain sums of each bucket's current strategies (see the header)
+    void enable_avg_fill(double reach) {
+        avg_fill_ = true; fill_reach_ = reach;
+        plain_.assign(buckets_.size(), {}); plain_last_.assign(buckets_.size(), plain_clock_);
+    }
+    void plain_tick(double w) { if (avg_fill_) plain_clock_ += w; }
+    void plain_flush_all() { if (avg_fill_) for (uint32_t b = 0; b < plain_.size(); ++b) plain_flush(b); }
+    bool fills(double own, uint32_t b) const { return avg_fill_ && b != kNone && own < fill_reach_; }
+    std::array<double, A> plain_policy(uint32_t b, uint8_t mask) const { return normalized(plain_[b], mask); }
+    void note_avg_node(bool filled) const { ++avg_nodes_; if (filled) ++filled_nodes_; }
+    std::pair<uint64_t, uint64_t> take_fill_counts() {
+        const auto r = std::make_pair(avg_nodes_, filled_nodes_); avg_nodes_ = filled_nodes_ = 0; return r;
+    }
     void count_root() { if (track_rwin_) ++rwin_roots_; }
     // sum_B max(0, max_a R_B(a)) / roots / 2 over the window (ante per root), then the window restarts if `reset`
     double iterate_regret_half(bool reset) {
@@ -876,6 +896,7 @@ public:
                 auto child = [&] {
                     const uint32_t nb = new_bucket(b);
                     buckets_[nb].q = buckets_[b].q; buckets_[nb].s = buckets_[b].s;
+                    if (avg_fill_) { plain_[nb] = plain_[b]; plain_last_[nb] = plain_last_[b]; }
                     return nb;
                 };
                 for (const auto& [sig, keys] : sigs) {
@@ -898,6 +919,7 @@ public:
         if (track_rwin_ && rwin_.size() < buckets_.size()) rwin_.resize(buckets_.size());
         for (uint32_t b : touched_) {
             Bucket& bucket = buckets_[b];
+            if (avg_fill_) plain_flush(b);  // the strategy that held since its last change, before it changes
             if (track_rwin_) for (int a = 0; a < A; ++a) rwin_[b][a] += bucket.pending[a];
             for (int a = 0; a < A; ++a) { bucket.q[a] = std::max(0.0, bucket.q[a] + bucket.pending[a]); bucket.pending[a] = 0; }
             bucket.dirty = false;
@@ -1017,6 +1039,10 @@ public:
                 put(out, rwin_roots_); put(out, static_cast<uint64_t>(rwin_.size()));
                 for (const auto& r : rwin_) put(out, r);
             }
+            if (avg_fill_) {
+                put(out, plain_clock_); put(out, static_cast<uint64_t>(plain_.size()));
+                for (size_t b = 0; b < plain_.size(); ++b) { put(out, plain_[b]); put(out, plain_last_[b]); }
+            }
             return;
         }
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
@@ -1050,6 +1076,11 @@ public:
                 uint64_t m; get(in, rwin_roots_); get(in, m);
                 rwin_.assign(m, {});
                 for (auto& r : rwin_) get(in, r);
+            }
+            if (avg_fill_) {
+                uint64_t m; get(in, plain_clock_); get(in, m);
+                plain_.assign(m, {}); plain_last_.assign(m, 0.0);
+                for (size_t b = 0; b < m; ++b) { get(in, plain_[b]); get(in, plain_last_[b]); }
             }
             touched_.clear();
             return;
@@ -1198,6 +1229,7 @@ private:
     }
     uint32_t new_bucket(uint32_t parent = kNone) {
         buckets_.emplace_back();
+        if (avg_fill_) { plain_.emplace_back(); plain_last_.push_back(plain_clock_); }
         if (partition_ == Partition::History) parent_.push_back(parent);
         return static_cast<uint32_t>(buckets_.size() - 1);
     }
@@ -1249,6 +1281,18 @@ private:
     std::unordered_map<uint16_t, HContext> hctx_;
     std::vector<uint32_t> parent_;  // bucket -> the bucket it was split from (kNone: a context's first bucket)
     bool track_rwin_ = false;
+    bool avg_fill_ = false;
+    double fill_reach_ = 1e-4, plain_clock_ = 0;
+    std::vector<std::array<double, A>> plain_;
+    std::vector<double> plain_last_;
+    mutable uint64_t avg_nodes_ = 0, filled_nodes_ = 0;
+    void plain_flush(uint32_t b) {
+        const double dw = plain_clock_ - plain_last_[b];
+        if (dw <= 0) return;
+        const auto sigma = rm_plus(buckets_[b].q, static_cast<uint8_t>((1u << A) - 1));  // unused actions keep q = 0
+        for (int a = 0; a < A; ++a) plain_[b][a] += dw * sigma[a];
+        plain_last_[b] = plain_clock_;
+    }
     std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
     uint64_t rwin_roots_ = 0;
     HMap hatoms_;
@@ -1368,21 +1412,26 @@ std::pair<double, double> rho_estimates(const BucketHalves& halves, uint64_t n) 
 }
 double avg_traverse_h(const Model& model, State state, Trail trail, int traverser, std::mt19937_64& rng, HMap* stats,
                       SubMap* sub = nullptr, const HSet* only = nullptr, BucketHalves* halves = nullptr, int half = 0,
-                      std::array<HFull, 2> pk = {}) {
+                      std::array<HFull, 2> pk = {}, double own = 1.0) {
     if (state.terminal) return terminal_net_search(state, traverser);
     const int actor = state.actor;
     const uint8_t mask = valid_mask(state, actor);
     const HFull key = model.hkey(state, actor, trail);
     const uint32_t b = model.hlookup(key), seen = b == kNone ? kUnseen : b;
-    const auto sigma = model.bucket_policy(b, mask, true);
+    const auto avg = model.bucket_policy(b, mask, true);
     const HFull prev_key = pk[actor];
     if (sub) pk[actor] = key;
     if (actor != traverser) {
-        const Action a = sample_action(sigma, mask, rng);
+        const Action a = sample_action(avg, mask, rng);
         trail_step(trail, state, actor, a, seen);
         step(state, actor, a);
-        return avg_traverse_h(model, std::move(state), trail, traverser, rng, stats, sub, only, halves, half, pk);
+        return avg_traverse_h(model, std::move(state), trail, traverser, rng, stats, sub, only, halves, half, pk, own);
     }
+    // own: the traverser's own reach of this node under the average policy (--avg-fill: below the threshold, its
+    // average stayed at early iterations, so the bucket's plain average of current strategies values this node)
+    const bool filled = model.fills(own, b);
+    model.note_avg_node(filled);
+    const auto sigma = filled ? model.plain_policy(b, mask) : avg;
     std::array<double, A> v{};
     double node = 0;
     for (int a = 0; a < A; ++a) {
@@ -1391,7 +1440,7 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         Trail child_trail = trail;
         trail_step(child_trail, state, actor, static_cast<Action>(a), seen);
         step(child, actor, static_cast<Action>(a));
-        v[a] = avg_traverse_h(model, std::move(child), child_trail, traverser, rng, stats, sub, only, halves, half, pk);
+        v[a] = avg_traverse_h(model, std::move(child), child_trail, traverser, rng, stats, sub, only, halves, half, pk, own * avg[a]);
         node += sigma[a] * v[a];
     }
     AtomStats* st = stats ? &(*stats)[key] : nullptr;
@@ -1512,7 +1561,8 @@ int train(int argc, char** argv) {
                                 {"--avg-frac", "0.25"}, {"--history-cards", "street"}, {"--label-cap", "0"},
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
                                 {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
-                                {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"}});
+                                {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
+                                {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1543,9 +1593,14 @@ int train(int argc, char** argv) {
     const bool gate_iter = o["--gate-stat"] == "iter";
     if (gated && (partition != Partition::History || label_rule != "avg"))
         throw std::runtime_error("--gate-eps needs --partition history --label avg");
+    if (o["--avg-fill"] != "none" && o["--avg-fill"] != "plain") throw std::runtime_error("--avg-fill must be none or plain");
+    const bool avg_fill = o["--avg-fill"] == "plain";
+    if (avg_fill && (partition != Partition::History || label_rule != "avg"))
+        throw std::runtime_error("--avg-fill plain needs --partition history --label avg");
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
     model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0);
+    if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
     std::filesystem::create_directories(out);
@@ -1564,12 +1619,13 @@ int train(int argc, char** argv) {
         << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
                           o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] +
                           (o["--backward-z"].empty() ? "" : ";backward_z=" + o["--backward-z"]) : "")
-        << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "");
+        << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "")
+        << (avg_fill ? ";avg_fill=plain;avg_fill_reach=" + o["--avg-fill-reach"] : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
-    const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv";
+    const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
     LoopState s;
     s.L = epoch0;
     const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model) ||
@@ -1580,7 +1636,7 @@ int train(int argc, char** argv) {
         std::filesystem::resize_file(log_path, s.log_bytes);
         std::filesystem::resize_file(index_path, s.index_bytes);
         std::filesystem::resize_file(curve_path, s.curve_bytes);
-        for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}}) {
+        for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}, std::pair{avg_fill, fill_path}}) {
             if (!on) continue;  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
             std::ifstream in(path);
             std::string line, kept;
@@ -1599,6 +1655,7 @@ int train(int argc, char** argv) {
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
         std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
         if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,iterate_regret_half,eps,judged\n";
+        if (avg_fill) std::ofstream(fill_path) << "epoch,roots,buckets,traverser_nodes,filled_nodes\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
@@ -1632,7 +1689,11 @@ int train(int argc, char** argv) {
         // history keys with --label avg: no window at all (it would only feed the L/C diagnostic and doubles the memory)
         const bool in_window = track && (!label_cap || epoch_end - s.t < label_cap) &&
                                !(partition == Partition::History && label_rule == "avg");
-        for (int p = 0; p < 2; ++p) { model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window); model.apply_regrets(); }
+        for (int p = 0; p < 2; ++p) {
+            model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window);
+            model.plain_tick(0.5 * static_cast<double>(s.t));
+            model.apply_regrets();
+        }
         model.count_root();
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root
         s.curve_sum += gap; s.curve_sq += gap * gap; ++s.curve_roots;
@@ -1664,6 +1725,8 @@ int train(int argc, char** argv) {
                 std::mt19937_64 eval_rng(eval_seed);
                 uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
                 if (label_cap) n = std::min(n, label_cap);
+                model.plain_flush_all();
+                model.take_fill_counts();
                 for (uint64_t i = 0; i < n; ++i) {
                     auto eval_deck = fresh_deck();
                     std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
@@ -1675,6 +1738,11 @@ int train(int argc, char** argv) {
                 // eps. rho_P = sum_B max(0, max_a r(B, a)) estimated from this pass: the plain estimate is biased upward
                 // by the noise of tens of thousands of bucket sums, so the gate uses the cross-fitted one (each bucket's
                 // best action chosen on one half of the roots, its regret measured on the other half, both ways).
+                if (avg_fill) {
+                    const auto [nodes, filled] = model.take_fill_counts();
+                    std::ofstream(fill_path, std::ios::app) << s.k << ',' << s.t << ',' << live_total() << ',' << nodes << ',' << filled << '\n';
+                    std::cerr << "average-policy pass: " << filled << " of " << nodes << " traverser nodes valued with the plain average\n";
+                }
                 bool judge = true;
                 if (gated) {
                     const auto [plain, cross] = rho_estimates(halves, n);

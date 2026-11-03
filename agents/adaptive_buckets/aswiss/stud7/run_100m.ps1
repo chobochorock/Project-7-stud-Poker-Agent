@@ -39,6 +39,7 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     hist_b    = @("history_b_street", "history", 1024, "bucket-history keys, method B labels (average policy)", "--history-cards street --label avg --label-cap 2560000")
     hist_wb   = @("history_wb_street", "history", 1024, "bucket-history keys, window + method B labels", "--history-cards street --label window+avg --label-cap 2560000")
     hist_bb   = @("history_bb_street", "history", 1024, "ASWISS: bucket-history keys, method B, backward split", "--history-cards street --label avg --label-cap 2560000 --backward 1")
+    hist_bbf  = @("history_bbf_street", "history", 1024, "ASWISS + hybrid average for labels (--avg-fill plain)", "--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain")
     hist_every = @("history_every", "history", 1024, "bucket-history keys, cards at every decision", "--history-cards every --label-cap 2560000")
     k256      = @("atom_k256", "atom", 256, "k-means 256", "")
     k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")

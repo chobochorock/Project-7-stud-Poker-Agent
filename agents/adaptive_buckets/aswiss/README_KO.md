@@ -1,5 +1,7 @@
 # ASWISS 실험: 누적 regret 라벨로 bucket 분할 (mini-stud)
 
+> 2026-11-03: 발표와 논문의 본문 방법은 이 문서의 "기존" 규칙(정보집합 단위, 구간 누적 후회 라벨)이다(`../ASWISS_CONVERGENCE_KO.md` 정리 1). 평균 전략 라벨(B), bucket 이력, 역방향 분할 등은 부록의 트릭으로 정리했다(`slides/aswiss_deck.tex`).
+
 2026-10-26 첫 실행. 이론은 [REGRET_SPACE_ABSTRACTION_KO.md](../REGRET_SPACE_ABSTRACTION_KO.md)의 식 (6) 기반 분할((B) 방식)이다.
 
 ## 무엇을 하는가

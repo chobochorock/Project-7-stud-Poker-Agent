@@ -1,23 +1,19 @@
 # ASWISS 발표 자료
 
-## 새 자료 (2026-11-03): `aswiss_deck.tex` (LaTeX Beamer)
+## 발표 자료 (2026-11-03): `aswiss_deck.tex` (LaTeX Beamer)
 
-CFR과 불완전 정보 게임을 모르는 청중을 위해 다시 짠 자료다. 본문 23장(여덟 질문에 차례로 답함) + 부록 10장. 하나의 H/L 게임 트리를 2·7–11장에서 단계별로 바꿔 가며 정방향(파랑)과 역방향(주황) 분할을 보인다.
+본문 21장 + 부록 12장. **본문 방법은 정보집합 단위의 구간 누적 후회 라벨로, 업데이트 방향이 갈린 bucket을 그 자리에서 나누는 것**이다(`../../ASWISS_CONVERGENCE_KO.md` 정리 1). 평균 전략 라벨, bucket 이력, 역방향 분할, 원자, 판정 문턱, 혼합 평균은 부록의 트릭(T1–T6)이다.
 
-- `aswiss_deck.tex`: Beamer(metropolis) 원고. 글꼴과 색은 이전 원고와 같다(Latin Modern Sans, 나눔바른고딕, 남색·파랑·주황). 게임 트리는 TikZ, 그래프는 pgfplots(`plotdata/`).
-- `aswiss_deck.pdf`: 컴파일 결과(33쪽).
-- `aswiss_deck_notes.pdf`: 각 슬라이드 뒤에 발표자 노트 쪽을 넣은 판(66쪽).
-- `aswiss_deck_notes_KO.md`: 발표자 노트만 모은 것.
-- `CHANGES_KO.md`: 이전 자료와의 대응표, 추가·삭제·이동한 것, 원본 PDF에 없던 내용과 출처, 요청과 다른 점.
-- `aswiss_deck.pptx`와 `deck/`: 같은 내용의 PowerPoint 판과 그 생성 코드(편집 가능한 PPTX가 필요할 때).
+- `aswiss_deck.tex`: Beamer(metropolis) 원고. 글꼴과 색은 이전 원고와 같다(Latin Modern Sans, 나눔바른고딕). 게임 트리는 TikZ, 그래프는 pgfplots.
+- `aswiss_deck.pdf`(33쪽), `aswiss_deck_notes.pdf`(각 슬라이드 뒤에 노트 쪽, 66쪽), `aswiss_deck_notes_KO.md`(노트만, `python notes_md.py`로 다시 만듦).
+- `CHANGES_KO.md`: 원래 자료(`aswiss_slides.pdf`)와의 대응, 원본에 없던 내용과 출처, 요청과 다른 점.
+- `plotdata/`: `leduc_infoset.dat`(`make_leduc_infoset_data.py`), `ministud_long.dat`(`make_ministud_data.py`), 부록 트릭용 `leduc_conv.dat`·`leduc_gain.dat`(`make_data.py`).
+- `pptx_v1/`: 이전 재구성판(bucket 이력 + 역방향 분할을 본문으로 둔 23+10장)의 PowerPoint와 생성 코드. 지금 본문과 맞지 않는다.
 
 ```bash
 xelatex aswiss_deck.tex && xelatex aswiss_deck.tex          # 두 번 (질문 표시 위치와 쪽 번호)
 xelatex -jobname=aswiss_deck_notes "\def\withnotes{1}\input{aswiss_deck}"   # 노트 판, 역시 두 번
 ```
-
-- 원고 맨 위 "글꼴" 네 줄만 고치면 글꼴이 바뀐다(아래 "글꼴 바꾸기"와 같다).
-- 절 구분 슬라이드는 만들지 않는다(`\metroset{sectionpage=none}`). 절은 PDF 책갈피에만 남는다.
 
 ## 이전 자료: `aswiss_slides.tex` (LaTeX Beamer)
 

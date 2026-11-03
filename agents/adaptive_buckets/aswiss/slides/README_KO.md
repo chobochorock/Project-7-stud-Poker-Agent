@@ -1,4 +1,15 @@
-# ASWISS 알고리즘 설명 슬라이드 (LaTeX Beamer)
+# ASWISS 발표 자료
+
+## 새 자료 (2026-11-03): `aswiss_deck.pptx` / `aswiss_deck.pdf`
+
+- CFR과 불완전 정보 게임을 모르는 청중을 위해 다시 짠 자료다. 본문 23장(여덟 질문에 차례로 답함) + 부록 10장. 하나의 H/L 게임 트리를 2·7–11장에서 단계별로 바꿔 가며 정방향(파랑)과 역방향(주황) 분할을 보인다.
+- `aswiss_deck.pptx`: 편집 가능한 PowerPoint. 글꼴은 테마 글꼴(맑은 고딕)이라 한 곳에서 바꿀 수 있다. 슬라이드마다 발표자 노트가 있다.
+- `aswiss_deck.pdf`: 같은 자료의 PDF(LibreOffice 렌더링).
+- `aswiss_deck_notes_KO.md`: 발표자 노트만 모은 것.
+- `CHANGES_KO.md`: 이전 자료와의 대응표, 추가·삭제·이동한 것, 원본 PDF에 없던 내용과 출처, 요청과 다른 점.
+- `deck/`: 생성 코드. `cd deck && npm install && node build_deck.js ../aswiss_deck.pptx ../plotdata`, PDF는 `python make_pdf.py ../aswiss_deck.pptx ../aswiss_deck.pdf`(LibreOffice 필요).
+
+## 이전 자료: `aswiss_slides.tex` (LaTeX Beamer)
 
 - `aswiss_slides.tex`: Beamer(metropolis 테마) 원고, 16:9. 도식은 TikZ, 그래프는 pgfplots, 표는 booktabs로 그린다. 각 frame에 `\note{}`로 발표자 노트가 있다.
 - `aswiss_slides.pdf`: 컴파일한 결과(표지, 본문 16장, 절 구분 4장).

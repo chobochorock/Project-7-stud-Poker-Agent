@@ -7,7 +7,10 @@
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot     # figures
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack     # results -> results_data
 # Each arm is one process (one core). "run" again after a stop, crash or reboot resumes every unfinished arm from its
-# checkpoint (bit-exact). eval/final skip snapshots already evaluated, so they can be rerun while training continues.
+# checkpoint (bit-exact). -Threads K (K > 1) runs each arm's epoch-end average-policy label pass (--label avg arms:
+# aswiss_b, aswiss_wb, hist_b, hist_wb, hist_bb, hist_bbf) on K threads; training stays on one. Any K > 1 gives the
+# same results, but not those of -Threads 1 (other label deals), so an arm resumes only with the same choice.
+# eval/final skip snapshots already evaluated, so they can be rerun while training continues.
 # The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
 # C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
@@ -22,6 +25,7 @@ param(
     [long]$SnapshotEvery = 5000000,
     [long]$CheckpointEvery = 1000000,
     [long]$CurveEvery = 100000,
+    [ValidateRange(1, 256)] [int]$Threads = 1,   # threads of the average-policy label pass (see above)
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
@@ -95,6 +99,7 @@ if ($Action -eq "run") {
         $argv = @("train", "--partition", $Arm[$a][1], "--atlas", (AtlasPath $Arm[$a][2]), "--z", "2", "--seed", $Seed,
                   "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", $CheckpointEvery,
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
+        if ($Threads -gt 1) { $argv += @("--threads", $Threads) }
         if ($Arm[$a][4]) { $argv += $Arm[$a][4] -split " " }
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
         # Start-Process joins the arguments with spaces, so quote the ones that contain spaces (paths)

@@ -7,7 +7,7 @@
 //                            [--label window|avg|window+avg] [--avg-frac 0.25] [--history-cards street|every]
 //                            [--label-cap 0] [--backward 0] [--backward-min-visits 32] [--backward-max-subkeys 4000000]
 //                            [--backward-test pair|labels] [--backward-z Z] [--gate-eps 0] [--gate-stat avg|iter]
-//                            [--avg-fill none|plain] [--avg-fill-reach 1e-4]
+//                            [--avg-fill none|plain] [--avg-fill-reach 1e-4] [--threads 1]
 //                            --out DIR
 //                            (rerun the same command to resume)
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000] [--rho-roots 0]
@@ -59,6 +59,10 @@
 //            --avg-fill-reach (1e-4), the plain average of that bucket's current strategies (linear in t, not weighted
 //            by reach), kept lazily without an extra pass. The policy itself (snapshots, evaluation) is unchanged: those
 //            nodes carry no realization weight. fill.csv logs the pass's traverser nodes and how many were filled.
+// --threads K (--label avg|window+avg): the epoch-end average-policy pass and the backward replay run on K threads
+//            (training itself stays serial). K > 1 draws each root from its own generator and adds 1024-root chunks
+//            in root order, so every K > 1 gives the same bits; K = 1 is the serial pass (other deals). A run resumes
+//            only with the same choice of 1 or > 1 (see chunked_pass).
 // Training: external-sampling MCCFR+ (RM+) from a sampled 5th-street root, traversers 0 then 1 on the
 // same deal; bucket regrets are applied after each traversal; linear averaging at opponent nodes.
 // --h4 learn: the 4th-street discard/reveal (12 actions, exact suit-canonical four-card keys per seat) is learned
@@ -236,6 +240,8 @@ struct SubMap {
     std::unordered_map<SubKey, struct AtomStats, SubKeyHash> stats;
     size_t cap = SIZE_MAX;  // no new sub-key once this many are held (frequent ones appear early); their visits are dropped
     uint64_t dropped = 0;
+    bool ordered = false;     // keep `order` (a chunk of the parallel replay, merged in order of first appearance)
+    std::vector<SubKey> order;  // sub-keys in order of first insertion
     uint32_t id(const HFull& k) {
         const auto [it, fresh] = ids.try_emplace(k, static_cast<uint32_t>(prev.size()));
         if (fresh) prev.push_back(k);
@@ -534,8 +540,9 @@ public:
     void plain_flush_all() { if (avg_fill_) for (uint32_t b = 0; b < plain_.size(); ++b) plain_flush(b); }
     bool fills(double own, uint32_t b) const { return avg_fill_ && b != kNone && own < fill_reach_; }
     std::array<double, A> plain_policy(uint32_t b, uint8_t mask) const { return normalized(plain_[b], mask); }
-    void note_avg_node(bool filled) const { ++avg_nodes_; if (filled) ++filled_nodes_; }
-    std::pair<uint64_t, uint64_t> take_fill_counts() {
+    // counted per thread (--threads: each label-pass thread takes its own counts)
+    static void note_avg_node(bool filled) { ++avg_nodes_; if (filled) ++filled_nodes_; }
+    static std::pair<uint64_t, uint64_t> take_fill_counts() {
         const auto r = std::make_pair(avg_nodes_, filled_nodes_); avg_nodes_ = filled_nodes_ = 0; return r;
     }
     void count_root() { if (track_rwin_) ++rwin_roots_; }
@@ -1285,7 +1292,7 @@ private:
     double fill_reach_ = 1e-4, plain_clock_ = 0;
     std::vector<std::array<double, A>> plain_;
     std::vector<double> plain_last_;
-    mutable uint64_t avg_nodes_ = 0, filled_nodes_ = 0;
+    static inline thread_local uint64_t avg_nodes_ = 0, filled_nodes_ = 0;
     void plain_flush(uint32_t b) {
         const double dw = plain_clock_ - plain_last_[b];
         if (dw <= 0) return;
@@ -1448,7 +1455,10 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
     if (sub && prev_key.ctx != 0 && (!only || only->count(key))) {
         const SubKey sk{key, sub->id(prev_key)};
         if (const auto it = sub->stats.find(sk); it != sub->stats.end()) ss = &it->second;
-        else if (sub->stats.size() < sub->cap) ss = &sub->stats[sk];
+        else if (sub->stats.size() < sub->cap) {
+            ss = &sub->stats[sk];
+            if (sub->ordered) sub->order.push_back(sk);
+        }
         else ++sub->dropped;
     }
     for (int a = 0; a < A; ++a) {
@@ -1461,6 +1471,118 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
     if (st) st->visits += 1;
     if (ss) ss->visits += 1;
     return node;
+}
+
+// --threads K > 1: the average-policy pass and its backward replay run in chunks of kLabelChunk roots, K chunks at a
+// time. Root i draws its deal and samples from its own generator (label_root_rng), each chunk sums into fresh tables
+// of its own, and after every round the chunk tables are added to the totals in root order (per-key totals on K
+// threads, each owning every K-th of kLabelShards key shards). The totals, and so the splits, are therefore the same
+// bits for every K > 1. --threads 1 keeps the serial pass, whose single generator draws other deals. Meanwhile the
+// atlas's shared cache is only read; each thread memoizes its misses in its own overlay (PowerAtlas::overlay), and
+// the overlays join the shared cache after the pass. The cache only saves time, but its hit and miss counts in
+// log.csv can differ with K (which entries a full cache drops depends on the order they join).
+constexpr uint64_t kLabelChunk = 1024;
+constexpr size_t kLabelShards = 64;
+
+std::mt19937_64 label_root_rng(uint64_t eval_seed, uint64_t i) {
+    std::seed_seq seq{static_cast<uint32_t>(eval_seed), static_cast<uint32_t>(eval_seed >> 32), static_cast<uint32_t>(i),
+                      static_cast<uint32_t>(i >> 32)};
+    return std::mt19937_64(seq);
+}
+// the deal of root i of a chunked pass, with the generator that then samples its traversals
+State label_root(uint64_t eval_seed, uint64_t i, std::mt19937_64& rng) {
+    rng = label_root_rng(eval_seed, i);
+    auto deck = fresh_deck();
+    std::shuffle(deck.begin(), deck.end(), rng);
+    return sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte);
+}
+
+// f(t) for t < m on m threads (t = 0 on the calling thread); rethrows a worker's exception after all have joined
+void run_threads(int m, const std::function<void(int)>& f) {
+    std::exception_ptr error;
+    std::mutex lock;
+    const auto guarded = [&](int t) {
+        try { f(t); }
+        catch (...) { std::lock_guard<std::mutex> g(lock); if (!error) error = std::current_exception(); }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 1; t < m; ++t) pool.emplace_back(guarded, t);
+    guarded(0);
+    for (auto& th : pool) th.join();
+    if (error) std::rethrow_exception(error);
+}
+
+// Runs chunk(c, t) for the chunks c of an n-root pass, `threads` at a time with t the slot of c in its round, each
+// thread with its own atlas overlay; merge(c0, m) follows every round of the m chunks from c0.
+void chunked_pass(uint64_t n, int threads, PowerAtlas* atlas, const std::function<void(uint64_t, int)>& chunk,
+                  const std::function<void(uint64_t, int)>& merge) {
+    std::vector<PowerAtlas::AssignOverlay> overlay(threads);
+    if (atlas)  // together no larger than the shared cache (--power-cache)
+        for (auto& o : overlay) o.limit = std::max<size_t>(1, atlas->assignment_cache_stats().limit / threads);
+    const uint64_t chunks = (n + kLabelChunk - 1) / kLabelChunk;
+    for (uint64_t c0 = 0; c0 < chunks; c0 += threads) {
+        const int m = static_cast<int>(std::min<uint64_t>(threads, chunks - c0));
+        run_threads(m, [&](int t) {
+            struct Use {  // the overlay is set only while this thread runs its chunk
+                explicit Use(PowerAtlas::AssignOverlay* o) { PowerAtlas::overlay = o; }
+                ~Use() { PowerAtlas::overlay = nullptr; }
+            } use(&overlay[t]);
+            chunk(c0 + t, t);
+        });
+        merge(c0, m);
+    }
+    // the pass's assignments join the shared cache, as a serial pass's would (the backward replay reuses them)
+    if (atlas) for (auto& o : overlay) atlas->absorb(o);
+}
+
+void add_stats(AtomStats& to, const AtomStats& from) {
+    for (int a = 0; a < A; ++a) { to.r[a] += from.r[a]; to.sq[a] += from.sq[a]; }
+    to.visits += from.visits;
+}
+template <class Map>
+size_t label_shard(const typename Map::key_type& k) {
+    return static_cast<size_t>((static_cast<uint64_t>(typename Map::hasher()(k)) * 0x9e3779b97f4a7c15ull) >> 58) % kLabelShards;
+}
+// adds the chunk tables (in root order) to the sharded per-key totals on `threads` threads
+template <class Map>
+void merge_chunk_stats(std::vector<Map>& shards, const std::vector<Map>& chunks, int m, int threads) {
+    run_threads(threads, [&](int t) {
+        for (int c = 0; c < m; ++c)
+            for (const auto& [k, st] : chunks[c]) {
+                const size_t s = label_shard<Map>(k);
+                if (static_cast<int>(s % threads) == t) add_stats(shards[s][k], st);
+            }
+    });
+}
+template <class Map>
+Map join_shards(std::vector<Map>& shards) {
+    size_t total = 0;
+    for (const auto& s : shards) total += s.size();
+    Map out;
+    out.reserve(total);
+    for (auto& s : shards) { out.merge(s); Map().swap(s); }  // keys are disjoint across shards: every node moves
+    return out;
+}
+// Adds a chunk of the parallel backward replay to the totals as the serial replay would have: previous keys take ids
+// in order of first appearance; new sub-keys enter in order of first appearance while fewer than `cap` are held, and
+// the visits of the others count as dropped (a sub-key the chunk dropped was dropped by the serial replay too).
+void merge_sub(SubMap& to, const SubMap& from) {
+    std::vector<uint32_t> id(from.prev.size());
+    for (size_t j = 0; j < from.prev.size(); ++j) id[j] = to.id(from.prev[j]);
+    for (const SubKey& sk : from.order) {
+        const AtomStats& st = from.stats.at(sk);
+        const SubKey g{sk.k, id[sk.p]};
+        if (const auto it = to.stats.find(g); it != to.stats.end()) add_stats(it->second, st);
+        else if (to.stats.size() < to.cap) to.stats.emplace(g, st);
+        else to.dropped += static_cast<uint64_t>(st.visits);
+    }
+    to.dropped += from.dropped;
+}
+void merge_halves(BucketHalves& to, const BucketHalves& from) {
+    for (const auto& [b, h] : from) {
+        auto& t = to[b];
+        for (int j = 0; j < 2 * A; ++j) t[j] += h[j];
+    }
 }
 
 std::map<std::string, std::string> parse(int argc, char** argv, std::map<std::string, std::string> opt) {
@@ -1562,7 +1684,7 @@ int train(int argc, char** argv) {
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
                                 {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
-                                {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}});
+                                {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1597,6 +1719,10 @@ int train(int argc, char** argv) {
     const bool avg_fill = o["--avg-fill"] == "plain";
     if (avg_fill && (partition != Partition::History || label_rule != "avg"))
         throw std::runtime_error("--avg-fill plain needs --partition history --label avg");
+    const int threads = std::stoi(o["--threads"]);
+    if (threads < 1 || threads > 256) throw std::runtime_error("--threads must be 1 to 256");
+    const bool label_pass = label_rule != "window";  // the epoch-end average-policy pass, the only part --threads runs in parallel
+    if (threads > 1 && !label_pass) std::cerr << "note: --threads only affects --label avg|window+avg; this run is serial\n";
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
     model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0);
@@ -1620,7 +1746,8 @@ int train(int argc, char** argv) {
                           o["--backward-max-subkeys"] + ";backward_test=" + o["--backward-test"] +
                           (o["--backward-z"].empty() ? "" : ";backward_z=" + o["--backward-z"]) : "")
         << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "")
-        << (avg_fill ? ";avg_fill=plain;avg_fill_reach=" + o["--avg-fill-reach"] : "");
+        << (avg_fill ? ";avg_fill=plain;avg_fill_reach=" + o["--avg-fill-reach"] : "")
+        << (label_pass && threads > 1 ? ";label_pass=chunked" : "");  // any --threads > 1 gives the same bits
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1722,26 +1849,55 @@ int train(int argc, char** argv) {
                 HMap avg;
                 BucketHalves halves;
                 const uint64_t eval_seed = std::stoull(o["--seed"]) * 1000003ull + s.k;
-                std::mt19937_64 eval_rng(eval_seed);
                 uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
                 if (label_cap) n = std::min(n, label_cap);
                 model.plain_flush_all();
                 model.take_fill_counts();
-                for (uint64_t i = 0; i < n; ++i) {
-                    auto eval_deck = fresh_deck();
-                    std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
-                    for (int p = 0; p < 2; ++p)
-                        avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, &avg,
-                                       nullptr, nullptr, gated ? &halves : nullptr, static_cast<int>(i & 1));
+                uint64_t fill_nodes = 0, fill_filled = 0;
+                const double pass_start = elapsed();
+                if (threads == 1) {
+                    std::mt19937_64 eval_rng(eval_seed);
+                    for (uint64_t i = 0; i < n; ++i) {
+                        auto eval_deck = fresh_deck();
+                        std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
+                        for (int p = 0; p < 2; ++p)
+                            avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, eval_rng, &avg,
+                                           nullptr, nullptr, gated ? &halves : nullptr, static_cast<int>(i & 1));
+                    }
+                    std::tie(fill_nodes, fill_filled) = model.take_fill_counts();
+                } else {
+                    // one fresh table per chunk of a round (its iteration order then depends on that chunk alone)
+                    std::vector<HMap> shards(kLabelShards), part(threads);
+                    std::vector<BucketHalves> part_halves(threads);
+                    std::vector<std::pair<uint64_t, uint64_t>> part_fill(threads);
+                    chunked_pass(n, threads, atlas.get(), [&](uint64_t c, int t) {
+                        Model::take_fill_counts();
+                        std::mt19937_64 rng;
+                        for (uint64_t i = c * kLabelChunk; i < std::min(n, (c + 1) * kLabelChunk); ++i) {
+                            const State root = label_root(eval_seed, i, rng);
+                            for (int p = 0; p < 2; ++p)
+                                avg_traverse_h(model, root, Trail{}, p, rng, &part[t], nullptr, nullptr, gated ? &part_halves[t] : nullptr,
+                                               static_cast<int>(i & 1));
+                        }
+                        part_fill[t] = Model::take_fill_counts();
+                    }, [&](uint64_t, int m) {
+                        merge_chunk_stats(shards, part, m, threads);
+                        for (int t = 0; t < m; ++t) {
+                            if (gated) merge_halves(halves, part_halves[t]);
+                            fill_nodes += part_fill[t].first; fill_filled += part_fill[t].second;
+                            part[t] = HMap(); part_halves[t] = BucketHalves();
+                        }
+                    });
+                    avg = join_shards(shards);
                 }
+                const double pass_secs = elapsed() - pass_start;
                 // --gate-eps: judge only when the bucket regret total of the average policy, rho_P/2 per root, is at most
                 // eps. rho_P = sum_B max(0, max_a r(B, a)) estimated from this pass: the plain estimate is biased upward
                 // by the noise of tens of thousands of bucket sums, so the gate uses the cross-fitted one (each bucket's
                 // best action chosen on one half of the roots, its regret measured on the other half, both ways).
                 if (avg_fill) {
-                    const auto [nodes, filled] = model.take_fill_counts();
-                    std::ofstream(fill_path, std::ios::app) << s.k << ',' << s.t << ',' << live_total() << ',' << nodes << ',' << filled << '\n';
-                    std::cerr << "average-policy pass: " << filled << " of " << nodes << " traverser nodes valued with the plain average\n";
+                    std::ofstream(fill_path, std::ios::app) << s.k << ',' << s.t << ',' << live_total() << ',' << fill_nodes << ',' << fill_filled << '\n';
+                    std::cerr << "average-policy pass: " << fill_filled << " of " << fill_nodes << " traverser nodes valued with the plain average\n";
                 }
                 bool judge = true;
                 if (gated) {
@@ -1760,19 +1916,39 @@ int train(int argc, char** argv) {
                 SubMap sub;
                 sub.cap = backward_max_subkeys;
                 HSet frequent;
+                double replay_secs = 0;
                 if (backward && judge) {
                     for (const auto& [k, st] : avg) if (st.visits >= backward_min_visits) frequent.insert(k);
-                    std::mt19937_64 replay_rng(eval_seed);
-                    for (uint64_t i = 0; i < n; ++i) {
-                        auto eval_deck = fresh_deck();
-                        std::shuffle(eval_deck.begin(), eval_deck.end(), replay_rng);
-                        for (int p = 0; p < 2; ++p)
-                            avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, replay_rng,
-                                           nullptr, &sub, &frequent);
+                    const double replay_start = elapsed();
+                    if (threads == 1) {
+                        std::mt19937_64 replay_rng(eval_seed);
+                        for (uint64_t i = 0; i < n; ++i) {
+                            auto eval_deck = fresh_deck();
+                            std::shuffle(eval_deck.begin(), eval_deck.end(), replay_rng);
+                            for (int p = 0; p < 2; ++p)
+                                avg_traverse_h(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), Trail{}, p, replay_rng,
+                                               nullptr, &sub, &frequent);
+                        }
+                    } else {
+                        std::vector<SubMap> part(threads);
+                        const auto fresh = [&](SubMap& m) { m = SubMap(); m.cap = backward_max_subkeys; m.ordered = true; };
+                        for (auto& m : part) fresh(m);
+                        chunked_pass(n, threads, atlas.get(), [&](uint64_t c, int t) {
+                            std::mt19937_64 rng;
+                            for (uint64_t i = c * kLabelChunk; i < std::min(n, (c + 1) * kLabelChunk); ++i) {
+                                const State root = label_root(eval_seed, i, rng);
+                                for (int p = 0; p < 2; ++p) avg_traverse_h(model, root, Trail{}, p, rng, nullptr, &part[t], &frequent);
+                            }
+                        }, [&](uint64_t, int m) {
+                            for (int t = 0; t < m; ++t) { merge_sub(sub, part[t]); fresh(part[t]); }
+                        });
                     }
+                    replay_secs = elapsed() - replay_start;
                 }
                 if (judge) splits = model.hsplit(z, &avg, label_rule == "window+avg");
-                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys\n";
+                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys (" << pass_secs << " s"
+                          << (backward && judge ? ", replay " + std::to_string(replay_secs) + " s" : "") << ", " << threads
+                          << (threads == 1 ? " thread)\n" : " threads)\n");
                 if (backward && judge) {
                     const double rss = peak_rss_mb();  // includes the sub-key table, still alive here
                     const auto br = model.hbackward(z, sub, backward_pair_test, backward_z);
@@ -1787,17 +1963,36 @@ int train(int argc, char** argv) {
             else if (partition == Partition::Aswiss) {
                 // method B: regrets of the frozen average policy from a separate sampled pass (deterministic per epoch)
                 AtomMap avg;
-                std::mt19937_64 eval_rng(std::stoull(o["--seed"]) * 1000003ull + s.k);
+                const uint64_t eval_seed = std::stoull(o["--seed"]) * 1000003ull + s.k;
                 uint64_t n = std::max<uint64_t>(1000, static_cast<uint64_t>(avg_frac * static_cast<double>(s.t - s.epoch_start)));
                 if (label_cap) n = std::min(n, label_cap);
-                for (uint64_t i = 0; i < n; ++i) {
-                    auto eval_deck = fresh_deck();
-                    std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
-                    for (int p = 0; p < 2; ++p)
-                        avg_traverse(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), p, eval_rng, avg);
+                const double pass_start = elapsed();
+                if (threads == 1) {
+                    std::mt19937_64 eval_rng(eval_seed);
+                    for (uint64_t i = 0; i < n; ++i) {
+                        auto eval_deck = fresh_deck();
+                        std::shuffle(eval_deck.begin(), eval_deck.end(), eval_rng);
+                        for (int p = 0; p < 2; ++p)
+                            avg_traverse(model, sample_fifth_street_root(eval_deck, kAnte, kEffectiveStackAnte), p, eval_rng, avg);
+                    }
+                } else {
+                    std::vector<AtomMap> shards(kLabelShards), part(threads);
+                    chunked_pass(n, threads, atlas.get(), [&](uint64_t c, int t) {
+                        std::mt19937_64 rng;
+                        for (uint64_t i = c * kLabelChunk; i < std::min(n, (c + 1) * kLabelChunk); ++i) {
+                            const State root = label_root(eval_seed, i, rng);
+                            for (int p = 0; p < 2; ++p) avg_traverse(model, root, p, rng, part[t]);
+                        }
+                    }, [&](uint64_t, int m) {
+                        merge_chunk_stats(shards, part, m, threads);
+                        for (int t = 0; t < m; ++t) part[t] = AtomMap();
+                    });
+                    avg = join_shards(shards);
                 }
+                const double pass_secs = elapsed() - pass_start;
                 splits = model.split(z, inherit, &avg, label_rule == "window+avg");
-                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " atoms\n";
+                std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " atoms (" << pass_secs << " s, " << threads
+                          << (threads == 1 ? " thread)\n" : " threads)\n");
             }
             model.clear_window();
             const auto live = model.live_buckets();

@@ -4,7 +4,8 @@
 #   bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh [run|status|stop|eval|final|plot|pack]
 # Environment overrides: ROOTS=100000000 SEED=1 ARMS="aswiss k256 k341 k512 k1024" OUT=... WORKERS=4 PYTHON=python3
 #   H4=learn (learn the 12-action 4th-street discard/reveal; run names get _h4), SNAPSHOT_EVERY=5000000,
-#   CHECKPOINT_EVERY=1000000, CURVE_EVERY=100000
+#   CHECKPOINT_EVERY=1000000, CURVE_EVERY=100000, THREADS=1 (K > 1: the epoch-end average-policy label pass of the
+#   --label avg arms runs on K threads; any K > 1 gives the same results, not those of 1, so resume with the same choice)
 # "run" again after a stop, crash or reboot resumes every unfinished arm from its checkpoint (bit-exact).
 set -euo pipefail
 ACTION=${1:-run}
@@ -12,7 +13,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOTS=${ROOTS:-100000000}; SEED=${SEED:-1}; ARMS=${ARMS:-"aswiss k256 k341 k512 k1024"}
 OUT=${OUT:-agents/adaptive_buckets/aswiss/stud7/data/runs_100m}; WORKERS=${WORKERS:-4}; PYTHON=${PYTHON:-python3}
 H4=${H4:-heuristic}; SNAPSHOT_EVERY=${SNAPSHOT_EVERY:-5000000}; CHECKPOINT_EVERY=${CHECKPOINT_EVERY:-1000000}
-CURVE_EVERY=${CURVE_EVERY:-100000}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
+CURVE_EVERY=${CURVE_EVERY:-100000}; THREADS=${THREADS:-1}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
 EXE=$HERE/aswiss_stud
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
@@ -53,7 +54,7 @@ run)
         if [ -f "$OUT/$name.pid" ] && kill -0 "$(cat "$OUT/$name.pid")" 2>/dev/null; then echo "$name already running"; continue; fi
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \
             --epoch0 10000 --checkpoint-every "$CHECKPOINT_EVERY" --snapshot-every "$SNAPSHOT_EVERY" --curve-every "$CURVE_EVERY" \
-            --h4 "$H4" ${EXTRA[$a]:-} --out "$OUT/$name" \
+            --h4 "$H4" ${EXTRA[$a]:-} $( [ "$THREADS" -gt 1 ] && echo --threads "$THREADS" ) --out "$OUT/$name" \
             >> "$OUT/$name.stderr.log" 2>&1 &
         echo $! > "$OUT/$name.pid"; echo "started $name (pid $!)"
     done ;;

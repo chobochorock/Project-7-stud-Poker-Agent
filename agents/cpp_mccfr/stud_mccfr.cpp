@@ -1081,9 +1081,52 @@ public:
         rebuild_local_variances();
     }
 
+    // Concurrent assignment: while a thread points `overlay` at its own table, its calls only read the shared cache
+    // and memoize their misses in that table, so several threads may assign at once as long as no thread writes
+    // the shared cache meanwhile (no thread without an overlay assigns). Unused unless a caller sets it.
+    struct AssignOverlay {
+        std::unordered_map<PowerObservationKey, uint16_t, PowerObservationHash> cache;
+        size_t limit = SIZE_MAX;  // entries before it restarts (also at most the shared cache's limit)
+        uint64_t hits = 0;
+        uint64_t misses = 0;
+    };
+    static inline thread_local AssignOverlay* overlay = nullptr;
+    // moves an overlay's entries and counts into the shared cache (no thread may assign meanwhile)
+    void absorb(AssignOverlay& own) {
+        if (assignment_cache_limit_ > 0) {
+            for (const auto& [observation, assigned] : own.cache) {
+                if (assignment_cache_.size() >= assignment_cache_limit_) {
+                    assignment_cache_.clear();
+                    ++assignment_cache_resets_;
+                }
+                assignment_cache_.emplace(observation, assigned);
+            }
+        }
+        assignment_cache_hits_ += own.hits;
+        assignment_cache_misses_ += own.misses;
+        own = AssignOverlay();
+    }
+
     virtual uint16_t assign(const State& state, int viewer) const {
         const PowerObservationKey observation = power_observation_key(state, viewer);
         auto found = assignment_cache_.find(observation);
+        if (AssignOverlay* own = overlay) {
+            if (found == assignment_cache_.end()) {
+                found = own->cache.find(observation);
+                if (found == own->cache.end()) {
+                    ++own->misses;
+                    const uint16_t assigned = assign_vector(state.street, power_vector(state, viewer, sample_limit_));
+                    const size_t limit = std::min(assignment_cache_limit_, own->limit);
+                    if (limit > 0) {
+                        if (own->cache.size() >= limit) own->cache.clear();
+                        own->cache.emplace(observation, assigned);
+                    }
+                    return assigned;
+                }
+            }
+            ++own->hits;
+            return found->second;
+        }
         if (found != assignment_cache_.end()) {
             ++assignment_cache_hits_;
             return found->second;

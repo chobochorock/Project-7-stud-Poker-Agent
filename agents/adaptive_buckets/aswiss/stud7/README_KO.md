@@ -672,6 +672,35 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 - **짧은 확인** (seed 1): 단순 평균으로 계산한 탐색자 노드 비율이 1만 roots 10%, 3만 28%, 7만 48%, 15만 31%, 31만 23%였다. 15만 roots의 bucket은 1,498개(옵션 없이 1,526개)다.
 - **100M 비교군:** `hist_bbf`(= `hist_bb` + `--avg-fill plain`). 효과를 보려면 `hist_bb`도 함께 돌린다. 둘 다 아직 100M을 돌리지 않았다.
 
+## 라벨 순회 병렬화 (`--threads`, 2026-11-03 추가)
+
+- **대상:** epoch 끝의 평균 전략 순회(방법 B 라벨, ε 문턱의 반쪽 통계, 혼합 평균 집계)와 역방향 분할의 재순회. 학습 순회는 그대로 한 스레드다. `--label avg|window+avg` 비교군(`aswiss_b`, `aswiss_wb`, `hist_b`, `hist_wb`, `hist_bb`, `hist_bbf`)에만 효과가 있다.
+- **방법:**
+  - root i는 자기 난수 생성기(seed, epoch, i로 초기화)로 딜과 표본을 뽑는다. 어느 스레드가 맡든 표본이 같다.
+  - root 1,024개씩 묶은 덩어리마다 따로 합한 뒤, root 순서대로 전체 합에 더한다. 키별 합은 키 해시로 나눈 64조각을 스레드들이 나눠 맡아 병렬로 더한다.
+  - 그래서 `--threads`가 2 이상이면 몇이든 결과가 비트 단위로 같다. `--threads 1`은 이전의 직렬 순회 그대로다. 생성기 하나를 이어 쓰므로 2 이상과는 딜이 다르다.
+  - 역방향 재순회의 세부 이력 표는 상한(`--backward-max-subkeys`)과 id가 처음 나타난 순서를 따른다. 덩어리를 root 순서대로 합치며 직렬 재순회와 같은 규칙을 적용한다. 이 합치기는 한 스레드라서 재순회는 첫 순회보다 덜 빨라진다.
+  - 카드 → 클러스터 배정 캐시: 순회 중에는 공용 캐시를 읽기만 하고, 새 배정은 스레드마다 자기 캐시(모두 합쳐 `--power-cache` 이하)에 적는다. 순회가 끝나면 공용 캐시로 옮긴다. 캐시는 시간에만 영향을 주지만 `log.csv`의 캐시 적중·실패 수는 스레드 수에 따라 다를 수 있다.
+- **재개:** checkpoint 설정에 `label_pass=chunked`가 들어간다. 1로 시작한 실행은 1로만, 2 이상으로 시작한 실행은 2 이상으로만 이어진다(2 이상끼리는 숫자를 바꿔도 된다). 어기면 학습기가 설정이 다르다는 오류를 내고 멈춘다.
+- **실행기:** `-Threads K`(PowerShell), `THREADS=K`(bash). 기본은 1이다.
+- **검증** (seed 1): `hist_bbf` 설정 17만 roots, ε 문턱 설정(`--gate-eps 10`, 역방향 포함) 15만 roots, `--partition aswiss --label avg` 15만 roots.
+  - `--threads 1`은 이전 실행 파일과 스냅숏, `log.csv`(캐시 수 포함), `backward.csv`, `fill.csv`, `gate.csv`가 같다.
+  - `--threads 2`, `3`, `4`는 서로 같다.
+  - `--threads 2`로 7만 roots에서 멈춘 뒤 `--threads 4`로 17만까지 이은 실행은 끊지 않은 실행과 스냅숏, `backward.csv`, `fill.csv`가 같다. `log.csv`에서는 캐시 적중·실패 수와 표 용량(MB)만 다르다. 둘 다 재개한 프로세스 기준으로 다시 세기 때문이고, 이전 실행 파일로 같은 시험을 해도 같은 차이가 난다.
+  - 1로 시작한 실행을 2로 이으려 하면 거부한다.
+- **속도** (4코어 컨테이너, 한 번에 한 프로세스, `hist_bbf` 설정 33만 roots의 가장 큰 순회 = 4만 roots):
+
+  | 스레드 | 첫 순회 | 역방향 재순회 | 합 | 배율 | 최대 메모리 (33만 roots 전체) |
+  |---:|---:|---:|---:|---:|---:|
+  | 1 | 21.9 s | 11.8 s | 33.7 s | 1 | 302 MB |
+  | 2 | 11.3 s | 7.4 s | 18.7 s | 1.8 | 325 MB |
+  | 4 | 5.9 s | 4.4 s | 10.3 s | 3.3 | 351 MB |
+
+  - 33만 roots 전체 시간은 221 s(1), 195 s(2), 179 s(4)다. 다만 1과 2 이상은 라벨 딜이 달라 bucket 수도 다르다(6,093개, 6,358개).
+- **100M에서의 어림 (측정 아님):** 위 실행의 root당 비용(학습 0.47 ms, 첫 순회 0.55 ms, 재순회 0.29 ms)과 100M의 라벨 roots(합계 12.8M, 학습 roots의 12.8%)로 어림하면 `hist_bb`·`hist_bbf`에서 라벨 단계는 전체 시간의 약 19%다. 4스레드로 3.3배 빨라지면 전체가 약 13% 짧아진다. 학습은 한 스레드이므로 이보다 크게 줄지는 않는다.
+  - 메모리는 스레드마다 덩어리 표(1,024 roots 분량)와 배정 캐시만큼 는다. 배정 캐시는 모든 스레드를 합쳐 `--power-cache` 항목(기본 100만, 약 80–90 MB) 이하다. 100M 규모에서는 재지 않았다.
+- **같은 시간에 표본 늘리기:** 스레드가 있으면 `--label-cap`을 키워 라벨 표본을 늘릴 수도 있다. 다만 설정이 바뀌므로 새 실행이 된다.
+
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 
 **조건**
@@ -910,11 +939,12 @@ powershell -ExecutionPolicy Bypass -File $s -Action plot     # 그림
 powershell -ExecutionPolicy Bypass -File $s -Action pack     # 결과 요약 파일을 results_data로 묶기 (공유용)
 # 옵션: -Roots 100000000 -Seed 1 -Arms aswiss,k256,k341,k512,k1024 -Workers 4 -Out <폴더> -Python python
 #       -H4 learn (4구 12액션 학습) -SnapshotEvery 5000000 -CheckpointEvery 1000000 -CurveEvery 100000
+#       -Threads 4 (방법 B 비교군의 라벨 순회를 4스레드로; "라벨 순회 병렬화" 절)
 ```
 
 ```bash
 bash agents/adaptive_buckets/aswiss/stud7/run_100m.sh run      # status | stop | eval | final | plot | pack
-# 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON H4 SNAPSHOT_EVERY CHECKPOINT_EVERY CURVE_EVERY
+# 환경 변수: ROOTS SEED ARMS OUT WORKERS PYTHON H4 SNAPSHOT_EVERY CHECKPOINT_EVERY CURVE_EVERY THREADS
 ```
 
 **학습이 끝난 뒤 확인하는 순서** (2026-10-29 추가)

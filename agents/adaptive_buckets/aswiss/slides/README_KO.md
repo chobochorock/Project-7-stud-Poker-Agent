@@ -1,13 +1,23 @@
 # ASWISS 발표 자료
 
-## 새 자료 (2026-11-03): `aswiss_deck.pptx` / `aswiss_deck.pdf`
+## 새 자료 (2026-11-03): `aswiss_deck.tex` (LaTeX Beamer)
 
-- CFR과 불완전 정보 게임을 모르는 청중을 위해 다시 짠 자료다. 본문 23장(여덟 질문에 차례로 답함) + 부록 10장. 하나의 H/L 게임 트리를 2·7–11장에서 단계별로 바꿔 가며 정방향(파랑)과 역방향(주황) 분할을 보인다.
-- `aswiss_deck.pptx`: 편집 가능한 PowerPoint. 글꼴은 테마 글꼴(맑은 고딕)이라 한 곳에서 바꿀 수 있다. 슬라이드마다 발표자 노트가 있다.
-- `aswiss_deck.pdf`: 같은 자료의 PDF(LibreOffice 렌더링).
+CFR과 불완전 정보 게임을 모르는 청중을 위해 다시 짠 자료다. 본문 23장(여덟 질문에 차례로 답함) + 부록 10장. 하나의 H/L 게임 트리를 2·7–11장에서 단계별로 바꿔 가며 정방향(파랑)과 역방향(주황) 분할을 보인다.
+
+- `aswiss_deck.tex`: Beamer(metropolis) 원고. 글꼴과 색은 이전 원고와 같다(Latin Modern Sans, 나눔바른고딕, 남색·파랑·주황). 게임 트리는 TikZ, 그래프는 pgfplots(`plotdata/`).
+- `aswiss_deck.pdf`: 컴파일 결과(33쪽).
+- `aswiss_deck_notes.pdf`: 각 슬라이드 뒤에 발표자 노트 쪽을 넣은 판(66쪽).
 - `aswiss_deck_notes_KO.md`: 발표자 노트만 모은 것.
 - `CHANGES_KO.md`: 이전 자료와의 대응표, 추가·삭제·이동한 것, 원본 PDF에 없던 내용과 출처, 요청과 다른 점.
-- `deck/`: 생성 코드. `cd deck && npm install && node build_deck.js ../aswiss_deck.pptx ../plotdata`, PDF는 `python make_pdf.py ../aswiss_deck.pptx ../aswiss_deck.pdf`(LibreOffice 필요).
+- `aswiss_deck.pptx`와 `deck/`: 같은 내용의 PowerPoint 판과 그 생성 코드(편집 가능한 PPTX가 필요할 때).
+
+```bash
+xelatex aswiss_deck.tex && xelatex aswiss_deck.tex          # 두 번 (질문 표시 위치와 쪽 번호)
+xelatex -jobname=aswiss_deck_notes "\def\withnotes{1}\input{aswiss_deck}"   # 노트 판, 역시 두 번
+```
+
+- 원고 맨 위 "글꼴" 네 줄만 고치면 글꼴이 바뀐다(아래 "글꼴 바꾸기"와 같다).
+- 절 구분 슬라이드는 만들지 않는다(`\metroset{sectionpage=none}`). 절은 PDF 책갈피에만 남는다.
 
 ## 이전 자료: `aswiss_slides.tex` (LaTeX Beamer)
 

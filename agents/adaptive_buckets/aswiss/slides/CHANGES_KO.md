@@ -1,6 +1,6 @@
 # 발표 자료 재구성: 변경 요약
 
-이전 자료 `aswiss_slides.pdf`(Beamer, 21쪽)를 새 자료 `aswiss_deck.pptx`/`aswiss_deck.pdf`(본문 23장, 부록 10장)로 다시 짰다. 이전 자료와 원고(`aswiss_slides.tex`)는 그대로 두었다.
+이전 자료 `aswiss_slides.pdf`(Beamer, 21쪽)를 새 자료 `aswiss_deck.tex`/`aswiss_deck.pdf`(Beamer, 본문 23장, 부록 10장)로 다시 짰다. 같은 내용의 PowerPoint 판 `aswiss_deck.pptx`도 있다. 이전 자료와 원고(`aswiss_slides.tex`)는 그대로 두었다.
 
 ## 1. 한눈에
 
@@ -10,7 +10,7 @@
 | 대상 | ASWISS를 아는 사람 | CFR과 불완전 정보 게임을 모르는 AI/ML 전공자 |
 | 흐름 | 방법 → 이론 → 실험 | 여덟 가지 질문에 차례로 답한다. 각 슬라이드 오른쪽 위에 어느 질문인지 표시 |
 | 중심 예시 | 표(K₁–K₄)와 글로 설명한 H/L 반례 | 같은 H/L 게임 트리를 2·7–11장에서 단계별로 바꿔 가며 보인다 |
-| 형식 | PDF (LaTeX) | 편집 가능한 PPTX + PDF, 슬라이드마다 발표자 노트 |
+| 형식 | LaTeX Beamer → PDF | LaTeX Beamer → PDF (같은 글꼴·색), 슬라이드마다 `\note{}`와 노트 판 PDF. 같은 내용의 PPTX도 따로 |
 
 **여덟 질문과 슬라이드**
 
@@ -32,7 +32,7 @@
 | 1 | 표지 | 1 (다시 그림: 정방향 파랑, 역방향 주황 모티프) |
 | 2 | 큰 게임은 추상화가 필요하다 | 3 (얻는 것·잃는 것 그림), 4 (고정 추상화의 빈틈), 5 (ASWISS의 질문 → 핵심 문장) |
 | 3 | 한 라운드 (다섯 단계) | 12 (여덟 단계 흐름도), 5 (개요) |
-| 4, 10, 14, 20 | 절 구분 | 삭제 (PowerPoint 구역으로만 남김) |
+| 4, 10, 14, 20 | 절 구분 | 삭제 (`\section`은 PDF 책갈피로만 남김) |
 | 5 | bucket과 bucket 이력 | 7 (게임 트리 위에서, 기호 범례 포함) |
 | 6 | 라벨 (식 + K₁–K₄ 표) | 식은 13과 부록 A1, K₁–K₃ 표는 8. K₄("없음")는 13과 A1의 규칙으로 |
 | 7 | 정방향 분할 | 8 (게임 트리 + 같은 예시 그림) |
@@ -92,26 +92,31 @@
 
 - **색:** 정방향 분할 = 파랑(#2A6FDB), 역방향 분할 = 주황(#D9622B). 그래프에서도 역방향을 포함한 ASWISS는 주황, 정방향만은 파랑, k-means는 회색이다.
 - **기호:** 정보집합 = 검은 원(플레이어 1)·흰 원(플레이어 2), 여러 상태를 담은 정보집합 = 점선 타원(J), bucket = 칠한 둥근 상자, bucket 이력 = 파선 상자. 7장에 범례가 있다.
-- **그래프:** PowerPoint 기본 차트(편집 가능). 지표, 학습량, bucket 수를 그래프 옆 캡션에 적었다. Leduc 그래프의 최소–최대 띠는 기본 차트로 칠할 수 없어 옅은 선으로 바꿨다.
-- **글꼴:** 맑은 고딕 하나(한글·영문·그리스 문자). PowerPoint의 테마 글꼴이라 "디자인 → 변형 → 글꼴"에서 한 번에 바꿀 수 있다. PDF는 LibreOffice로 만들었고 이 환경에 맑은 고딕이 없어 나눔바른고딕으로 대신 렌더링했다.
-- **글자 크기 (요청과 다른 점):** 제목 28pt, 본문 설명은 대부분 18–20pt다. 20pt 미만이 남은 곳은 도식 라벨(13–17pt), 표(15–19pt), 지표·출처 캡션(13–15pt), 부록(15–17pt), 그리고 7–10·13–15·17–22장 오른쪽 설명(18–19pt)이다. 모두 20pt로 올리려면 해당 설명을 더 줄여 노트로 옮겨야 한다.
+- **그래프:** pgfplots. Leduc 두 그래프는 이전 원고와 같은 데이터(`plotdata/`)에 로그–로그 축, 최소–최대 띠를 그대로 쓰고 색만 새 규칙에 맞췄다. 지표, 학습량, bucket 수를 그래프 옆 캡션에 적었다.
+- **글꼴:** 이전 원고와 같다. 라틴 문자 Latin Modern Sans, 수식 Computer Modern, 한글 나눔바른고딕.
+- **글자 크기:** 16:9 Beamer 쪽은 폭이 16 cm라서 Beamer의 10pt(`\small`)가 PowerPoint 와이드 화면(33.9 cm)의 약 21pt와 같다. 본문 설명은 대부분 `\small`(약 21pt)이다. 도식 안의 글자와 표는 `\footnotesize`–`\scriptsize`(약 19–17pt), 지표·출처 캡션은 `\scriptsize`(약 17pt), 부록 A1은 `\footnotesize`다.
 - **분량 (요청과 다른 점):** 요청은 본문 18–20장이었다. 알고리즘(흐름도 → 의사코드), 이론(인증식 → 결과의 상태), 역방향(과정 → 비교)을 각각 두 장으로 나눠 23장이 되었다.
+- **PowerPoint 판:** 같은 구성과 수치를 PowerPoint 기본 차트와 테마 글꼴(맑은 고딕)로 만든 것이다. Leduc 그래프의 띠는 기본 차트로 칠할 수 없어 옅은 선으로 바꿨다.
 
 ## 7. 파일과 다시 만드는 법
 
 | 파일 | 내용 |
 |---|---|
-| `aswiss_deck.pptx` | 편집 가능한 발표 자료 (노트 포함) |
-| `aswiss_deck.pdf` | 같은 자료의 PDF |
+| `aswiss_deck.tex` | Beamer 원고 (각 frame에 `\note{}`) |
+| `aswiss_deck.pdf` | 컴파일 결과, 33쪽 |
+| `aswiss_deck_notes.pdf` | 각 슬라이드 뒤에 노트 쪽을 넣은 판, 66쪽 |
 | `aswiss_deck_notes_KO.md` | 발표자 노트만 모은 것 |
-| `deck/` | 생성 코드: `build_deck.js`(슬라이드), `lib.js`(색·게임 트리·글 표기), `post.js`(테마 글꼴, 차트 세부), `make_pdf.py`(PDF) |
+| `aswiss_deck.pptx`, `deck/` | 같은 내용의 PowerPoint 판과 생성 코드 |
 
 ```bash
-cd agents/adaptive_buckets/aswiss/slides/deck
-npm install
-node build_deck.js ../aswiss_deck.pptx ../plotdata
-python make_pdf.py ../aswiss_deck.pptx ../aswiss_deck.pdf      # LibreOffice 필요
+cd agents/adaptive_buckets/aswiss/slides
+xelatex aswiss_deck.tex && xelatex aswiss_deck.tex
+xelatex -jobname=aswiss_deck_notes "\def\withnotes{1}\input{aswiss_deck}"     # 두 번
+
+# PowerPoint 판 (선택)
+cd deck && npm install && node build_deck.js ../aswiss_deck.pptx ../plotdata
+python make_pdf.py ../aswiss_deck.pptx ../aswiss_deck_pptx.pdf               # LibreOffice 필요
 ```
 
-- PowerPoint에서 직접 고쳐도 된다. 다만 `build_deck.js`로 다시 만들면 손으로 고친 내용은 사라진다.
-- `make_pdf.py`는 LibreOffice가 한글과 영문 사이에 넣는 간격("행동 .")을 끄기 위해 PPTX → ODP → PDF 순서로 변환한다.
+- 노트 판은 `show notes`(슬라이드 뒤에 노트 쪽)로 만든다. 두 화면 방식(`show notes on second screen`)은 XeLaTeX에서 글자색이 깨져 쓰지 않았다.
+- PowerPoint 판을 손으로 고친 뒤 `build_deck.js`로 다시 만들면 고친 내용은 사라진다. `make_pdf.py`는 LibreOffice가 한글과 영문 사이에 넣는 간격을 끄기 위해 PPTX → ODP → PDF로 변환한다.

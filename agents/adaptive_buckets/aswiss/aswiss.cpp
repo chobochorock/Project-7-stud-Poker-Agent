@@ -47,6 +47,13 @@
 //            one parent bucket and action; by induction its members then share their whole own past in buckets (the
 //            abstraction has perfect recall). Divided buckets keep the parent's tables. Needs prev.bin/prev_action.bin
 //            (export_history.py); every division is logged in closure.csv.
+// --avg-fill plain (with --label avg): the bucket average the judgment uses (labels, gate, certificate columns) keeps
+//            CFR's own-reach-weighted average where the average policy itself goes, and in every bucket none of whose
+//            members it reaches with own probability >= --avg-fill-reach (default 1e-4) takes the plain average of the
+//            bucket's current strategies instead (linear in t like the other average, not weighted by reach). Off the
+//            policy's own path any completion gives the same realization plan, so what the policy plays is unchanged;
+//            the completion matters only for the counterfactual values of actions the policy does not take, which the
+//            labels read. Epoch rows of log.csv gain filled_buckets, and policy_label_K.bin holds the policy judged.
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -83,6 +90,13 @@ vector<int64_t> start;
 vector<double> prob, util, delta_range;
 int nI, B;
 vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
+// --avg-fill: plain (unweighted) sums of each bucket's current strategies, kept lazily. A bucket's current strategy
+// changes only when its regrets do, so before each change the weight accumulated since its last change (plain_clock -
+// plain_last[b]) times the old strategy is added.
+bool avg_fill = false;
+double avg_fill_reach = 1e-4, plain_clock = 0;
+vector<double> Splain, plain_last;
+int filled_buckets = 0;
 vector<double> Rp, Rp2, Rit;                   // method A: replayed window sums, squared sums, one-iteration buffer
 mt19937_64 replay_rng;
 vector<int32_t> prev_info, prev_action, inc_code, timestep_of;  // --unit history inputs
@@ -243,9 +257,19 @@ double es(int h, int p, double weight) {
     return es(edges[e + k], p, weight);
 }
 
+inline void plain_flush(int b) {
+    const double dw = plain_clock - plain_last[b];
+    if (dw <= 0) return;
+    double s[W];
+    strategy(b, W, s);  // unused actions keep Q = 0; policy() renormalizes over the legal ones
+    for (int a = 0; a < W; ++a) Splain[(size_t)b * W + a] += dw * s[a];
+    plain_last[b] = plain_clock;
+}
+
 // Untouched buckets have Rtmp = 0 and Q >= 0, so skipping them leaves every table bit-identical.
 void apply_regrets() {
     for (int b : touched) {
+        if (avg_fill) plain_flush(b);
         for (int i = b * W; i < (b + 1) * W; ++i) { Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
         dirty[b] = 0;
     }
@@ -261,6 +285,49 @@ vector<double> policy(const vector<double>& num, bool lifted) {
         for (int a = 0; a < n; ++a) out[(size_t)I * W + a] = total > 0 ? row[a] / total : 1.0 / n;
     }
     return out;
+}
+// Own reach of every information set under a lifted policy (the largest over its histories; with perfect recall of
+// the original game they are all equal).
+void own_reach(int h, double p0, double p1, const double* pol, vector<double>& own) {
+    int pl = players[h];
+    if (pl == TERMINAL) return;
+    int64_t e = start[h]; int d = degree[h];
+    if (pl == CHANCE) { for (int k = 0; k < d; ++k) own_reach(edges[e + k], p0, p1, pol, own); return; }
+    int I = info[h];
+    own[I] = max(own[I], pl == 0 ? p0 : p1);
+    for (int a = 0; a < d; ++a) {
+        const double x = pol[(size_t)I * W + a];
+        if (pl == 0) own_reach(edges[e + a], p0 * x, p1, pol, own); else own_reach(edges[e + a], p0, p1 * x, pol, own);
+    }
+}
+// The lifted bucket average a judgment uses: CFR's average, with --avg-fill the plain average in the buckets the
+// average policy does not reach (sets filled_buckets).
+vector<double> label_policy() {
+    vector<double> pol = policy(S, true);
+    filled_buckets = 0;
+    if (!avg_fill) return pol;
+    for (int b = 0; b < B; ++b) plain_flush(b);
+    vector<double> own(nI, 0.0), reach(B, 0.0);
+    own_reach(0, 1, 1, pol.data(), own);
+    for (int I = 0; I < nI; ++I) reach[bucket[I]] = max(reach[bucket[I]], own[I]);
+    const vector<double> plain = policy(Splain, true);
+    vector<char> off(B, 0);
+    for (int b = 0; b < B; ++b) { off[b] = reach[b] < avg_fill_reach; filled_buckets += off[b]; }
+    for (int I = 0; I < nI; ++I)
+        if (off[bucket[I]]) for (int a = 0; a < W; ++a) pol[(size_t)I * W + a] = plain[(size_t)I * W + a];
+    return pol;
+}
+// New bucket tables after a split: rows a new bucket keeps from its parent copy the parent's plain sums, fresh
+// children start empty at the current clock.
+void plain_remap(const vector<int>& keep, int B2) {
+    if (!avg_fill) return;
+    vector<double> P2((size_t)B2 * W, 0.0), L2(B2, plain_clock);
+    for (int nb = 0; nb < B2; ++nb)
+        if (keep[nb] >= 0) {
+            for (int a = 0; a < W; ++a) P2[(size_t)nb * W + a] = Splain[(size_t)keep[nb] * W + a];
+            L2[nb] = plain_last[keep[nb]];
+        }
+    Splain = P2; plain_last = L2;
 }
 vector<double> current_policy() {
     vector<double> out((size_t)nI * W, 0.0);
@@ -382,6 +449,7 @@ Judgment judge_avg(vector<double> R, bool history, bool backward) {
     for (int nb = 0; nb < B2; ++nb)
         if (keep[nb] >= 0)
             for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+    plain_remap(keep, B2);
     bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     return j;
 }
@@ -404,6 +472,7 @@ int tree_close() {
     vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
     for (int nb = 0; nb < B2; ++nb)
         for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+    plain_remap(keep, B2);
     bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     return divided;
 }
@@ -448,6 +517,10 @@ int main(int argc, char** argv) {
     if (gated && !(label_rule == "avg" && split)) throw runtime_error("--gate-eps needs --label avg --split cum");
     if (gate_decay != "none" && gate_decay != "sqrt_iters" && gate_decay != "sqrt_rounds") throw runtime_error("unknown --gate-decay");
     const bool closure = opt.count("--tree-closure") && opt["--tree-closure"] == "1";
+    avg_fill = opt.count("--avg-fill") && opt["--avg-fill"] == "plain";
+    if (opt.count("--avg-fill") && opt["--avg-fill"] != "plain" && opt["--avg-fill"] != "none") throw runtime_error("unknown --avg-fill");
+    if (opt.count("--avg-fill-reach")) avg_fill_reach = stod(opt["--avg-fill-reach"]);
+    if (avg_fill && !(label_rule == "avg" && split)) throw runtime_error("--avg-fill needs --label avg --split cum");
     if (history_unit || closure) {
         prev_info = load<int32_t>(dir + "/prev.bin"); prev_action = load<int32_t>(dir + "/prev_action.bin");
         inc_code = load<int32_t>(dir + "/inc.bin"); timestep_of = load<int32_t>(dir + "/bucket_timestep.bin");
@@ -459,6 +532,7 @@ int main(int argc, char** argv) {
     }
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+    if (avg_fill) { Splain.assign((size_t)B * W, 0); plain_last.assign(B, 0); }
     FILE* closure_log = nullptr;
     auto close_tree = [&](long long it) {
         if (!closure) return;
@@ -489,7 +563,7 @@ int main(int argc, char** argv) {
                 jd.backward, jd.inconsistent, jd.units, stem.c_str());
         fflush(judgment_log);
     };
-    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units\n");
+    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units%s\n", avg_fill ? ",filled_buckets" : "");
     auto t0 = chrono::steady_clock::now();
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
     while (t < T) {
@@ -504,8 +578,8 @@ int main(int argc, char** argv) {
             exact_into(0, 1, 1, 1, nullptr, Rit);   // regrets of the strategy used in this iteration
             for (size_t i = 0; i < Rit.size(); ++i) { Rp[i] += Rit[i]; Rp2[i] += Rit[i] * Rit[i]; }
         }
-        if (mode == "full") { full(0, 1, 1, 1, weight); apply_regrets(); }
-        else for (int p = 0; p < 2; ++p) { es(0, p, weight); apply_regrets(); }
+        if (mode == "full") { full(0, 1, 1, 1, weight); if (avg_fill) plain_clock += weight; apply_regrets(); }
+        else for (int p = 0; p < 2; ++p) { es(0, p, weight); if (avg_fill) plain_clock += 0.5 * weight; apply_regrets(); }
         const bool sched = t == epoch_end || t == T;
         if (sched) {
             // window diagnostics from the per-infoset window sums (sampled in es mode)
@@ -532,7 +606,7 @@ int main(int argc, char** argv) {
                 fill(ExW.begin(), ExW.end(), 0);
             }
             // regrets of the bucket average policy (the checkpoint policy_bucket_k): certificate diagnostics, method B labels
-            vector<double> avg_pol = policy(S, true), Ravg((size_t)nI * W, 0.0);
+            vector<double> avg_pol = label_policy(), Ravg((size_t)nI * W, 0.0);
             exact_into(0, 1, 1, 1, avg_pol.data(), Ravg);
             double rho = 0, rhoP = 0;
             int consistent = 0;
@@ -552,6 +626,7 @@ int main(int argc, char** argv) {
                 // checkpoint policies BEFORE any split (they describe the epoch just finished)
                 save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
                 save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                if (avg_fill) save(out + "/policy_label_" + to_string(k) + ".bin", avg_pol);
                 if (!gated) {
                     Judgment jd = judge_avg(Ravg, history_unit, backward);
                     close_tree(t);
@@ -655,9 +730,11 @@ int main(int argc, char** argv) {
             save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
             double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
             double len = (double)(t - epoch_start);
-            fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d\n", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
+            fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
                     eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
                     rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev, units);
+            if (avg_fill) fprintf(log, ",%d", filled_buckets);
+            fprintf(log, "\n");
             fflush(log);
             fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
                     k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);
@@ -668,7 +745,7 @@ int main(int argc, char** argv) {
             if (epoch_end > T) epoch_end = T;
         }
         if (gated && t % gate_every == 0 && t != T) {  // gate check: judge only when rho_P(avg)/2 <= threshold
-            vector<double> gpol = policy(S, true), gR((size_t)nI * W, 0.0);
+            vector<double> gpol = label_policy(), gR((size_t)nI * W, 0.0);
             exact_into(0, 1, 1, 1, gpol.data(), gR);
             vector<double> gsum((size_t)B * W, 0.0);
             vector<int> gcount(B, 0);

@@ -128,4 +128,6 @@ python summarize_small.py OUT > summary.md
 python plot_small.py OUT leduc results_small_leduc; python plot_small.py OUT kuhn results_small_kuhn
 ```
 
+명제 B4(a)의 반례(혼합 평균 실험, `../README_KO.md`의 "혼합 평균" 절)는 `export_b4a.py OUT`로 같은 형식으로 만든다.
+
 원자료: `../results_data/small_games_summaries.tar.gz`. 실행마다 log.csv, judgments.csv, closure.csv, exploitability.csv, onpath.csv, 최종 분할이 들어 있고, 무작위·k-means 분할 파일과 summary.md도 들어 있다. 정책 파일은 빠져 있으며 위 명령으로 다시 만들 수 있다.

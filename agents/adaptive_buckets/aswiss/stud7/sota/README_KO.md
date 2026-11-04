@@ -4,11 +4,17 @@ ASWISS·k-means와 **같은 게임**(heads-up, 규칙 v3, 5구부터, heuristic 
 
 ## 고른 대조군과 진행 상태
 
+**기본 대조군 (2026-11-05 결정): ReBeL, MMD, ESCHER.** 계열마다 대표를 하나씩 둔다.
+
 | 계열 | 방법 | 한 번 방문이 다른 정보집합을 바꾸는 방식 | 상태 |
 |---|---|---|---|
-| 정책 기울기 | **MMD 자기대전** (Sokota 외; Rudolph 외 ICLR 2026에서 가장 강했던 계열) | 공유 정책망 | **구현·검증 (이 문서)** |
-| 신경망 CFR | ESCHER (McAleer 외 ICLR 2023) | 후회망 | 다음 |
-| 실시간 탐색 | 청사진 + 7구 정확 resolving (엔진의 `ExactSeventhResolverPolicy`) | 학습에서 못 본 정보집합을 둘 때 직접 푼다 | 다음 |
+| 정책 기울기 | **MMD 자기대전** (Sokota 외 ICLR 2023; Rudolph 외 ICLR 2026에서 가장 강했던 계열) | 공유 정책망 | **구현·검증 (이 문서)**, 조율 중 |
+| 신경망 CFR | **ESCHER** (McAleer 외 ICLR 2023) | 후회망 | 다음 |
+| 학습 + 탐색 | **ReBeL** (Brown 외 NeurIPS 2020) | 가치망, 그리고 두는 순간 하위 게임을 직접 푼다 | 설계 중 |
+
+**Obscuro (Zhang & Sandholm, arXiv 2506.01242)는 넣지 않는다.** 원문을 확인한 근거는 다음과 같다.
+- **풀려는 문제가 다르다.** Fog of War 체스처럼 공통 지식 집합이 10¹⁸ 규모라 나열할 수 없는 게임을 위한 탐색이다(KLUSS, 한쪽 GT-CFR + PCFR+). 원문은 heads-up 포커가 공통 지식 집합이 작아 포커 전용 하위 게임 풀이로 충분하다고 대비시킨다. 7-stud는 포커 쪽이라, 탐색 계열 대표로는 ReBeL이 맞다.
+- **잎 평가 함수가 필요하다.** 원문은 Stockfish의 완전정보 평가를 썼고, 평가 함수를 약하게 바꾸자 성능이 크게 떨어졌다. 7-stud에는 그런 평가 함수가 없다. 학습한 가치망을 쓰면 ReBeL과 겹친다. 원문도 학습한 평가 함수와의 결합을 향후 과제로 남겼다.
 
 ## 파일
 
@@ -67,6 +73,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 
 ## 남은 일
 
-1. ESCHER(신경망 CFR)
-2. 7구 실시간 resolving을 기존 청사진(ASWISS, k-means)과 MMD에 붙여 평가
-3. 같은 벽시계 시간 비교. 실행 순서와 동시 실행 수를 기록한다.
+1. MMD 조율 마무리(Leduc에서 학습률·β·magnet 이동)
+2. ESCHER(신경망 CFR)
+3. ReBeL. 저장소의 `agents/rebel`은 부분 구현(5구 청사진, 6구 국소 CFR + 7구 가치망, 7구 종단 CFR, torch·CUDA)이라 그대로 쓸 수 없다.
+4. 같은 벽시계 시간 비교. 실행 순서와 동시 실행 수를 기록한다.

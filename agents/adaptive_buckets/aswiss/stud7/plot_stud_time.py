@@ -29,6 +29,8 @@ ap.add_argument("--drop-stalls", type=float, default=0)
 a = ap.parse_args()
 colors = ["#444444", "#6a51a3", "#1b9e77", "#000000", "#e6550d", "#3182bd", "#777777", "#d62728", "#17becf"]
 fig, ax = plt.subplots(2, 2, figsize=(14, 10))
+YCAP = 20.0  # LBR panels grow up to this (ante/hand); points above are listed in the panel
+ymax, above = [0.0, 0.0], [[], []]
 for i, spec in enumerate(a.runs):
     name, rest = spec.split(":", 1)
     label, _, group = rest.partition("|")
@@ -54,6 +56,7 @@ for i, spec in enumerate(a.runs):
         rows = sorted((r for r in rows if r["policy"] == policy and r["file"] in secs), key=lambda r: secs[r["file"]])
         x = [secs[r["file"]] for r in rows]; y = [r["lbr_ante"] for r in rows]; e = [1.96 * r["lbr_se"] for r in rows]
         ax[0][j].errorbar(x, y, yerr=e, color=color, ls=ls, marker="o", ms=3, lw=1.1, capsize=2, label=lab if j == 0 else None)
+        ymax[j] = max([ymax[j]] + y); above[j] += [f"{lab} {v:.1f}" for v in y if v > YCAP]
         fpath = os.path.join(d, "eval_final.jsonl")
         if os.path.exists(fpath):
             for r in map(json.loads, open(fpath)):
@@ -68,9 +71,12 @@ for i, spec in enumerate(a.runs):
 tag = f" (stalls > {a.drop_stalls:g}x median removed)" if a.drop_stalls > 0 else ""
 for j, policy in enumerate(("Average", "Current")):
     ax[0][j].set_xscale("log"); ax[0][j].axhline(0, color="black", lw=0.6)
+    if above[j]:  # points above the axis are listed, not dropped silently
+        ax[0][j].text(0.01, 0.98, f"above {YCAP:g}, not drawn: " + "; ".join(above[j]), transform=ax[0][j].transAxes,
+                      fontsize=7, va="top", wrap=True)
     ax[0][j].set_title(f"{policy} policy: Policy-LBR (95%) against training time{tag}", fontsize=10)
     ax[0][j].set_xlabel("training wall-clock seconds (evaluation excluded)"); ax[0][j].set_ylabel("LBR winnings, ante/hand")
-    ax[0][j].set_ylim(bottom=-0.5, top=4); ax[0][j].grid(True, which="both", alpha=0.3)
+    ax[0][j].set_ylim(bottom=-0.5, top=min(YCAP, max(4.0, 1.1 * ymax[j]))); ax[0][j].grid(True, which="both", alpha=0.3)
 ax[1][0].set_xscale("log"); ax[1][0].set_yscale("log"); ax[1][0].set_title("Training roots against wall-clock seconds" + tag, fontsize=10)
 ax[1][0].set_xlabel("training wall-clock seconds"); ax[1][0].set_ylabel("training roots (5th-street deals)"); ax[1][0].grid(True, which="both", alpha=0.3)
 ax[1][1].set_xscale("log"); ax[1][1].set_yscale("log"); ax[1][1].set_title("Seconds per 1M roots (100k-root chunks; epoch-end label passes show as spikes)")

@@ -208,10 +208,15 @@ for ax, key, title, logy in ((axes[0], "lbr_ante", "Newest average policy: Polic
     for run, label, colour, marker, ls in SERIES:
         if run in off_scale: continue
         rows = {k: v for k, v in (final[run] or data[run]).items() if k[1] == "average"}
+        tag = ""
+        if not rows:  # MMD and ReBeL have only a current (last-iterate / search) policy
+            rows = {k: v for k, v in (final[run] or data[run]).items() if k[1] == "current"}
+            tag = ", current policy"
+        if not rows: continue
         r = max(rows.values(), key=lambda r: r["roots"])
         err = 1.96 * r["lbr_se"] if key == "lbr_ante" else None
         ax.errorbar([r["buckets"] + r.get("h4_buckets", 0) if learned_h4 else r["buckets"]], [r[key]], yerr=err, color=colour, marker=marker, ms=4 + 3 * LW, mec=SURFACE, mew=0.8, capsize=2,
-                    ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots, {r['pairs']:,} pairs)")
+                    ls="none", label=f"{label} ({r['roots'] / 1e6:.2f}M roots, {r['pairs']:,} pairs{tag})")
     ax.set_xscale("log")
     if logy: ax.set_yscale("log")
     ax.grid(True, color=GRID, lw=0.8); ax.set_axisbelow(True)

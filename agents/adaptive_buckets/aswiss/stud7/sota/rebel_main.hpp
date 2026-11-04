@@ -223,7 +223,7 @@ int train_rebel(int argc, char** argv) {
                                 {"--snapshot-every", "0"}, {"--curve-every", "100"}, {"--h4", "heuristic"}, {"--threads", "1"},
                                 {"--rebel-iters56", "32"}, {"--rebel-iters7", "64"}, {"--rebel-buckets", "64"},
                                 {"--rebel-hidden", "128"}, {"--rebel-lr", "3e-4"}, {"--rebel-batch", "32"},
-                                {"--rebel-train-steps", "1"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.1"}});
+                                {"--rebel-train-steps", "4"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.1"}});
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition rebel uses the heuristic H4 (--h4 heuristic)");
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");

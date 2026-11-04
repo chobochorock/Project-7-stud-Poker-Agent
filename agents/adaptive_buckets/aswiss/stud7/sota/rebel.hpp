@@ -218,7 +218,7 @@ struct Config {
     int iters56 = 32, iters7 = 64, buckets = 64;
     int hidden = 128;
     float lr = 3e-4f;
-    int batch = 32, train_steps = 1, capacity = 4096;
+    int batch = 32, train_steps = 4, capacity = 4096;
     double explore = 0.1, floor = 1e-6;
     uint64_t seed = 1;
 };

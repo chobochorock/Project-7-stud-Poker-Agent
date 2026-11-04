@@ -2036,7 +2036,8 @@ int eval(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--snapshot", ""}, {"--policy", "average"},
                                 {"--pairs", "2000"}, {"--particles", "64"}, {"--gap-roots", "4000"},
                                 {"--seed", "2026102701"}, {"--power-cache", "1000000"}, {"--pairs-csv", ""},
-                                {"--rho-roots", "0"}, {"--threads", "1"}});
+                                {"--rho-roots", "0"}, {"--threads", "1"},
+                                {"--rebel-iters56", ""}, {"--rebel-iters7", ""}, {"--rebel-buckets", ""}});
     if (o["--partition"] == "net") return sota::eval_net(o);
     if (o["--partition"] == "rebel") return sota::eval_rebel(o);  // --threads: parallel LBR hands (ReBeL only)
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));

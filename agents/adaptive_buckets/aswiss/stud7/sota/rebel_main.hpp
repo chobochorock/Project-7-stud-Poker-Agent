@@ -329,6 +329,10 @@ int eval_rebel(std::map<std::string, std::string>& o) {
     rebel::Config c;
     Mlp v6, v7;
     rebel::load_snapshot(o.at("--snapshot"), c, v6, v7);
+    // diagnostics: search settings at test time other than the snapshot's (default: the snapshot's own)
+    if (!o["--rebel-iters56"].empty()) c.iters56 = std::stoi(o["--rebel-iters56"]);
+    if (!o["--rebel-iters7"].empty()) c.iters7 = std::stoi(o["--rebel-iters7"]);
+    if (!o["--rebel-buckets"].empty()) c.buckets = std::stoi(o["--rebel-buckets"]);
     const uint64_t seed = std::stoull(o["--seed"]);
     const int pairs = std::stoi(o["--pairs"]), particles = std::stoi(o["--particles"]);
     const int threads = std::max(1, std::stoi(o.count("--threads") && !o["--threads"].empty() ? o["--threads"] : "1"));
@@ -375,7 +379,7 @@ int eval_rebel(std::map<std::string, std::string>& o) {
               << "\",\"pairs\":" << pairs << ",\"particles\":" << particles << ",\"seed\":" << seed << ",\"lbr_ante\":" << m
               << ",\"lbr_se\":" << se << ",\"gap_roots\":0,\"gap_proxy_ante\":NaN,\"gap_proxy_se\":NaN"
               << ",\"policy_queries\":" << q << ",\"policy_misses\":" << mi << ",\"lbr_seconds\":" << lbr_seconds
-              << ",\"threads\":" << threads << ",\"solves\":[" << solves[0] << ',' << solves[1] << ',' << solves[2] << "],\"solve_seconds\":" << ss
+              << ",\"threads\":" << threads << ",\"search\":\"" << rebel::config_string(c) << "\",\"solves\":[" << solves[0] << ',' << solves[1] << ',' << solves[2] << "],\"solve_seconds\":" << ss
               << ",\"h4\":\"heuristic\",\"h4_buckets\":0,\"rho_roots\":0,\"rho_plain_half\":-1,\"rho_cross_half\":-1,\"parameters\":"
               << v6.parameters() + v7.parameters() << ",\"lbr_rng\":\"per_pair\"}\n";
     return 0;

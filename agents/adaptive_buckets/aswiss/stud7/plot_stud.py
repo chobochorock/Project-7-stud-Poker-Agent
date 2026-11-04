@@ -166,7 +166,9 @@ if have_curve:
     styled(ax, "Training-deal gap proxy of the current policy (curve.csv)", "chunk mean, ante/hand (log)", True)
 else:
     ax.axis("off")
-notes = [f"{run}: LBR > {OFF_SCALE_LBR:g} (no card information), not drawn" for run in sorted(off_scale)] + [
+notes = [f"{run}: newest snapshot LBR > {OFF_SCALE_LBR:g}, not drawn" for run in sorted(off_scale)] + [
+    "Network arms (partition net, e.g. MMD): one policy (the last iterate) drawn in the current-policy panels; their "
+    "'buckets' are the policy network's parameters."] * any(r.startswith("net_") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
     f"{run}: no evaluations found, not drawn" + (" - this is the baseline, so the difference and ratio panels are empty"
                                                   if run == BASELINE else "") for run in MISSING] + [
     ("Heads-up 7-stud, rules v3, 5th-7th street with the 4th-street discard/reveal (12 actions) learned by both seats, "

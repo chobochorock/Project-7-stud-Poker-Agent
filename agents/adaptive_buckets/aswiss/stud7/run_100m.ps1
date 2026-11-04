@@ -49,6 +49,8 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")
     k512      = @("atom_k512", "atom", 512, "k-means 512", "")
     k1024     = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly", "")
+    # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
+    mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }

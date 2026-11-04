@@ -64,7 +64,9 @@ for spec in a.runs:
     if a.epochs is not None: snaps = [s for s in snaps if s[2] == "epoch" and s[3] in a.epochs]
     if a.latest and snaps: snaps = [max(snaps, key=lambda s: s[1])]
     for snap in snaps:
-        for policy in (("average",) if a.rho_only else ("average", "current")):
+        # a network (partition net) has only its last iterate, evaluated as the current policy
+        policies = ("current",) if partition == "net" else ("average",) if a.rho_only else ("average", "current")
+        for policy in policies:
             if (snap[0], policy) not in have:
                 jobs.append((d, snap, policy, partition, atlas))
 

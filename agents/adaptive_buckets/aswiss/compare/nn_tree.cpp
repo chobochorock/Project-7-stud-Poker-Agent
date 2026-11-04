@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
                           {"--episodes", "1024"}, {"--epochs", "4"}, {"--minibatch", "256"}, {"--lr", "3e-4"},
                           {"--value-lr", "1e-3"}, {"--alpha", "0.2"}, {"--alpha-halflife", "0"}, {"--beta", "1"},
                           {"--hidden1", "128"}, {"--hidden2", "64"}, {"--reward-scale", "1"},
-                          {"--magnet-every", "0"}};
+                          {"--magnet-every", "0"}, {"--normalize", "1"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
     c.episodes = stoi(o["--episodes"]); c.epochs = stoi(o["--epochs"]); c.minibatch = stoi(o["--minibatch"]);
     c.lr = stof(o["--lr"]); c.value_lr = stof(o["--value-lr"]); c.alpha0 = stod(o["--alpha"]);
     c.alpha_halflife = stod(o["--alpha-halflife"]); c.beta = stod(o["--beta"]); c.hidden1 = stoi(o["--hidden1"]);
-    c.hidden2 = stoi(o["--hidden2"]); c.magnet_every = stoi(o["--magnet-every"]); c.reward_scale = stod(o["--reward-scale"]); c.seed = stoull(o["--seed"]);
+    c.hidden2 = stoi(o["--hidden2"]); c.magnet_every = stoi(o["--magnet-every"]); c.normalize = o["--normalize"] == "1"; c.reward_scale = stod(o["--reward-scale"]); c.seed = stoull(o["--seed"]);
     sota::Mmd<TreeGame> mmd(g, c);
     const long long total = stoll(o["--episodes-total"]);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");

@@ -32,6 +32,7 @@ struct MmdConfig {
     float lr = 3e-4f, value_lr = 1e-3f;
     double alpha0 = 0.2, alpha_halflife = 0, beta = 1.0, reward_scale = 1.0;
     int magnet_every = 0;
+    bool normalize = true;  // advantages divided by their batch standard deviation (then alpha is relative to it)
     uint64_t seed = 1;
 };
 
@@ -114,7 +115,7 @@ struct Mmd {
         mean /= static_cast<double>(batch.size());
         for (auto& smp : batch) sq += (smp.adv - mean) * (smp.adv - mean);
         const double sd = std::sqrt(sq / std::max<size_t>(1, batch.size() - 1)) + 1e-8;
-        for (auto& smp : batch) smp.adv = static_cast<float>((smp.adv - mean) / sd);
+        for (auto& smp : batch) smp.adv = cfg.normalize ? static_cast<float>((smp.adv - mean) / sd) : smp.adv;
         const double al = alpha();
         std::vector<size_t> order(batch.size());
         std::iota(order.begin(), order.end(), 0);

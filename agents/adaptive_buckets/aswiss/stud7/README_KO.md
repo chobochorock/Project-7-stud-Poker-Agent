@@ -704,11 +704,13 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 | **− k-means 341** | **−0.578 [−0.750, −0.406]** | **−0.460 [−0.637, −0.283]** |
 | **− k-means 256** | **−0.641 [−0.835, −0.448]** | **−0.567 [−0.747, −0.386]** |
 
-![100M: hist_bbf와 기존 비교군의 학습 곡선(epoch 끝), k-means 256 대비 차이, bucket 수](results_stud_100m_bbf_seed1_curves.png)
+그림에는 네 비교군만 남겼다(`hist_bbf`, `hist`, k-means 1024, 기준선 k-means 256). `hist_b`, ASWISS 원자, k-means 341은 읽기 쉽게 하려고 그림에서만 뺐고, 위 표에는 그대로 있다. `hist`와 `hist_b`는 구별되지 않으므로(1.023 대 1.060), 본문 방법(가)과 같은 구간 라벨인 `hist`를 남겼다.
+
+![100M: hist_bbf, hist, k-means 1024, k-means 256의 학습 곡선(epoch 끝), k-means 256 대비 차이, bucket 수](results_stud_100m_bbf_seed1_curves.png)
 
 ![100M: 마지막 평균 정책의 LBR과 BR-gap 근사치 대 bucket 수](results_stud_100m_bbf_seed1_frontier.png)
 
-원자료: `results_data/runs_100m_s1_summaries.tar.gz`(사용자가 2026-11-05에 올린 파일, 일곱 비교군). `python plot_stud.py runs_100m results_stud_100m_bbf_seed1 --epoch-only --baseline atom_k256_s1 --runs "history_bbf_street_s1:ASWISS: history keys, method B, backward, avg-fill" "history_b_street_s1:bucket-history keys, method B labels" "history_street_s1:bucket-history keys, window labels" "atom_k1024_s1:k-means 1024 = atoms trained directly" "aswiss_k1024_z2_s1:ASWISS, atom labels" "atom_k341_s1:k-means 341" "atom_k256_s1:k-means 256 = baseline"`로 다시 그린다.
+원자료: `results_data/runs_100m_s1_summaries.tar.gz`(사용자가 2026-11-05에 올린 파일, 일곱 비교군). `python plot_stud.py runs_100m results_stud_100m_bbf_seed1 --epoch-only --baseline atom_k256_s1 --runs "history_bbf_street_s1:ASWISS: history keys, method B, backward, avg-fill" "history_b_street_s1:bucket-history keys, method B labels" "history_street_s1:bucket-history keys, window labels" "atom_k1024_s1:k-means 1024 = atoms trained directly" "aswiss_k1024_z2_s1:ASWISS, atom labels" "atom_k341_s1:k-means 341" "atom_k256_s1:k-means 256 = baseline"`로 다시 그린다(그림의 네 비교군만 주려면 해당 `--runs` 항목만 남긴다).
 
 **해석** (seed 1 하나)
 1. **평균 정책 LBR은 이번 비교군 중 가장 낮지만, bucket 이력 두 비교군과는 구별되지 않는다.**
@@ -743,6 +745,8 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 | k-means 256 (5개, 10-28) | 13.0 h | 3.5 h | 9.5 h | 32.0 s | 0.3 h |
 
 (`curve.csv` 마지막 행 기준이라 `log.csv`의 epoch 끝 시간과 조금 다르다. `hist_bbf`는 100M에서의 마지막 라벨 판정까지 넣으면 23.7 h다.)
+
+시간 그림도 같은 네 비교군이다(표는 일곱 개 모두).
 
 ![100M: LBR 대 학습 시간(원래 시간), roots 대 시간, 100만 roots당 시간](results_stud_100m_time_seed1.png)
 

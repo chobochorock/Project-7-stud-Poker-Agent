@@ -3,6 +3,9 @@
 //
 // Build: g++ -O3 -std=c++17 nn_tree.cpp -o nn_tree
 // Run:   ./nn_tree --tree DIR --out OUTDIR --algo mmd [--episodes-total 2000000] [MMD options, see ../stud7/sota/mmd.hpp]
+//        ./nn_tree --tree DIR --out OUTDIR --algo escher [--iterations 256] [ESCHER options, see ../stud7/sota/escher.hpp]
+//   ESCHER checkpoints: policy_bucket_k / policy_true_k = the average policy network (trained at the checkpoint),
+//   policy_current_k = regret matching on the regret networks; iters = hands used so far (value + regret traversals).
 //   --input onehot (default: one-hot information set, so the network can represent any policy) | features (features.bin)
 // Checkpoints after 1, 2, 4, 8, ... updates and the last one: policy_{bucket,true,current}_k.bin (the current network
 // policy at every information set; MMD evaluates its last iterate) and a log.csv row (iters = episodes so far).
@@ -10,6 +13,7 @@
 #include <cstdio>
 #include <map>
 #include "../stud7/sota/mmd.hpp"
+#include "../stud7/sota/escher.hpp"
 
 using namespace std;
 
@@ -54,6 +58,8 @@ struct TreeGame {
     }
     void features(const State& h, int, sota::Sparse& x) const { infoset_features(info[h], x); }
     int input_dim() const { return onehot ? nI : fdim; }
+    void history_features(const State& h, sota::Sparse& x) const { x.clear(); x.add(h, 1.0f); }  // one-hot history (node)
+    int history_dim() const { return static_cast<int>(players.size()); }
 };
 
 int main(int argc, char** argv) {
@@ -61,7 +67,9 @@ int main(int argc, char** argv) {
                           {"--episodes", "1024"}, {"--epochs", "4"}, {"--minibatch", "256"}, {"--lr", "3e-4"},
                           {"--value-lr", "1e-3"}, {"--alpha", "0.2"}, {"--alpha-halflife", "0"}, {"--beta", "1"},
                           {"--hidden1", "128"}, {"--hidden2", "64"}, {"--reward-scale", "1"},
-                          {"--magnet-every", "0"}, {"--normalize", "1"}};
+                          {"--magnet-every", "0"}, {"--normalize", "1"}, {"--iterations", "256"}, {"--value-hands", "1024"},
+                          {"--value-steps", "200"}, {"--traversals", "1024"}, {"--regret-steps", "400"}, {"--avg-steps", "2000"},
+                          {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
@@ -75,7 +83,54 @@ int main(int argc, char** argv) {
     g.nI = static_cast<int>(g.counts.size());
     g.onehot = o["--input"] == "onehot";
     if (!g.onehot) { g.feats = load<double>(dir + "/features.bin"); g.fdim = static_cast<int>(g.feats.size() / g.nI); }
-    if (o["--algo"] != "mmd") throw runtime_error("--algo must be mmd");
+    if (o["--algo"] == "escher") {
+        sota::EscherConfig e;
+        e.hidden1 = stoi(o["--hidden1"]); e.hidden2 = stoi(o["--hidden2"]); e.value_hands = stoi(o["--value-hands"]);
+        e.value_steps = stoi(o["--value-steps"]); e.traversals = stoi(o["--traversals"]); e.regret_steps = stoi(o["--regret-steps"]);
+        e.avg_steps = stoi(o["--avg-steps"]); e.batch = stoi(o["--batch"]); e.regret_capacity = e.strategy_capacity = stoull(o["--capacity"]);
+        e.lr = stof(o["--lr"]); e.value_lr = stof(o["--value-lr"]); e.reward_scale = stod(o["--reward-scale"]);
+        e.reinit = o["--reinit"] == "1"; e.seed = stoull(o["--seed"]);
+        sota::Escher<TreeGame> es(g, e);
+        FILE* log = fopen((out + "/log.csv").c_str(), "w");
+        if (!log) throw runtime_error("cannot write " + out + "/log.csv");
+        fprintf(log, "epoch,iters,buckets_after,iteration,regret_samples,value_loss,regret_loss0,regret_loss1,seconds\n");
+        const auto t0 = chrono::steady_clock::now();
+        const long long T = stoll(o["--iterations"]);
+        int k = 0; long long next = 1;
+        for (long long it = 1; it <= T; ++it) {
+            es.iterate();
+            if (it != next && it != T) continue;
+            next *= 2;
+            es.train_average();
+            vector<double> pa(static_cast<size_t>(g.nI) * W, 0.0), pc(pa.size(), 0.0);
+            sota::Sparse x;
+            for (int I = 0; I < g.nI; ++I) {
+                g.infoset_features(I, x);
+                const uint8_t mask = static_cast<uint8_t>((1u << g.counts[I]) - 1);
+                es.average(x, mask, &pa[static_cast<size_t>(I) * W]);
+            }
+            // the current policy uses the regret network of the information set's owner
+            {
+                vector<int32_t> owner = load<int32_t>(dir + "/owner.bin");
+                for (int I = 0; I < g.nI; ++I) {
+                    g.infoset_features(I, x);
+                    es.current(owner[I], x, static_cast<uint8_t>((1u << g.counts[I]) - 1), &pc[static_cast<size_t>(I) * W]);
+                }
+            }
+            save(out + "/policy_bucket_" + to_string(k) + ".bin", pa); save(out + "/policy_true_" + to_string(k) + ".bin", pa);
+            save(out + "/policy_current_" + to_string(k) + ".bin", pc);
+            const double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
+            fprintf(log, "%d,%lld,%d,%lld,%lld,%.6g,%.6g,%.6g,%.3f\n", k, es.roots_done, g.nI, it, es.regret_samples, es.last_value_loss,
+                    es.last_regret_loss[0], es.last_regret_loss[1], secs);
+            fflush(log);
+            fprintf(stderr, "checkpoint %d iteration=%lld hands=%lld value_loss=%.4f regret_loss=%.4f/%.4f (%.1fs)\n", k, it,
+                    es.roots_done, es.last_value_loss, es.last_regret_loss[0], es.last_regret_loss[1], secs);
+            ++k;
+        }
+        fclose(log);
+        return 0;
+    }
+    if (o["--algo"] != "mmd") throw runtime_error("--algo must be mmd or escher");
     sota::MmdConfig c;
     c.episodes = stoi(o["--episodes"]); c.epochs = stoi(o["--epochs"]); c.minibatch = stoi(o["--minibatch"]);
     c.lr = stof(o["--lr"]); c.value_lr = stof(o["--value-lr"]); c.alpha0 = stod(o["--alpha"]);

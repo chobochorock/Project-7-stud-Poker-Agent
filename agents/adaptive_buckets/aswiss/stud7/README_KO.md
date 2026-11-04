@@ -658,7 +658,7 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
   --labels gate_e10_s1="eps 10" gate_e3_s1="eps 3" gate_e1_s1="eps 1" gate_e3z3_s1="eps 3, backward z=3" gate_it20_s1="iterate regret, eps 20" ASWISS_ungated="ASWISS, no gate"
 ```
 
-## 혼합 평균 (`--avg-fill plain`, 2026-11-03 추가, 100M 실행 대기)
+## 혼합 평균 (`--avg-fill plain`, 2026-11-03 추가, 100M 결과는 다음 절)
 
 개념과 다른 게임의 결과는 [`../AVG_FILL_KO.md`](../AVG_FILL_KO.md)에 있다.
 - **7-stud 구현:** 평균 전략 순회(라벨, 문턱, 역방향 세부 이력에 쓰는 순회)에서 탐색자의 자기 도달확률을 경로를 따라 곱한다(평균 전략 기준). 10⁻⁴(`--avg-fill-reach`) 미만이 된 탐색자 노드에서는 그 bucket의 현재 전략 단순 평균으로 가치를 계산한다. 상대 노드는 평균 전략 그대로 표본을 뽑는다.
@@ -670,7 +670,70 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
   - 옵션을 끄면 이전 학습기와 스냅숏, log, `backward.csv`가 같다(15만 roots).
   - 옵션을 켜고 7만 roots에서 멈췄다가 재개한 실행이 끊지 않은 31만 roots 실행과 스냅숏, `fill.csv`, `backward.csv`가 같다. 단순 평균은 checkpoint에 저장된다.
 - **짧은 확인** (seed 1): 단순 평균으로 계산한 탐색자 노드 비율이 1만 roots 10%, 3만 28%, 7만 48%, 15만 31%, 31만 23%였다. 15만 roots의 bucket은 1,498개(옵션 없이 1,526개)다.
-- **100M 비교군:** `hist_bbf`(= `hist_bb` + `--avg-fill plain`). 효과를 보려면 `hist_bb`도 함께 돌린다. 둘 다 아직 100M을 돌리지 않았다.
+- **100M 비교군:** `hist_bbf`(= `hist_bb` + `--avg-fill plain`). 2026-11-05에 100M을 마쳤다(다음 절). 혼합 평균만의 효과를 보려면 `hist_bb`도 100M을 돌려야 하는데, 아직 돌리지 않았다.
+
+## ASWISS + 혼합 평균 100M 결과 (노트북 실행, seed 1, 완료 2026-11-05)
+
+**조건**
+- 사용자가 노트북에서 `run_100m.ps1 -Arms hist_bbf -SnapshotEvery 0`으로 돌렸다. 이전 100M 실행들과 같은 출력 폴더, 같은 학습 seed(1), 100M roots다.
+  - `hist_bbf`: bucket 이력 + 방법 B 라벨 + 역방향 분할 + 혼합 평균(`--avg-fill plain`). 카드는 street 첫 결정에서만 넣고, 라벨 표본 상한은 2.56M roots다.
+  - `--threads` 이전 실행 파일이라 라벨 순회는 한 스레드였다.
+- 학습 시간은 23.7시간(85,264초)이다. `hist_b` 14.1시간, `hist` 13.6시간의 1.7배다.
+  - 늘어난 시간의 대부분은 epoch 끝의 평균 전략 순회와 역방향 재순회다.
+  - 마지막 두 epoch(40.95M → 100M roots)에만 16.6시간이 걸렸다.
+- 마지막 스냅숏(100M, 분할 전 bucket 1,199,549개)을 다른 비교군과 같은 deal로 20,000 pair 평가했다.
+
+| 비교군 | 평가한 분할의 bucket 수 | 평균 정책 LBR (95%) | 현재 정책 LBR (95%) | BR-gap 근사치 (평균/현재) |
+|---|---:|---:|---:|---:|
+| **ASWISS + 혼합 평균 (`hist_bbf`)** | 1,199,549 | **0.961 ± 0.132** | 1.138 ± 0.123 | 865 / 579 |
+| bucket 이력 + 방법 B (`hist_b`) | 861,446 | 1.060 ± 0.143 | 1.082 ± 0.113 | 803 / 566 |
+| bucket 이력 + 구간 라벨 (`hist`) | 1,274,437 | 1.023 ± 0.140 | 1.096 ± 0.116 | 797 / 538 |
+| ASWISS (원자) | 78,397 | 1.298 ± 0.141 | 1.373 ± 0.130 | 730 / 635 |
+| k-means 1024 (원자 전부) | 145,410 | 1.282 ± 0.130 | 1.481 ± 0.150 | 689 / 630 |
+| k-means 341 | 49,593 | 1.539 ± 0.127 | 1.598 ± 0.135 | 658 / 613 |
+| k-means 256 | 37,249 | 1.603 ± 0.156 | 1.705 ± 0.142 | 607 / 569 |
+
+같은 deal로 짝지은 차이(`hist_bbf` − 비교군, 95%)다.
+
+| 비교 | 평균 정책 | 현재 정책 |
+|---|---:|---:|
+| − bucket 이력 + 방법 B | −0.098 [−0.277, +0.081] | +0.056 [−0.102, +0.213] |
+| − bucket 이력 + 구간 라벨 | −0.061 [−0.234, +0.111] | +0.042 [−0.119, +0.202] |
+| **− ASWISS (원자)** | **−0.337 [−0.521, −0.153]** | **−0.235 [−0.411, −0.059]** |
+| **− k-means 1024** | **−0.321 [−0.496, −0.145]** | **−0.343 [−0.529, −0.158]** |
+| **− k-means 341** | **−0.578 [−0.750, −0.406]** | **−0.460 [−0.637, −0.283]** |
+| **− k-means 256** | **−0.641 [−0.835, −0.448]** | **−0.567 [−0.747, −0.386]** |
+
+![100M: hist_bbf와 기존 비교군의 학습 곡선(epoch 끝), k-means 256 대비 차이, bucket 수](results_stud_100m_bbf_seed1_curves.png)
+
+![100M: 마지막 평균 정책의 LBR과 BR-gap 근사치 대 bucket 수](results_stud_100m_bbf_seed1_frontier.png)
+
+원자료: `results_data/runs_100m_s1_summaries.tar.gz`(사용자가 2026-11-05에 올린 파일, 일곱 비교군). `python plot_stud.py runs_100m results_stud_100m_bbf_seed1 --epoch-only --baseline atom_k256_s1 --runs "history_bbf_street_s1:ASWISS: history keys, method B, backward, avg-fill" "history_b_street_s1:bucket-history keys, method B labels" "history_street_s1:bucket-history keys, window labels" "atom_k1024_s1:k-means 1024 = atoms trained directly" "aswiss_k1024_z2_s1:ASWISS, atom labels" "atom_k341_s1:k-means 341" "atom_k256_s1:k-means 256 = baseline"`로 다시 그린다.
+
+**해석** (seed 1 하나)
+1. **평균 정책 LBR은 이번 비교군 중 가장 낮지만, bucket 이력 두 비교군과는 구별되지 않는다.**
+   - 0.961로, `hist_b`보다 −0.098, `hist`보다 −0.061이다. 두 구간 모두 0을 포함한다.
+   - 현재 정책은 오히려 +0.04–0.06 높고, 이것도 유의하지 않다.
+2. **원자 비교군 전부보다는 두 정책 모두에서 유의하게 낮다.** k-means 1024보다 평균 정책 −0.32, 현재 정책 −0.34다. 앞 절의 bucket 이력 비교군들과 같은 결론이다.
+3. **역방향 분할이 나눈 몫은 작다.**
+   - 마지막 네 epoch에서 역방향 분할은 epoch당 7,508 → 4,363 → 2,522 → 1,453개다. 같은 epoch의 전체 분할 16만–45만 개의 0.3–5%다.
+   - 세부 이력 표가 상한 400만 개에 걸렸다. 그 뒤로 새 세부 이력의 방문은 버려졌다.
+4. **혼합 평균은 판정에 넓게 쓰였다.** 마지막 판정들에서 평균 전략 순회의 탐색자 노드 중 37–38%(예: 2억 2,181만 개 중 8,303만 개)를 bucket의 단순 평균으로 계산했다. 31만 roots 확인 때의 10–48%와 같은 범위다.
+5. **이 실행으로 나눌 수 없는 것:**
+   - `hist_bb`(혼합 평균 없음)의 100M이 없다. 그래서 역방향 분할의 몫과 혼합 평균의 몫을 따로 볼 수 없다. `hist_b`와의 차이는 둘을 합친 효과인데 유의하지 않다.
+   - bucket 수가 다르다(120만 대 86만, 127만).
+6. **BR-gap 근사치**는 865/579로 비교군 중 가장 크다. 앞 절들과 같이 근사치는 LBR과 순위가 달라 결론에 쓰지 않는다.
+
+**AGENTS.md 점검**
+- k-means 256 기준선을 모든 곡선에 겹쳤다. 같은 학습량에서의 짝지은 LBR 차이와 근사치 비율을 그렸고, 평균 정책과 현재 정책을 나눴다.
+- 일곱 비교군 모두 같은 평가 deal, LBR seed, particle 64, gap deal, 학습 seed(1), 학습량(100M roots)을 쓴다.
+- 결론은 마지막 20,000 pair 평가에서만 냈다. 곡선은 epoch 끝 2,000 pair 평가다.
+- 남은 차이
+  - `hist_bbf`는 epoch마다 평균 전략 순회와 역방향 재순회(각각 최대 2.56M roots)를 더 쓴다. 이 순회는 x축에 들어가지 않는다.
+  - bucket 수가 다르다.
+  - 학습 deal 경로는 전략이나 분할이 달라지는 순간부터 갈라진다.
+  - seed가 하나다.
+- LBR은 선형 축이고, 교차점이나 기울기로 외삽하지 않았다.
 
 ## 라벨 순회 병렬화 (`--threads`, 2026-11-03 추가)
 

@@ -126,12 +126,13 @@ elseif ($Action -eq "stop") {
 }
 elseif ($Action -in @("eval", "final")) {
     if (-not (Test-Path $Exe)) { throw "build first (-Action run builds $Exe)" }
-    $specs = $Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][1]):$(AtlasPath $Arm[$_][2])" }
+    # @(...) keeps one arm an array: splatting a lone string (@specs) would pass it character by character
+    $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][1]):$(AtlasPath $Arm[$_][2])" })
     $extra = if ($Action -eq "final") { @("--latest", "--pairs", "20000", "--tag", "final") } else { @("--min-roots", "100000") }
     & $Python (Join-Path $Here "evaluate.py") $Exe $Out --runs @specs --workers $Workers @extra
 }
 elseif ($Action -eq "plot") {
-    $specs = $Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" }
+    $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" })
     # baseline: the first k-means arm that was run (k256 when present)
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }

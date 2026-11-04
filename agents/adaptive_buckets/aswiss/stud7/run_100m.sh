@@ -18,11 +18,11 @@ EXE=$HERE/aswiss_stud
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
-                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [mmd]=net_mmd)
+                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [mmd]=net_mmd [escher]=net_escher [rebel]=rebel)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
-                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history [mmd]=net)
+                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history [mmd]=net [escher]=net [rebel]=rebel)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [mmd]=1024)
+              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [mmd]=1024 [escher]=1024 [rebel]=1024)
 # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
 declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
                   [hist_b]="--history-cards street --label avg --label-cap 2560000"
@@ -30,7 +30,8 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [hist_every]="--history-cards every --label-cap 2560000"
                   [hist_bb]="--history-cards street --label avg --label-cap 2560000 --backward 1"
                   [hist_bbf]="--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain"
-                  [mmd]="--algo mmd")
+                  [mmd]="--algo mmd" [escher]="--algo escher"
+                  [rebel]="--roots 60000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
                   [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly"
@@ -40,15 +41,16 @@ declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b
                   [hist_every]="bucket-history keys, cards at every decision"
                   [hist_bb]="ASWISS: bucket-history keys, method B, backward split"
                   [hist_bbf]="ASWISS + hybrid average for labels (--avg-fill plain)"
-                  [mmd]="MMD self-play (policy network)")
+                  [mmd]="MMD self-play (policy network)" [escher]="ESCHER (neural CFR)" [rebel]="ReBeL (scaled: search + value networks)")
 atlas() { echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }
 mkdir -p "$OUT"
 case $ACTION in
 run)
     # rebuild when the executable is missing or older than its sources (for example after git pull)
     if [ ! -x "$EXE" ] || [ "$HERE/aswiss_stud.cpp" -nt "$EXE" ] || [ "$HERE/h4_lbr_generated.hpp" -nt "$EXE" ] ||
-       [ "$HERE/../../../cpp_mccfr/stud_mccfr.cpp" -nt "$EXE" ]; then
-        g++ -O3 -std=c++17 "$HERE/aswiss_stud.cpp" -o "$EXE" ||
+       [ "$HERE/../../../cpp_mccfr/stud_mccfr.cpp" -nt "$EXE" ] ||
+       [ -n "$(find "$HERE/sota" -name '*.hpp' -newer "$EXE" 2>/dev/null)" ]; then
+        g++ -O3 -std=c++17 -pthread "$HERE/aswiss_stud.cpp" -o "$EXE" ||
             { echo "build failed; if arms are still running, stop them first (stop, then status)"; exit 1; }
     fi
     for a in $ARMS; do
@@ -72,7 +74,7 @@ stop)
 eval|final)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${PART[$a]}:$(atlas "${K[$a]}")"); done
     extra=(--min-roots 100000); [ "$ACTION" = final ] && extra=(--latest --pairs 20000 --tag final)
-    "$PYTHON" "$HERE/evaluate.py" "$EXE" "$OUT" --runs "${specs[@]}" --workers "$WORKERS" "${extra[@]}" ;;
+    "$PYTHON" "$HERE/evaluate.py" "$EXE" "$OUT" --runs "${specs[@]}" --workers "$WORKERS" --rebel-threads "$WORKERS" "${extra[@]}" ;;
 plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run

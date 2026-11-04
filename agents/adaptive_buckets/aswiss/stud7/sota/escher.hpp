@@ -1,9 +1,12 @@
 // ESCHER (McAleer, Farina, Lanctot, Sandholm, ICLR 2023, arXiv 2206.04122), templated on the game like mmd.hpp.
 //
 // Iteration t:
-//  1. history value network: `value_hands` hands with the current profile sigma_t for both seats; the network maps the
-//     full history (both players' private information) to player 0's return (/ reward_scale); `value_steps` minibatch
-//     Adam steps, warm-started across iterations.
+//  1. history value network: `value_hands` hands with the current profile sigma_t for both seats, except that each
+//     decision takes a uniform random action with probability value_explore; only the histories after a hand's last
+//     such exploratory action are kept (their continuation followed sigma_t, so the return is an unbiased sample of
+//     v_sigma_t there), so the network also learns the values after actions sigma_t rarely takes, which step 2 needs.
+//     The network maps the full history (both players' private information) to player 0's return (/ reward_scale);
+//     `value_steps` minibatch Adam steps, warm-started across iterations.
 //  2. for each player i, `traversals` hands in which i acts from a fixed sampling policy (uniform over legal actions)
 //     and the opponent from sigma_t. At each of i's information sets on the path, with history h:
 //         r(a) = q(h,a) - sum_b sigma_t(b) q(h,b),   q(h,a) = V(h.a) (the exact utility when h.a is terminal),
@@ -28,7 +31,7 @@ struct EscherConfig {
     int value_hands = 1024, value_steps = 200, traversals = 1024, regret_steps = 400, avg_steps = 2000, batch = 256;
     size_t regret_capacity = 1000000, strategy_capacity = 1000000;
     float lr = 1e-3f, value_lr = 1e-3f;
-    double reward_scale = 1.0;
+    double reward_scale = 1.0, value_explore = 0.25;
     bool reinit = true;
     uint64_t seed = 1;
 };
@@ -56,8 +59,8 @@ struct Escher {
     std::mt19937_64 rng;
     long long t = 0, roots_done = 0, regret_samples = 0;
     double last_value_loss = 0, last_regret_loss[2] = {0, 0};
-    struct RegretSample { Sparse x; uint8_t mask; std::array<float, A> r; float w; };
-    struct StratSample { Sparse x; uint8_t mask; std::array<float, A> p; float w; };
+    struct RegretSample { Sparse x; uint8_t mask; std::array<float, A> v; float w; };  // v: sampled regrets
+    struct StratSample { Sparse x; uint8_t mask; std::array<float, A> v; float w; };   // v: sigma_t
     struct ValueSample { Sparse h; float ret; };
     Reservoir<RegretSample> rmem[2];
     Reservoir<StratSample> smem;
@@ -103,14 +106,25 @@ struct Escher {
         std::vector<ValueSample> data;
         for (int e = 0; e < cfg.value_hands; ++e) {
             auto s = game.root(rng);
-            const size_t first = data.size();
+            size_t first = data.size();
             while (!game.terminal(s)) {
                 const int pl = game.actor(s);
                 if (pl < 0) { game.chance(s, rng); continue; }
+                const uint8_t mask = game.mask(s);
                 ValueSample v; game.history_features(s, v.h); data.push_back(std::move(v));
+                if (std::uniform_real_distribution<double>(0, 1)(rng) < cfg.value_explore) {
+                    int n = 0;
+                    for (int b = 0; b < A; ++b) n += mask >> b & 1;
+                    const int pickn = std::uniform_int_distribution<int>(0, n - 1)(rng);
+                    int a = -1;
+                    for (int b = 0, c = 0; b < A; ++b) if (mask >> b & 1) { if (c == pickn) { a = b; break; } ++c; }
+                    data.resize(first);  // this history and the earlier ones are not followed by sigma_t
+                    game.step(s, a);
+                    continue;
+                }
                 Sparse x; game.features(s, pl, x);
-                double p[A]; current(pl, x, game.mask(s), p);
-                game.step(s, sample(p, game.mask(s)));
+                double p[A]; current(pl, x, mask, p);
+                game.step(s, sample(p, mask));
             }
             const double u0 = game.utility(s, 0);
             for (size_t i = first; i < data.size(); ++i) data[i].ret = static_cast<float>(u0 / cfg.reward_scale);
@@ -150,7 +164,8 @@ struct Escher {
                         q[a] = value_of(child, i); node += sigma[a] * q[a];
                     }
                     RegretSample rs; rs.x = x; rs.mask = mask; rs.w = w;
-                    for (int a = 0; a < A; ++a) rs.r[a] = (mask >> a & 1) ? static_cast<float>(q[a] - node) : 0.0f;
+                    // in units of reward_scale, like the value network (regret matching ignores the scale)
+                    for (int a = 0; a < A; ++a) rs.v[a] = (mask >> a & 1) ? static_cast<float>((q[a] - node) / cfg.reward_scale) : 0.0f;
                     rmem[i].add(std::move(rs), rng); ++regret_samples;
                     int n = 0;
                     for (int a = 0; a < A; ++a) n += mask >> a & 1;
@@ -160,7 +175,7 @@ struct Escher {
                     game.step(s, a);
                 } else {
                     StratSample ss; ss.x = x; ss.mask = mask; ss.w = w;
-                    for (int a = 0; a < A; ++a) ss.p[a] = static_cast<float>(sigma[a]);
+                    for (int a = 0; a < A; ++a) ss.v[a] = static_cast<float>(sigma[a]);
                     smem.add(std::move(ss), rng);
                     game.step(s, sample(sigma, mask));
                 }
@@ -184,7 +199,7 @@ struct Escher {
                 float dy[A] = {};
                 const float wn = rs.w / static_cast<float>(t);  // weights t'/t in (0, 1]
                 for (int a = 0; a < A; ++a) if (rs.mask >> a & 1) {
-                    const float d = c.y[a] - rs.r[a];
+                    const float d = c.y[a] - rs.v[a];
                     dy[a] = 2.0f * wn * d;
                     if (st == cfg.regret_steps - 1) { loss += wn * d * d; }
                 }
@@ -219,7 +234,7 @@ struct Escher {
                 double p[A]; masked_softmax(c.y.data(), ss.mask, A, p);
                 const float wn = ss.w / static_cast<float>(t);
                 float dy[A] = {};
-                for (int a = 0; a < A; ++a) if (ss.mask >> a & 1) dy[a] = wn * static_cast<float>(p[a] - ss.p[a]);  // d CE / d logits
+                for (int a = 0; a < A; ++a) if (ss.mask >> a & 1) dy[a] = wn * static_cast<float>(p[a] - ss.v[a]);  // d CE / d logits
                 avg.backward(ss.x, c, dy, g);
             }
             opt.step(avg, g, 1.0f / static_cast<float>(cfg.batch));

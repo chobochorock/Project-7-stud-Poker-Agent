@@ -167,8 +167,13 @@ if have_curve:
 else:
     ax.axis("off")
 notes = [f"{run}: newest snapshot LBR > {OFF_SCALE_LBR:g}, not drawn" for run in sorted(off_scale)] + [
-    "Network arms (partition net, e.g. MMD): one policy (the last iterate) drawn in the current-policy panels; their "
-    "'buckets' are the policy network's parameters."] * any(r.startswith("net_") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
+    "Network arms (partition net; not MCCFR): MMD has one policy (its last iterate, current-policy panels); ESCHER has an "
+    "average-policy network and regret-matching current policy; their 'buckets' are the networks' parameters."] * any(
+        r.startswith("net_") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
+    "ReBeL (scaled, partition rebel; not MCCFR): its 'roots' are self-play hands (each solves up to three street "
+    "subgames), its search policy is drawn in the current-policy panels, 'buckets' = value-network parameters, gap "
+    "proxy not computed. Compare it on the wall-clock axis (plot_stud_time.py)."] * any(
+        r.startswith("rebel") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
     f"{run}: no evaluations found, not drawn" + (" - this is the baseline, so the difference and ratio panels are empty"
                                                   if run == BASELINE else "") for run in MISSING] + [
     ("Heads-up 7-stud, rules v3, 5th-7th street with the 4th-street discard/reveal (12 actions) learned by both seats, "

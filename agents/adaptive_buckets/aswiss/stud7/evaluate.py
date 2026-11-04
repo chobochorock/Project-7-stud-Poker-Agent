@@ -28,6 +28,9 @@ ap.add_argument("--pairs", type=int, default=2000); ap.add_argument("--particles
 ap.add_argument("--gap-roots", type=int, default=4000); ap.add_argument("--seed", type=int, default=2026102701)
 ap.add_argument("--tag", default="")
 ap.add_argument("--rho-roots", type=int, default=0); ap.add_argument("--rho-only", action="store_true")
+# ReBeL (partition rebel): roots are self-play hands (--min-roots does not apply), a search runs at every street, so
+# its LBR hands run on --rebel-threads threads inside one evaluation; --rebel-pairs overrides --pairs for it
+ap.add_argument("--rebel-threads", type=int, default=1); ap.add_argument("--rebel-pairs", type=int, default=0)
 a = ap.parse_args()
 suffix = f"_{a.tag}" if a.tag else ""
 
@@ -60,12 +63,16 @@ for spec in a.runs:
         print(f"skipped {name}: no run folder with log.csv in {a.runs_dir} (arm not trained here?)", flush=True)
         continue
     have = done(os.path.join(d, f"{'rho' if a.rho_only else 'eval'}{suffix}.jsonl"))
-    snaps = [s for s in snapshots(d, partition) if s[2] in a.kinds and s[1] >= a.min_roots]
+    snaps = [s for s in snapshots(d, partition) if s[2] in a.kinds and (s[1] >= a.min_roots or partition == "rebel")]
     if a.epochs is not None: snaps = [s for s in snaps if s[2] == "epoch" and s[3] in a.epochs]
     if a.latest and snaps: snaps = [max(snaps, key=lambda s: s[1])]
     for snap in snaps:
-        # a network (partition net) has only its last iterate, evaluated as the current policy
-        policies = ("current",) if partition == "net" else ("average",) if a.rho_only else ("average", "current")
+        # networks (partition net): MMD has only its last iterate (current); ESCHER has an average and a current policy.
+        # ReBeL (partition rebel) plays its search policy, evaluated once and shown with the current policies.
+        kind = open(os.path.join(d, "net_kind.txt")).read().strip() if partition == "net" and os.path.exists(os.path.join(d, "net_kind.txt")) else "mmd"
+        policies = (("average", "current") if kind == "escher" else ("current",)) if partition == "net" \
+            else ("current",) if partition == "rebel" \
+            else ("average",) if a.rho_only else ("average", "current")
         for policy in policies:
             if (snap[0], policy) not in have:
                 jobs.append((d, snap, policy, partition, atlas))
@@ -79,8 +86,10 @@ def run(job):
            "--seed", str(a.seed)]
     if a.rho_only: cmd += ["--pairs", "0", "--gap-roots", "0", "--rho-roots", str(a.rho_roots or 128000)]
     else:
-        cmd += ["--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", str(a.gap_roots),
+        pairs = a.rebel_pairs if partition == "rebel" and a.rebel_pairs > 0 else a.pairs
+        cmd += ["--pairs", str(pairs), "--particles", str(a.particles), "--gap-roots", str(a.gap_roots),
                 "--pairs-csv", os.path.join(d, f"lbr_pairs{suffix}_{stem}_{policy}.csv")]
+        if partition == "rebel": cmd += ["--threads", str(a.rebel_threads)]
         if a.rho_roots: cmd += ["--rho-roots", str(a.rho_roots)]
     if atlas: cmd += ["--atlas", atlas]
     row = json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)

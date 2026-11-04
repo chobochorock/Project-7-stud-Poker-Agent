@@ -83,6 +83,9 @@
 #include "../../../cpp_mccfr/stud_mccfr.cpp"
 
 #include <csignal>
+#include <deque>
+#include <memory>
+#include <thread>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -1678,11 +1681,15 @@ bool read_checkpoint(const std::string& file, const std::string& config, LoopSta
 namespace sota {  // SOTA neural baselines (sota/stud7_net_main.hpp, included before main)
 int train_net(int argc, char** argv);
 int eval_net(std::map<std::string, std::string>& o);
+int train_rebel(int argc, char** argv);  // sota/rebel_main.hpp
+int eval_rebel(std::map<std::string, std::string>& o);
 }
 
 int train(int argc, char** argv) {
     for (int i = 2; i + 1 < argc; i += 2)  // --partition net: the neural baselines have their own trainer
         if (std::string(argv[i]) == "--partition" && std::string(argv[i + 1]) == "net") return sota::train_net(argc, argv);
+    for (int i = 2; i + 1 < argc; i += 2)  // --partition rebel: scaled-down ReBeL (search + value networks)
+        if (std::string(argv[i]) == "--partition" && std::string(argv[i + 1]) == "rebel") return sota::train_rebel(argc, argv);
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
@@ -2029,8 +2036,9 @@ int eval(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--snapshot", ""}, {"--policy", "average"},
                                 {"--pairs", "2000"}, {"--particles", "64"}, {"--gap-roots", "4000"},
                                 {"--seed", "2026102701"}, {"--power-cache", "1000000"}, {"--pairs-csv", ""},
-                                {"--rho-roots", "0"}});
+                                {"--rho-roots", "0"}, {"--threads", "1"}});
     if (o["--partition"] == "net") return sota::eval_net(o);
+    if (o["--partition"] == "rebel") return sota::eval_rebel(o);  // --threads: parallel LBR hands (ReBeL only)
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     Model model(parse_partition(o["--partition"]), atlas.get());
     model.load(o.at("--snapshot"));
@@ -2128,6 +2136,7 @@ int eval(int argc, char** argv) {
 }
 
 #include "sota/stud7_net_main.hpp"
+#include "sota/rebel_main.hpp"
 
 int self_test(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--atlas", ""}});

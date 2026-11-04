@@ -8,6 +8,7 @@
 // the same command), OUT/STOP to stop. One root = one self-play hand from a sampled 5th-street root.
 #pragma once
 #include "mmd.hpp"
+#include "escher.hpp"
 
 namespace sota {
 
@@ -31,19 +32,38 @@ struct Stud7Game {
         for (int i = 0; i < kDeepCfrTensorSize; ++i) if (t[i] != 0.0f) x.x.emplace_back(i, t[i]);
     }
     int input_dim() const { return kDeepCfrTensorSize; }
+    // full history for ESCHER's value network: both seats' tensors side by side (both players' private cards)
+    void history_features(const State& s, Sparse& x) const {
+        x.clear();
+        for (int seat = 0; seat < 2; ++seat) {
+            const DeepCfrTensor t = deep_cfr_tensor(s, seat);
+            for (int i = 0; i < kDeepCfrTensorSize; ++i) if (t[i] != 0.0f) x.x.emplace_back(seat * kDeepCfrTensorSize + i, t[i]);
+        }
+    }
+    int history_dim() const { return 2 * kDeepCfrTensorSize; }
 };
 
-// PolicyLBR target backed by a policy network
+// PolicyLBR target backed by networks: a softmax policy network, or (regret[0] set) regret matching on per-seat
+// regret networks
 struct NetPolicy {
     const Mlp& net;
     mutable std::mt19937_64 rng;
+    const Mlp* regret[2] = {nullptr, nullptr};
     std::array<double, kActionCount> policy(const State& state, int seat, bool* found = nullptr) const {
         if (found) *found = true;
         Sparse x;
         Stud7Game{}.features(state, seat, x);
-        Mlp::Cache c; net.forward(x, c);
+        const uint8_t mask = valid_mask(state, seat);
         std::array<double, kActionCount> p{};
-        masked_softmax(c.y.data(), valid_mask(state, seat), kActionCount, p.data());
+        if (regret[0]) {
+            Mlp::Cache c; regret[seat]->forward(x, c);
+            double z = 0; int n = 0;
+            for (int a = 0; a < kActionCount; ++a) if (mask >> a & 1) { p[a] = std::max(0.0, static_cast<double>(c.y[a])); z += p[a]; ++n; }
+            for (int a = 0; a < kActionCount; ++a) p[a] = z > 0 ? p[a] / z : ((mask >> a & 1) ? 1.0 / n : 0.0);
+            return p;
+        }
+        Mlp::Cache c; net.forward(x, c);
+        masked_softmax(c.y.data(), mask, kActionCount, p.data());
         return p;
     }
     Action choose(const State& state, int seat, int) { return sample_action(policy(state, seat), valid_mask(state, seat), rng); }
@@ -93,12 +113,25 @@ inline void save_snapshot(const std::string& path, const Mlp& pol) {
     out.write(kNetMagic, 8);
     save_mlp(out, pol);
 }
-inline Mlp load_snapshot(const std::string& path) {
+// ESCHER snapshot: average policy network, then the two regret networks
+constexpr char kEscherMagic[8] = {'S', 'T', 'U', 'D', 'E', 'S', 'C', '1'};
+inline void save_escher_snapshot(const std::string& path, const Mlp& avg, const Mlp& r0, const Mlp& r1) {
+    std::ofstream out(path, std::ios::binary);
+    out.write(kEscherMagic, 8);
+    save_mlp(out, avg); save_mlp(out, r0); save_mlp(out, r1);
+}
+struct NetSnapshot { Mlp policy; bool escher = false; Mlp regret[2]; };
+inline NetSnapshot load_snapshot(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
     char magic[8];
     in.read(magic, 8);
-    if (!in || std::string(magic, 8) != std::string(kNetMagic, 8)) throw std::runtime_error(path + " is not a network snapshot");
-    return load_mlp(in);
+    NetSnapshot s;
+    if (in && std::string(magic, 8) == std::string(kNetMagic, 8)) { s.policy = load_mlp(in); return s; }
+    if (in && std::string(magic, 8) == std::string(kEscherMagic, 8)) {
+        s.escher = true; s.policy = load_mlp(in); s.regret[0] = load_mlp(in); s.regret[1] = load_mlp(in);
+        return s;
+    }
+    throw std::runtime_error(path + " is not a network snapshot");
 }
 
 struct NetLoop {  // counters the checkpoint restores
@@ -149,6 +182,78 @@ inline bool load_checkpoint(const std::string& path, const std::string& config, 
     std::istringstream rs(r); rs >> t.rng;
     for (long long* v : {&t.updates, &t.episodes_done, &t.samples_done}) in.read(reinterpret_cast<char*>(v), sizeof(*v));
     in.read(reinterpret_cast<char*>(&L), sizeof(L));
+    if (!in) throw std::runtime_error("truncated checkpoint " + path);
+    return true;
+}
+
+// --- ESCHER checkpoint: networks, optimizers, reservoirs, RNG, counters ---
+template <class T> void put_raw(std::ofstream& out, const T& v) { out.write(reinterpret_cast<const char*>(&v), sizeof(T)); }
+template <class T> void get_raw(std::ifstream& in, T& v) { in.read(reinterpret_cast<char*>(&v), sizeof(T)); }
+inline void put_sparse(std::ofstream& out, const Sparse& x) {
+    const uint32_t n = static_cast<uint32_t>(x.x.size());
+    put_raw(out, n);
+    for (const auto& [i, v] : x.x) { put_raw(out, static_cast<int32_t>(i)); put_raw(out, v); }
+}
+inline void get_sparse(std::ifstream& in, Sparse& x) {
+    uint32_t n = 0; get_raw(in, n);
+    x.x.resize(n);
+    for (auto& [i, v] : x.x) { int32_t ii = 0; get_raw(in, ii); i = ii; get_raw(in, v); }
+}
+template <class S> void put_reservoir(std::ofstream& out, const Reservoir<S>& r) {
+    put_raw(out, static_cast<uint64_t>(r.capacity)); put_raw(out, r.seen); put_raw(out, static_cast<uint64_t>(r.data.size()));
+    for (const auto& s : r.data) {
+        put_sparse(out, s.x); put_raw(out, s.mask); put_raw(out, s.w);
+        out.write(reinterpret_cast<const char*>(s.v.data()), sizeof(s.v));
+    }
+}
+template <class S> void get_reservoir(std::ifstream& in, Reservoir<S>& r) {
+    uint64_t cap = 0, size = 0;
+    get_raw(in, cap); get_raw(in, r.seen); get_raw(in, size);
+    r.capacity = static_cast<size_t>(cap);
+    r.data.resize(static_cast<size_t>(size));
+    for (auto& s : r.data) {
+        get_sparse(in, s.x); get_raw(in, s.mask); get_raw(in, s.w);
+        in.read(reinterpret_cast<char*>(s.v.data()), sizeof(s.v));
+    }
+}
+inline void put_rng(std::ofstream& out, const std::mt19937_64& rng) {
+    std::ostringstream rs; rs << rng;
+    const std::string r = rs.str(); const uint64_t rn = r.size();
+    put_raw(out, rn); out.write(r.data(), static_cast<std::streamsize>(rn));
+}
+inline void get_rng(std::ifstream& in, std::mt19937_64& rng) {
+    uint64_t rn = 0; get_raw(in, rn);
+    std::string r(rn, '\0'); in.read(r.data(), static_cast<std::streamsize>(rn));
+    std::istringstream rs(r); rs >> rng;
+}
+inline void save_checkpoint(const std::string& path, const std::string& config, const Escher<Stud7Game>& e, const NetLoop& L) {
+    const std::string tmp = path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary);
+        const uint64_t n = config.size();
+        put_raw(out, n); out.write(config.data(), static_cast<std::streamsize>(n));
+        save_mlp(out, e.value); save_mlp(out, e.regret[0]); save_mlp(out, e.regret[1]);
+        save_adam(out, e.opt_v); save_adam(out, e.opt_r[0]); save_adam(out, e.opt_r[1]);
+        put_reservoir(out, e.rmem[0]); put_reservoir(out, e.rmem[1]); put_reservoir(out, e.smem);
+        put_rng(out, e.rng);
+        for (long long v : {e.t, e.roots_done, e.regret_samples}) put_raw(out, v);
+        put_raw(out, L);
+    }
+    std::filesystem::rename(tmp, path);
+}
+inline bool load_checkpoint(const std::string& path, const std::string& config, Escher<Stud7Game>& e, NetLoop& L) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    uint64_t n = 0; get_raw(in, n);
+    std::string stored(n, '\0'); in.read(stored.data(), static_cast<std::streamsize>(n));
+    if (stored != config) throw std::runtime_error("checkpoint was written with different settings:\n  " + stored + "\nnow:\n  " + config);
+    e.value = load_mlp(in); e.regret[0] = load_mlp(in); e.regret[1] = load_mlp(in);
+    e.opt_v.init(e.value); e.opt_r[0].init(e.regret[0]); e.opt_r[1].init(e.regret[1]);
+    load_adam(in, e.opt_v); load_adam(in, e.opt_r[0]); load_adam(in, e.opt_r[1]);
+    get_reservoir(in, e.rmem[0]); get_reservoir(in, e.rmem[1]); get_reservoir(in, e.smem);
+    get_rng(in, e.rng);
+    for (long long* v : {&e.t, &e.roots_done, &e.regret_samples}) get_raw(in, *v);
+    get_raw(in, L);
     if (!in) throw std::runtime_error("truncated checkpoint " + path);
     return true;
 }

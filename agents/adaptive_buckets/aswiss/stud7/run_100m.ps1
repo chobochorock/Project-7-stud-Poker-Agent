@@ -51,6 +51,10 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     k1024     = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly", "")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
+    escher    = @("net_escher", "net", 1024, "ESCHER (neural CFR)", "--algo escher")
+    # scaled-down ReBeL (sota/rebel.hpp): roots = self-play hands, each solving up to three street subgames (~1 s);
+    # its own budget and cadences override the 100M ones (60k hands ~ the wall-clock of a 100M tabular arm)
+    rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 60000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }
@@ -75,7 +79,8 @@ function FindGxx {
 if ($Action -eq "run") {
     # rebuild when the executable is missing or older than its sources (for example after git pull)
     $sources = @((Join-Path $Here "aswiss_stud.cpp"), (Join-Path $Here "h4_lbr_generated.hpp"),
-                 (Join-Path $Here "..\..\..\cpp_mccfr\stud_mccfr.cpp"))
+                 (Join-Path $Here "..\..\..\cpp_mccfr\stud_mccfr.cpp")) +
+               @(Get-ChildItem (Join-Path $Here "sota\*.hpp") | ForEach-Object { $_.FullName })
     $stale = -not (Test-Path $Exe)
     if (-not $stale) {
         $built = (Get-Item $Exe).LastWriteTime
@@ -131,7 +136,8 @@ elseif ($Action -in @("eval", "final")) {
     # @(...) keeps one arm an array: splatting a lone string (@specs) would pass it character by character
     $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][1]):$(AtlasPath $Arm[$_][2])" })
     $extra = if ($Action -eq "final") { @("--latest", "--pairs", "20000", "--tag", "final") } else { @("--min-roots", "100000") }
-    & $Python (Join-Path $Here "evaluate.py") $Exe $Out --runs @specs --workers $Workers @extra
+    # ReBeL searches at every street: its LBR hands run on $Workers threads inside one evaluation
+    & $Python (Join-Path $Here "evaluate.py") $Exe $Out --runs @specs --workers $Workers --rebel-threads $Workers @extra
 }
 elseif ($Action -eq "plot") {
     $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" })

@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
                           {"--hidden1", "128"}, {"--hidden2", "64"}, {"--reward-scale", "1"},
                           {"--magnet-every", "0"}, {"--normalize", "1"}, {"--iterations", "256"}, {"--value-hands", "1024"},
                           {"--value-steps", "200"}, {"--traversals", "1024"}, {"--regret-steps", "400"}, {"--avg-steps", "2000"},
-                          {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}};
+                          {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}, {"--value-explore", "0.25"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
         e.value_steps = stoi(o["--value-steps"]); e.traversals = stoi(o["--traversals"]); e.regret_steps = stoi(o["--regret-steps"]);
         e.avg_steps = stoi(o["--avg-steps"]); e.batch = stoi(o["--batch"]); e.regret_capacity = e.strategy_capacity = stoull(o["--capacity"]);
         e.lr = stof(o["--lr"]); e.value_lr = stof(o["--value-lr"]); e.reward_scale = stod(o["--reward-scale"]);
-        e.reinit = o["--reinit"] == "1"; e.seed = stoull(o["--seed"]);
+        e.reinit = o["--reinit"] == "1"; e.value_explore = stod(o["--value-explore"]); e.seed = stoull(o["--seed"]);
         sota::Escher<TreeGame> es(g, e);
         FILE* log = fopen((out + "/log.csv").c_str(), "w");
         if (!log) throw runtime_error("cannot write " + out + "/log.csv");

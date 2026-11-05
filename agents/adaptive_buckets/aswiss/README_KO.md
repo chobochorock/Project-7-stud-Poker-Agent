@@ -652,6 +652,66 @@ python eval.py DATA/small RUN; python eval_judgments.py DATA/small RUN --delete
 ```
 원자료: `results_data/avg_fill_summaries.tar.gz`(B4(a), Leduc, mini-stud 실행의 log, judgments, gate, closure, exploitability; 정책 파일 제외).
 
+## 7-stud Policy-LBR과 정확한 exploitability (2026-11-05, 완료된 실험)
+
+7-stud의 LBR(오프라인 64파티클, 온라인 16파티클)이 실제 exploitability와 얼마나 다른지를, 둘 다 계산되는 mini-stud에서 쟀다.
+- **규칙:** `lbr_check.py`는 엔진의 `PolicyLBR` 규칙을 mini-stud에 그대로 옮겼다.
+  - 상대 카드의 사후 분포 = 사전 확률 × 상대 정책의 관측 행동 확률(행동마다 하한 1e-12).
+  - 파티클마다 남은 카드를 베팅 없이 한 번 굴려 승패를 정한다.
+  - 체크·콜의 값은 승률 × 팟이다. 베팅의 값은 상대가 폴드하거나 콜만 한다고 보고 계산한다.
+- **같은 정책에 대해 계산한 값:**
+  - 정확한 exploitability (NashConv/2, `tree_best_response`)
+  - 정확한 사후 분포를 쓴 LBR(무한 파티클). 트리에서 정확히 계산한다.
+  - 1/4/16/64파티클 LBR. 같은 카드로 짝지은 2만 pair로 잰다.
+- 정책은 30개다. 균등 정책, 고정 추상화(`fixed_p0`), k-means 2개, ASWISS 창 라벨(`label_p0`) 13개 체크포인트, 추상화 없는 CFR+ 13개 체크포인트다.
+- 결과는 `results_data/lbr_check_small.jsonl`에 있다.
+- 확인한 것: 모든 정책·좌석에서 정확한 LBR ≤ 최선 응수 값이었고, exploitability는 기존 `exploitability.csv`와 같았다.
+
+| 정책 | exploitability | LBR 정확 | 64파티클 | 16파티클 | 4파티클 | 1파티클 |
+|---|---:|---:|---:|---:|---:|---:|
+| 균등 | 2.373 | 2.280 | 2.270 | 2.237 | 2.066 | 1.537 |
+| ASWISS 체크포인트 0 | 0.806 | 0.696 | 0.670 | 0.589 | 0.434 | 0.201 |
+| 고정 추상화 | 0.764 | 0.618 | 0.586 | 0.519 | 0.348 | 0.153 |
+| k-means 마지막 | 0.297 | 0.225 | 0.199 | 0.155 | −0.029 | −0.401 |
+| CFR+ 체크포인트 0 | 0.268 | 0.242 | 0.218 | 0.167 | −0.015 | −0.352 |
+| ASWISS 체크포인트 6 | 0.194 | 0.076 | 0.050 | −0.004 | −0.174 | −0.524 |
+| ASWISS 체크포인트 7 | 0.077 | 0.029 | 0.011 | −0.037 | −0.197 | −0.529 |
+| CFR+ 체크포인트 1 | 0.043 | 0.026 | 0.005 | −0.035 | −0.190 | −0.512 |
+| ASWISS 마지막 | 0.0020 | −0.0085 | −0.025 | −0.062 | −0.205 | −0.506 |
+| CFR+ (exploitability < 1e-4, 7개 평균) | ≈0 | −0.011 | −0.027 | −0.065 | −0.202 | −0.520 |
+
+- 단위는 ante/hand(두 좌석 평균)다. 파티클 값의 95% 구간은 ±0.013–0.041이다.
+
+**결론:**
+1. **약한 정책에서는 LBR이 exploitability를 대부분 잡는다.**
+   - exploitability 0.2 이상 정책 11개에서 정확한 LBR이 exploitability의 64–96%다. 64파티클은 49–96%, 16파티클은 29–94%다.
+   - 순위 상관(Spearman, 30개)은 정확 0.97, 64파티클 0.97, 16파티클 0.95, 4파티클 0.71, 1파티클 0.56이다.
+2. **균형에 가까워지면 LBR은 바닥에 붙어 더는 구별하지 못한다.**
+   - exploitability 0.04–0.2에서는 정확한 LBR도 37–62%만 잡는다.
+   - exploitability 0.02 아래 정책 15개는 모두 같은 음수 바닥에 있다. LBR 자체가 균형 상대에게 지기 때문이다.
+   - 바닥은 정확 −0.011, 64파티클 −0.027, 16파티클 −0.065, 4파티클 −0.20, 1파티클 −0.52 ante다.
+   - 이 구간에서는 exploitability가 4자릿수 바뀌어도(2e-3 → 7e-7) LBR은 같다.
+3. **파티클 수가 바닥에 닿는 시점을 정한다.**
+   - 16파티클은 exploitability 약 0.2(ASWISS 체크포인트 6)에서 이미 0 근처로 내려간다.
+   - 64파티클은 약 0.04에서 0 근처로 내려간다.
+   - 1파티클은 거의 모든 정책에서 음수다.
+4. **7-stud에 옮길 때 주의할 점:**
+   - mini-stud는 카드가 QKA 세 가지뿐이라 상대 카드의 가능성이 몇 가지 안 된다. 그래서 적은 파티클로도 사후 분포를 잘 덮는다.
+   - 7-stud는 상대 타입이 수만 개이고 street와 레이즈도 더 많다. 그래서 "이후 베팅 없음" 가정도 더 거칠다.
+   - 따라서 7-stud에서 LBR이 exploitability를 잡는 비율은 여기보다 낮을 것으로 본다(확인한 것은 아니다).
+   - 7-stud 값(최종 약 1 ante)이 양수이고 비교군끼리 유의하게 다르다는 점은, 7-stud 비교군들이 아직 바닥 구간에 있지 않다는 간접 근거다. 다만 바닥의 높이와 비율은 mini-stud 값을 그대로 쓸 수 없다.
+
+![mini-stud: 정책 30개의 Policy-LBR(정확, 64/16/4/1파티클)과 정확한 exploitability, 그리고 ASWISS·CFR+ 학습 경로](results_lbr_check_small.png)
+
+재현:
+```bash
+python agents/adaptive_buckets/aswiss/lbr_check.py TREE_DIR OUT.jsonl --uniform \
+  --policies NAME=RUN/policy_bucket_K.bin ... --particles 1 4 16 64 --pairs 20000
+python agents/adaptive_buckets/aswiss/plot_lbr_check.py OUT.jsonl results_lbr_check_small.png --runs "aswiss=RUN:LABEL" ...
+```
+- 트리 의미 정보(팟, 콜 금액, 레이즈 크기, 베팅 없는 승률)는 처음 한 번 계산해 `TREE_DIR/lbr_semantics.npz`에 둔다(약 6초).
+- 정책 하나에 2만 pair × 파티클 4종으로 약 40초 걸린다.
+
 ## 비교 조건과 남은 차이
 
 - **평가:** 모든 방식은 같은 정확한 BR 평가기, 같은 seed, 같은 반복 수로 평가했다. LBR이나 Local BR-gap이 아니다.

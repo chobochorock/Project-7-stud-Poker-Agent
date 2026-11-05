@@ -867,6 +867,12 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 
 ![같은 실행의 2,000행 이동 평균](results_online_validation_w2000.png)
 
+**exploitability와의 차이 (mini-stud에서 확인):** 같은 LBR 규칙을 mini-stud 정책 30개에 적용해 정확한 exploitability와 비교했다(`../README_KO.md`의 "7-stud Policy-LBR과 정확한 exploitability").
+- 약한 정책(exploitability ≥ 0.2)에서는 정확한 사후 분포 LBR이 exploitability의 64–96%를 잡았다.
+- 균형 근처에서는 파티클 수에 따른 음수 바닥(16파티클 −0.065, 64파티클 −0.027 ante)에 붙어 구별하지 못했다.
+- 16파티클은 64파티클보다 일찍(exploitability 약 0.2) 바닥에 닿았다.
+- 7-stud에서는 비율이 더 낮을 것으로 보지만 확인하지 않았다.
+
 **노트북 설정 권장:** `-OnlineLbrEvery 1000`(ReBeL은 `-OnlineLbrRebelEvery 10`), 16파티클.
 - 부담은 표 기반이 약 2%(1,000 roots 학습 약 0.7초에 pair 하나 15ms), MMD·ESCHER는 2% 이하, ReBeL은 약 15%다.
 - 1억 roots면 10만 행이다. 100행 창은 10만 roots, 2,000행 창은 200만 roots에 걸친다.

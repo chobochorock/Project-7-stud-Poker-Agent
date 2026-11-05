@@ -59,7 +59,8 @@ inline void get_examples(std::ifstream& in, std::deque<Example>& b) {
         b.push_back(std::move(e));
     }
 }
-inline void save_checkpoint(const std::string& path, const std::string& config, const Trainer& t, const NetLoop& L) {
+inline void save_checkpoint(const std::string& path, const std::string& config, const Trainer& t, const NetLoop& L,
+                            OnlineLbr* online = nullptr) {
     const std::string tmp = path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary);
@@ -72,10 +73,12 @@ inline void save_checkpoint(const std::string& path, const std::string& config, 
         for (long long v : {t.episodes, t.examples6, t.examples7, t.steps, t.solves[0], t.solves[1], t.solves[2]}) put_raw(out, v);
         for (double v : {t.loss6, t.loss7, t.solve_s[0], t.solve_s[1], t.solve_s[2], t.train_s, t.gap7}) put_raw(out, v);
         put_raw(out, L);
+        if (online && online->on()) online->save(out);
     }
     std::filesystem::rename(tmp, path);
 }
-inline bool load_checkpoint(const std::string& path, const std::string& config, Trainer& t, NetLoop& L) {
+inline bool load_checkpoint(const std::string& path, const std::string& config, Trainer& t, NetLoop& L,
+                            OnlineLbr* online = nullptr, uint64_t* online_bytes = nullptr) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     uint64_t n = 0; get_raw(in, n);
@@ -89,6 +92,7 @@ inline bool load_checkpoint(const std::string& path, const std::string& config, 
     for (long long* v : {&t.episodes, &t.examples6, &t.examples7, &t.steps, &t.solves[0], &t.solves[1], &t.solves[2]}) get_raw(in, *v);
     for (double* v : {&t.loss6, &t.loss7, &t.solve_s[0], &t.solve_s[1], &t.solve_s[2], &t.train_s, &t.gap7}) get_raw(in, *v);
     get_raw(in, L);
+    if (online && online->on()) *online_bytes = online->load(in);
     if (!in) throw std::runtime_error("truncated checkpoint " + path);
     return true;
 }
@@ -223,7 +227,8 @@ int train_rebel(int argc, char** argv) {
                                 {"--snapshot-every", "0"}, {"--curve-every", "100"}, {"--h4", "heuristic"}, {"--threads", "1"},
                                 {"--rebel-iters56", "32"}, {"--rebel-iters7", "64"}, {"--rebel-buckets", "64"},
                                 {"--rebel-hidden", "128"}, {"--rebel-lr", "3e-4"}, {"--rebel-batch", "32"},
-                                {"--rebel-train-steps", "4"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.1"}});
+                                {"--rebel-train-steps", "4"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.1"},
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition rebel uses the heuristic H4 (--h4 heuristic)");
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -237,7 +242,10 @@ int train_rebel(int argc, char** argv) {
     const long long T = std::stoll(o["--roots"]), epoch0 = std::stoll(o["--epoch0"]);
     const long long checkpoint_every = std::stoll(o["--checkpoint-every"]), snapshot_every = std::stoll(o["--snapshot-every"]);
     const long long curve_every = std::stoll(o["--curve-every"]);
-    const std::string config = "rebel;seed=" + std::to_string(c.seed) + ";epoch0=" + std::to_string(epoch0) + ";" + rebel::config_string(c);
+    OnlineLbr online;  // ReBeL: its search policy, as "current"
+    online.setup(o, c.seed, false, true);
+    const std::string config = "rebel;seed=" + std::to_string(c.seed) + ";epoch0=" + std::to_string(epoch0) + ";" + rebel::config_string(c) +
+                               online.config();
     rebel::Trainer tr(c);
     const long long params = static_cast<long long>(tr.v6.parameters() + tr.v7.parameters());
     NetLoop L;
@@ -247,7 +255,8 @@ int train_rebel(int argc, char** argv) {
     L.next_checkpoint = checkpoint_every > 0 ? checkpoint_every : std::numeric_limits<long long>::max();
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string ck_path = out + "/checkpoint.net";
-    const bool resumed = rebel::load_checkpoint(ck_path, config, tr, L);
+    uint64_t online_bytes = 0;
+    const bool resumed = rebel::load_checkpoint(ck_path, config, tr, L, &online, &online_bytes);
     if (resumed) {
         std::filesystem::resize_file(log_path, L.log_bytes);
         std::filesystem::resize_file(index_path, L.index_bytes);
@@ -262,16 +271,18 @@ int train_rebel(int argc, char** argv) {
         std::ofstream(out + "/net_kind.txt") << "rebel\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
-    const double base = L.seconds;
+    online.open(out, resumed, online_bytes);
+    const double base = L.seconds, online0 = online.seconds;
     const auto t0 = std::chrono::steady_clock::now();
-    auto elapsed = [&] { return base + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+    // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
+    auto elapsed = [&] { return base + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() - (online.seconds - online0); };
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         L.seconds = elapsed();
         L.log_bytes = static_cast<std::streamoff>(std::filesystem::file_size(log_path));
         L.index_bytes = static_cast<std::streamoff>(std::filesystem::file_size(index_path));
         L.curve_bytes = static_cast<std::streamoff>(std::filesystem::file_size(curve_path));
-        rebel::save_checkpoint(ck_path, config, tr, L);
+        rebel::save_checkpoint(ck_path, config, tr, L, &online);
     };
     auto stats = [&] {
         std::ostringstream s;
@@ -288,6 +299,13 @@ int train_rebel(int argc, char** argv) {
             std::filesystem::remove(out + "/STOP");
             std::cerr << "stopped at hand " << tr.episodes << "; checkpoint saved, rerun the same command to resume\n";
             return 0;
+        }
+        if (online.due(tr.episodes + 1)) {  // test, then train
+            const long long t = tr.episodes + 1;
+            rebel::Agent agent;
+            agent.v6 = &tr.v6; agent.v7 = &tr.v7; agent.cfg = c;
+            agent.rng.seed(online.target_seed(t, "current"));
+            online.evaluate(t, online.deck_at(t), agent, "current", elapsed());
         }
         tr.episode();
         tr.train();

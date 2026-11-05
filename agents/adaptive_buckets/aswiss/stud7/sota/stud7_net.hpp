@@ -142,7 +142,8 @@ struct NetLoop {  // counters the checkpoint restores
     long long curve_roots0 = 0;
 };
 
-inline void save_checkpoint(const std::string& path, const std::string& config, const Mmd<Stud7Game>& t, const NetLoop& L) {
+inline void save_checkpoint(const std::string& path, const std::string& config, const Mmd<Stud7Game>& t, const NetLoop& L,
+                            OnlineLbr* online = nullptr) {
     const std::string tmp = path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary);
@@ -158,10 +159,12 @@ inline void save_checkpoint(const std::string& path, const std::string& config, 
         out.write(reinterpret_cast<const char*>(&rn), sizeof(rn)); out.write(r.data(), static_cast<std::streamsize>(rn));
         for (long long v : {t.updates, t.episodes_done, t.samples_done}) out.write(reinterpret_cast<const char*>(&v), sizeof(v));
         out.write(reinterpret_cast<const char*>(&L), sizeof(L));
+        if (online && online->on()) online->save(out);
     }
     std::filesystem::rename(tmp, path);
 }
-inline bool load_checkpoint(const std::string& path, const std::string& config, Mmd<Stud7Game>& t, NetLoop& L) {
+inline bool load_checkpoint(const std::string& path, const std::string& config, Mmd<Stud7Game>& t, NetLoop& L,
+                            OnlineLbr* online = nullptr, uint64_t* online_bytes = nullptr) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     uint64_t n = 0;
@@ -182,6 +185,7 @@ inline bool load_checkpoint(const std::string& path, const std::string& config, 
     std::istringstream rs(r); rs >> t.rng;
     for (long long* v : {&t.updates, &t.episodes_done, &t.samples_done}) in.read(reinterpret_cast<char*>(v), sizeof(*v));
     in.read(reinterpret_cast<char*>(&L), sizeof(L));
+    if (online && online->on()) *online_bytes = online->load(in);
     if (!in) throw std::runtime_error("truncated checkpoint " + path);
     return true;
 }
@@ -226,7 +230,8 @@ inline void get_rng(std::ifstream& in, std::mt19937_64& rng) {
     std::string r(rn, '\0'); in.read(r.data(), static_cast<std::streamsize>(rn));
     std::istringstream rs(r); rs >> rng;
 }
-inline void save_checkpoint(const std::string& path, const std::string& config, const Escher<Stud7Game>& e, const NetLoop& L) {
+inline void save_checkpoint(const std::string& path, const std::string& config, const Escher<Stud7Game>& e, const NetLoop& L,
+                            OnlineLbr* online = nullptr) {
     const std::string tmp = path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary);
@@ -238,10 +243,12 @@ inline void save_checkpoint(const std::string& path, const std::string& config, 
         put_rng(out, e.rng);
         for (long long v : {e.t, e.roots_done, e.regret_samples}) put_raw(out, v);
         put_raw(out, L);
+        if (online && online->on()) online->save(out);
     }
     std::filesystem::rename(tmp, path);
 }
-inline bool load_checkpoint(const std::string& path, const std::string& config, Escher<Stud7Game>& e, NetLoop& L) {
+inline bool load_checkpoint(const std::string& path, const std::string& config, Escher<Stud7Game>& e, NetLoop& L,
+                            OnlineLbr* online = nullptr, uint64_t* online_bytes = nullptr) {
     std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     uint64_t n = 0; get_raw(in, n);
@@ -254,6 +261,7 @@ inline bool load_checkpoint(const std::string& path, const std::string& config, 
     get_rng(in, e.rng);
     for (long long* v : {&e.t, &e.roots_done, &e.regret_samples}) get_raw(in, *v);
     get_raw(in, L);
+    if (online && online->on()) *online_bytes = online->load(in);
     if (!in) throw std::runtime_error("truncated checkpoint " + path);
     return true;
 }

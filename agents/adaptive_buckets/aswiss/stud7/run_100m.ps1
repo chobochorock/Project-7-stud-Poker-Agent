@@ -11,6 +11,9 @@
 # aswiss_b, aswiss_wb, hist_b, hist_wb, hist_bb, hist_bbf) on K threads; training stays on one. Any K > 1 gives the
 # same results, but not those of -Threads 1 (other label deals), so an arm resumes only with the same choice.
 # eval/final skip snapshots already evaluated, so they can be rerun while training continues.
+# -OnlineLbrEvery N (N > 0): online test-then-train Policy-LBR every N roots (ReBeL: every -OnlineLbrRebelEvery hands)
+# with -OnlineLbrParticles particles, into OUT/NAME/online_lbr.csv; its time is kept out of the training seconds.
+# It is part of a run's settings: a run started without it cannot be resumed with it (use a new -Out).
 # The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
 # C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
@@ -26,6 +29,9 @@ param(
     [long]$CheckpointEvery = 1000000,
     [long]$CurveEvery = 100000,
     [ValidateRange(1, 256)] [int]$Threads = 1,   # threads of the average-policy label pass (see above)
+    [long]$OnlineLbrEvery = 0,       # online LBR every N roots (0: off; 1000 adds about 2% to a tabular arm)
+    [long]$OnlineLbrRebelEvery = 10, # ReBeL: every N hands (one LBR pair costs about 1.5 training hands)
+    [int]$OnlineLbrParticles = 16,
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
@@ -108,6 +114,10 @@ if ($Action -eq "run") {
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
         if ($Threads -gt 1) { $argv += @("--threads", $Threads) }
         if ($Arm[$a][4]) { $argv += $Arm[$a][4] -split " " }
+        if ($OnlineLbrEvery -gt 0) {
+            $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
+            $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)
+        }
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
         # Start-Process joins the arguments with spaces, so quote the ones that contain spaces (paths)
         $quoted = $argv | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }
@@ -145,6 +155,15 @@ elseif ($Action -eq "plot") {
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
     & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
+    # online LBR (runs trained with -OnlineLbrEvery): moving average of the last 100 and of the last 2000 deals
+    $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
+    if ($online.Count -gt 0) {
+        $ospecs = @($online | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" })
+        $obase = if ($online -contains $base) { @("--baseline", (RunName $base)) } else { @() }
+        foreach ($w in @(100, 2000)) {
+            & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_w$w.png") --runs @ospecs --window $w @obase
+        }
+    }
 }
 elseif ($Action -eq "pack") {
     # small result files of every run in $Out (no snapshots or checkpoints) -> results_data, for git or sharing

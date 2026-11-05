@@ -1,7 +1,7 @@
 """Pack the small result files of 7-stud runs into one .tar.gz for sharing, and print a one-line summary per run.
 
 Usage: python pack_summaries.py RUNS_DIR OUT.tar.gz
-Takes RUNS_DIR/<run>/{log.csv, curve.csv, snapshots.csv, eval*.jsonl, lbr_pairs*.csv} and RUNS_DIR/{results*.png,
+Takes RUNS_DIR/<run>/{log.csv, curve.csv, snapshots.csv, eval*.jsonl, lbr_pairs*.csv, online_lbr.csv} and RUNS_DIR/{results*.png,
 *.stderr.log}; snapshots and checkpoints are left out (hundreds of MB). Members are stored as <basename of RUNS_DIR>/...,
 so the archive unpacks like results_data/runs_summaries.tar.gz and plot_stud.py can read the unpacked folder.
 """
@@ -11,7 +11,7 @@ if len(sys.argv) != 3: sys.exit(__doc__)
 runs_dir, out = os.path.normpath(sys.argv[1]), sys.argv[2]
 prefix = os.path.basename(runs_dir)
 if not os.path.isdir(runs_dir): sys.exit(f"{runs_dir} is not a folder (the runner's -Out / OUT)")
-PER_RUN = ("log.csv", "curve.csv", "snapshots.csv", "eval*.jsonl", "lbr_pairs*.csv")
+PER_RUN = ("log.csv", "curve.csv", "snapshots.csv", "eval*.jsonl", "lbr_pairs*.csv", "online_lbr.csv")
 TOP = ("results*.png", "*.stderr.log")
 
 files = [f for pattern in TOP for f in glob.glob(os.path.join(runs_dir, pattern))]

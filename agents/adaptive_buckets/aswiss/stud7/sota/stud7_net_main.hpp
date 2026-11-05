@@ -22,7 +22,8 @@ int train_net(int argc, char** argv) {
                                 {"--escher-regret-steps", "300"}, {"--escher-avg-steps", "2000"}, {"--escher-batch", "512"},
                                 {"--escher-capacity", "500000"}, {"--escher-lr", "1e-3"}, {"--escher-value-lr", "1e-3"},
                                 {"--escher-hidden1", "128"}, {"--escher-hidden2", "64"}, {"--escher-reward-scale", "10"},
-                                {"--escher-reinit", "1"}, {"--escher-value-explore", "0.25"}});
+                                {"--escher-reinit", "1"}, {"--escher-value-explore", "0.25"},
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
     const std::string algo = o["--algo"];
     if (algo != "mmd" && algo != "escher") throw std::runtime_error("--partition net needs --algo mmd or escher");
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition net uses the heuristic H4 (--h4 heuristic)");
@@ -37,6 +38,11 @@ int train_net(int argc, char** argv) {
     cfg << "net;algo=" << algo << ";seed=" << seed << ";epoch0=" << epoch0;
     for (const auto& [k, v] : o) if (k.rfind("--" + algo + "-", 0) == 0) cfg << ";" << k.substr(2) << "=" << v;
     cfg << ";input=deep_cfr_tensor";
+    // online LBR: MMD has only its last iterate; ESCHER's average network is trained only at snapshots, so its online
+    // rows are the current policy (regret matching on the regret networks)
+    OnlineLbr online;
+    online.setup(o, seed, false, true);
+    cfg << online.config();
     const std::string config = cfg.str();
     Stud7Game game;
     std::unique_ptr<Mmd<Stud7Game>> mmd;
@@ -71,7 +77,9 @@ int train_net(int argc, char** argv) {
     L.next_checkpoint = checkpoint_every > 0 ? checkpoint_every : std::numeric_limits<long long>::max();
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string ck_path = out + "/checkpoint.net";
-    const bool resumed = mmd ? load_checkpoint(ck_path, config, *mmd, L) : load_checkpoint(ck_path, config, *esc, L);
+    uint64_t online_bytes = 0;
+    const bool resumed = mmd ? load_checkpoint(ck_path, config, *mmd, L, &online, &online_bytes)
+                             : load_checkpoint(ck_path, config, *esc, L, &online, &online_bytes);
     const std::string head = mmd ? "updates,samples,alpha,entropy,kl_old,value_loss,return_abs" : "iterations,regret_samples,value_loss,regret_loss0,regret_loss1";
     if (resumed) {
         std::filesystem::resize_file(log_path, L.log_bytes);
@@ -86,16 +94,18 @@ int train_net(int argc, char** argv) {
         std::ofstream(out + "/net_kind.txt") << algo << "\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
-    const double base = L.seconds;
+    online.open(out, resumed, online_bytes);
+    const double base = L.seconds, online0 = online.seconds;
     const auto t0 = std::chrono::steady_clock::now();
-    auto elapsed = [&] { return base + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+    // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
+    auto elapsed = [&] { return base + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() - (online.seconds - online0); };
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         L.seconds = elapsed();
         L.log_bytes = static_cast<std::streamoff>(std::filesystem::file_size(log_path));
         L.index_bytes = static_cast<std::streamoff>(std::filesystem::file_size(index_path));
         L.curve_bytes = static_cast<std::streamoff>(std::filesystem::file_size(curve_path));
-        if (mmd) save_checkpoint(ck_path, config, *mmd, L); else save_checkpoint(ck_path, config, *esc, L);
+        if (mmd) save_checkpoint(ck_path, config, *mmd, L, &online); else save_checkpoint(ck_path, config, *esc, L, &online);
     };
     auto snapshot = [&](const std::string& file) {
         if (mmd) { save_snapshot(out + "/" + file, mmd->pol); return; }
@@ -117,6 +127,15 @@ int train_net(int argc, char** argv) {
             std::filesystem::remove(out + "/STOP");
             std::cerr << "stopped at root " << roots_done() << "; checkpoint saved, rerun the same command to resume\n";
             return 0;
+        }
+        if (online.on()) {  // test, then train: the roots of the next update / iteration, on the tabular deal stream
+            const long long d0 = roots_done();
+            const long long step = mmd ? mmd->cfg.episodes : esc->cfg.value_hands + 2LL * esc->cfg.traversals;
+            for (long long t = (d0 / online.every + 1) * online.every; t <= d0 + step; t += online.every) {
+                NetPolicy target{mmd ? mmd->pol : esc->avg, std::mt19937_64(online.target_seed(t, "current"))};
+                if (esc) { target.regret[0] = &esc->regret[0]; target.regret[1] = &esc->regret[1]; }
+                online.evaluate(t, online.deck_at(t), target, "current", elapsed());
+            }
         }
         if (mmd) { auto batch = mmd->collect(); mmd->update(batch); }
         else esc->iterate();

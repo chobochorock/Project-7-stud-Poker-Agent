@@ -196,6 +196,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
   - ESCHER는 두 패널 모두에 그려진다.
   - bucket 패널에는 파라미터 수가 찍힌다.
 - 시간 비교는 `plot_stud_time.py`로 한다(`../README_KO.md`의 "학습 시간").
+- 온라인 LBR(학습 중 test-then-train 지표)은 `-OnlineLbrEvery 1000`으로 켠다(ReBeL은 10판마다). 설명과 검증은 `../README_KO.md`의 "온라인 LBR" 절에 있다. MMD·ESCHER는 현재 정책, ReBeL은 탐색 정책을 잰다.
 - 하이퍼파라미터는 `--mmd-*`, `--escher-*`, `--rebel-*` 옵션으로 바꾼다. 바꾸면 checkpoint 설정이 달라지므로 새 출력 폴더가 필요하다.
 
 ## 남은 일

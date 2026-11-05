@@ -98,6 +98,7 @@ namespace {
 constexpr int A = kActionCount;
 constexpr uint32_t kNone = 0xffffffffu;
 constexpr int kAnte = 1000;
+#include "online_lbr.hpp"  // --online-lbr-*: test-then-train Policy-LBR during training (every trainer)
 
 struct NullAtlas final : PowerAtlas {
     uint16_t assign(const State&, int) const override { return 0; }
@@ -1641,7 +1642,8 @@ struct LoopState {
 
 // Checkpoint = config line + loop state + model state, written to checkpoint.tmp and renamed over checkpoint.bin.
 // On load, checkpoint.bin is preferred; a complete checkpoint.tmp left by an interrupted rename is also accepted.
-void write_checkpoint(const std::string& out, const std::string& config, const LoopState& s, const Model& model) {
+void write_checkpoint(const std::string& out, const std::string& config, const LoopState& s, const Model& model,
+                      OnlineLbr* online = nullptr) {
     const std::string tmp = out + "/checkpoint.tmp", path = out + "/checkpoint.bin";
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
@@ -1651,6 +1653,7 @@ void write_checkpoint(const std::string& out, const std::string& config, const L
         for (double v : {s.seconds, s.curve_sum, s.curve_sq}) put(f, v);
         put_string(f, s.deal_rng); put_string(f, s.rng);
         model.save_state(f);
+        if (online && online->on()) online->save(f);  // only with --online-lbr-every (part of the config line)
         f.write("ASWEND01", 8);
         if (!f) throw std::runtime_error("failed to write " + tmp);
     }
@@ -1661,7 +1664,8 @@ void write_checkpoint(const std::string& out, const std::string& config, const L
         std::filesystem::rename(tmp, path);
     }
 }
-bool read_checkpoint(const std::string& file, const std::string& config, LoopState& s, Model& model) {
+bool read_checkpoint(const std::string& file, const std::string& config, LoopState& s, Model& model, OnlineLbr* online = nullptr,
+                     uint64_t* online_bytes = nullptr) {
     std::ifstream f(file, std::ios::binary);
     if (!f) return false;
     char magic[8];
@@ -1674,6 +1678,7 @@ bool read_checkpoint(const std::string& file, const std::string& config, LoopSta
     for (double* v : {&s.seconds, &s.curve_sum, &s.curve_sq}) get(f, *v);
     s.deal_rng = get_string(f); s.rng = get_string(f);
     model.load_state(f);
+    if (online && online->on()) *online_bytes = online->load(f);
     f.read(magic, 8);
     return f && std::string(magic, 8) == "ASWEND01";
 }
@@ -1698,7 +1703,8 @@ int train(int argc, char** argv) {
                                 {"--backward", "0"}, {"--backward-min-visits", "32"},
                                 {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
-                                {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"}});
+                                {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1762,6 +1768,10 @@ int train(int argc, char** argv) {
         << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "")
         << (avg_fill ? ";avg_fill=plain;avg_fill_reach=" + o["--avg-fill-reach"] : "")
         << (label_pass && threads > 1 ? ";label_pass=chunked" : "");  // any --threads > 1 gives the same bits
+    OnlineLbr online;
+    online.setup(o, std::stoull(o["--seed"]), true, true);
+    if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
+    cfg << online.config();
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
@@ -1769,8 +1779,10 @@ int train(int argc, char** argv) {
     const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
     LoopState s;
     s.L = epoch0;
-    const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model) ||
-                         read_checkpoint(out + "/checkpoint.tmp", config, s, model);
+    uint64_t online_bytes = 0;
+    const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model, &online, &online_bytes) ||
+                         read_checkpoint(out + "/checkpoint.tmp", config, s, model, &online, &online_bytes);
+    online.open(out, resumed, online_bytes);
     if (resumed) {
         rng_load(deal_rng, s.deal_rng); rng_load(rng, s.rng);
         // drop rows written after the checkpoint; they are reproduced exactly by the replay
@@ -1810,15 +1822,16 @@ int train(int argc, char** argv) {
     std::signal(SIGBREAK, request_stop);
 #endif
     const auto t0 = std::chrono::steady_clock::now();
-    const double base_seconds = s.seconds;
-    auto elapsed = [&] { return base_seconds + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+    const double base_seconds = s.seconds, online0 = online.seconds;
+    // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
+    auto elapsed = [&] { return base_seconds + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() - (online.seconds - online0); };
     auto live_total = [&] { const auto l = model.live_buckets(); return l[0] + l[1] + l[2]; };
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         s.seconds = elapsed(); s.deal_rng = rng_text(deal_rng); s.rng = rng_text(rng);
         s.log_bytes = file_size_or_zero(log_path); s.index_bytes = file_size_or_zero(index_path);
         s.curve_bytes = file_size_or_zero(curve_path);
-        write_checkpoint(out, config, s, model);
+        write_checkpoint(out, config, s, model, &online);
     };
     const bool track = partition == Partition::Aswiss || partition == Partition::History;
     uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
@@ -1826,6 +1839,11 @@ int train(int argc, char** argv) {
         ++s.t;
         auto deck = fresh_deck();
         std::shuffle(deck.begin(), deck.end(), deal_rng);
+        if (online.due(static_cast<long long>(s.t)))  // test, then train on this deal
+            for (const auto& policy : online.policies) {
+                SnapshotPolicy target{model, policy == "average", std::mt19937_64(online.target_seed(static_cast<long long>(s.t), policy))};
+                online.evaluate(static_cast<long long>(s.t), deck, target, policy, elapsed());
+            }
         // --label-cap: window sums only over the epoch's last label_cap roots (bounds the window's memory)
         // history keys with --label avg: no window at all (it would only feed the L/C diagnostic and doubles the memory)
         const bool in_window = track && (!label_cap || epoch_end - s.t < label_cap) &&

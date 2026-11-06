@@ -19,7 +19,8 @@ are marked "(wall)" in the legend.
 the run's median chunk and contains no epoch end (where label passes legitimately take long) counts as a stall; its
 time above the median is subtracted from every later time. This is an adjustment, labeled as such in the titles.
 """
-import argparse, csv, json, os
+import argparse, csv, json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -36,28 +37,7 @@ ap.add_argument("--clock", choices=["wall", "cpu"], default="wall")
 a = ap.parse_args()
 
 
-def cpu_clock(d, cv, snap):
-    """(curve-row train CPU seconds, {snapshot file: train CPU seconds}) or None when the run has no CPU column."""
-    if cv and "train_cpu_seconds" in cv[0]:
-        return (np.array([0.0] + [float(r["train_cpu_seconds"]) for r in cv]),
-                {r["file"]: float(r["train_cpu_seconds"]) for r in snap if r.get("train_cpu_seconds")})
-    if not cv or "cpu_seconds" not in cv[0]:
-        return None
-    online = [], []
-    op = os.path.join(d, "online_lbr.csv")
-    if os.path.exists(op):
-        for r in csv.DictReader(open(op)): online[0].append(float(r["roots"])); online[1].append(float(r["online_seconds"]))
-    o_at = lambda x: online[1][np.searchsorted(online[0], x, side="right") - 1] if online[0] and x >= online[0][0] else 0.0
-    # process CPU time restarts at every resumption: the row after a restart adds its training wall seconds instead (the
-    # CPU time between the last row before the stop and the stop is not in any row; the trainers are single-threaded)
-    t, prev = [0.0], (0.0, 0.0, 0.0)  # previous row's cpu, online seconds, training seconds
-    for r in cv:
-        c, o, w = float(r["cpu_seconds"]), o_at(float(r["roots"])), float(r["seconds"])
-        t.append(t[-1] + ((c - prev[0]) - (o - prev[1]) if c >= prev[0] else w - prev[2]))
-        prev = (c, o, w)
-    t = np.array(t)
-    rr = np.array([0.0] + [float(r["roots"]) for r in cv])
-    return t, {r["file"]: float(np.interp(float(r["roots"]), rr, t)) for r in snap}
+from train_clock import cpu_clock  # noqa: E402  (training CPU seconds; see train_clock.py)
 colors = ["#444444", "#6a51a3", "#1b9e77", "#000000", "#e6550d", "#3182bd", "#777777", "#d62728", "#17becf"]
 fig, ax = plt.subplots(2, 2, figsize=(14, 10))
 YCAP = 20.0  # LBR panels grow up to this (ante/hand); points above are listed in the panel

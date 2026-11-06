@@ -101,15 +101,20 @@ plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run
     "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only
+    "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_cputime.png" --runs "${specs[@]}" --clock cpu  # equal CPU time
     pre=eval_presplit$PRESPLIT_PARTICLES.jsonl
     if ls "$OUT"/*/"$pre" > /dev/null 2>&1; then  # pre-split evaluations (presplit action)
         "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results${SUFFIX}_presplit$PRESPLIT_PARTICLES" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only --eval-file "$pre"
         "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_presplit${PRESPLIT_PARTICLES}_time.png" --runs "${specs[@]}" --eval-file "$pre"
+        "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_presplit${PRESPLIT_PARTICLES}_cputime.png" --runs "${specs[@]}" --eval-file "$pre" --clock cpu
     fi
     ospecs=(); for a in $ARMS; do [ -f "$OUT/${NAME[$a]}$SUFFIX/online_lbr.csv" ] && ospecs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     if [ ${#ospecs[@]} -gt 0 ]; then  # online LBR: moving average of the last 100 and of the last 2000 deals
         obase=(); [ -f "$OUT/${NAME[$base]}$SUFFIX/online_lbr.csv" ] && obase=(--baseline "${NAME[$base]}$SUFFIX")
-        for w in 100 2000; do "$PYTHON" "$HERE/plot_online_lbr.py" "$OUT" "$OUT/results${SUFFIX}_online_w$w.png" --runs "${ospecs[@]}" --window $w "${obase[@]}"; done
+        for w in 100 2000; do
+            "$PYTHON" "$HERE/plot_online_lbr.py" "$OUT" "$OUT/results${SUFFIX}_online_w$w.png" --runs "${ospecs[@]}" --window $w "${obase[@]}"
+            "$PYTHON" "$HERE/plot_online_lbr.py" "$OUT" "$OUT/results${SUFFIX}_online_cpu_w$w.png" --runs "${ospecs[@]}" --window $w "${obase[@]}" --clock cpu
+        done
     fi ;;
 pack)  # small result files of every run in OUT (no snapshots) -> results_data, for git or sharing
     "$PYTHON" "$HERE/pack_summaries.py" "$OUT" "$HERE/results_data/runs_100m${SUFFIX}_summaries.tar.gz" ;;

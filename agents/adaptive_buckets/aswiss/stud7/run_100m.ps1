@@ -178,11 +178,14 @@ elseif ($Action -eq "plot") {
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
     & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
+    # equal-CPU-time view: LBR against training CPU seconds (train_clock.py)
+    & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_cputime.png") --runs @specs --clock cpu
     # pre-split evaluations (-Action presplit): the same figures from eval_presplit<P>.jsonl
     $pre = "eval_presplit$PresplitParticles.jsonl"
     if (@($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) $pre) }).Count -gt 0) {
         & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results${Suffix}_presplit$PresplitParticles") --runs @specs --baseline (RunName $base) --epoch-only --eval-file $pre
         & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_time.png") --runs @specs --eval-file $pre
+        & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_cputime.png") --runs @specs --eval-file $pre --clock cpu
     }
     # online LBR (runs trained with -OnlineLbrEvery): moving average of the last 100 and of the last 2000 deals
     $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
@@ -191,6 +194,7 @@ elseif ($Action -eq "plot") {
         $obase = if ($online -contains $base) { @("--baseline", (RunName $base)) } else { @() }
         foreach ($w in @(100, 2000)) {
             & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_w$w.png") --runs @ospecs --window $w @obase
+            & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_cpu_w$w.png") --runs @ospecs --window $w @obase --clock cpu
         }
     }
 }

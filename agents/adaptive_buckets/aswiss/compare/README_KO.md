@@ -117,6 +117,46 @@ CFR+IRA는 매 반복 전체 트리를 순회해야 한다. 본문 방법은 외
 - **이 크기에서는 추상화 없는 전체 순회가 모두를 압도한다.** CFR+는 692초에 1.21e-6이다(PCFR+는 결과 2 참고).
 - **남은 차이 (AGENTS.md):** 학습기가 다르다(외부 샘플링: 교대 순회, 상대 노드 단순 선형 평균; 전체 순회: 교대 갱신, 선형 평균). 그래서 이것은 방법 전체의 비교다. 평가기는 모두 같은 정확한 최선 응답이다. seed 수가 다르다(샘플링 4, CFR+IRA 5, 나머지 1). 표의 CFR+IRA 시간은 seed 1이고, 범위는 그림에 있다.
 
+## 관련 연구 확인: 표본 기반 CFR+IRA가 이미 있는가 (2026-11-06)
+
+**질문:** CFR+IRA의 CFR+를 MCCFR로 바꾸기만 하면 되는 일이라 연구가 멈췄거나, 실무에서는 이미 쓰는데 논문만 없는 것은 아닌가.
+
+**원문의 입장 (`arXiv 1803.05392v2`, Artificial Intelligence 2020):**
+- 6.1절 향후 과제에서 이렇게 말한다. "a notable limitation of the presented methods is the need to traverse the complete game tree of the unabstracted game in each iteration. Therefore, it would be interesting to investigate a combination of CFR+IRA with sampling techniques"
+- 원문 Algorithm 8의 "SampleInformationSets"는 트리 표본이 아니다. 원 정보집합의 regret을 따로 저장할 정보집합을 메모리 한도(k_h, k_b) 안에서 고르는 것이고, 순회는 여전히 전체다.
+- 종료 조건(Algorithm 6, 6행)도 원 게임 최선 응수 두 번, 즉 전체 순회다.
+
+**그대로 바꿔 끼우면 안 되는 이유:**
+1. 분할 규칙이 정확한 값을 전제로 한다.
+   - 휴리스틱 갱신은 같은 추상 집합의 정보집합끼리 한 반복 regret을 허용오차 1/(5√t)로 비교한다.
+   - regret 경계 갱신은 정보집합별 누적 regret을 Δ√|A|/(100√t)와 비교한다.
+   - 표본 regret의 잡음은 한 번에 보수 범위 크기라, 이 허용오차로는 거의 모든 집합이 갈라진다. 허용오차를 키우면 반대로 거의 안 갈라진다.
+   - 그래서 유의성 판정(z 검정)과, 잡음을 담은 수렴 정리(H_B와 조건 (T))가 따로 필요하다.
+2. 큰 게임에서는 원 정보집합이 다시 오지 않는다. 7-stud 학습 중 원 정보집합은 거의 한 번씩만 나온다(`../stud7/README_KO.md`). 그래서 정보집합 단위 규칙은 판정할 표본이 없다. 원자·bucket 이력 같은 라벨 단위가 필요하다.
+3. 원 정보집합 통계를 들고 있으면 메모리 절약이라는 목적이 무너진다.
+
+**문헌 검색 (2026-11-06):**
+- 표본 기반으로 정보 추상화를 학습 중 정제하면서 원 게임 수렴을 보이는 연구는 찾지 못했다.
+- 이 세션에서는 arxiv.org 본문을 열 수 없었다. 아래 설명은 검색 결과의 초록과 요약에 근거한다.
+
+| 연구 | 하는 일 | 본문 방법과의 차이 |
+|---|---|---|
+| EVPA (Li & Huang, ICLR 2025; 저장소 `agents/evpa`) | 실시간 하위 게임 풀이에서 기댓값 기반 온라인 정보 추상화 + minimax 가지치기 | 하위 게임 탐색용이고, 학습 중 regret 라벨로 쪼개지 않는다 |
+| WEVA (Li & Huang, arXiv 2605.10900, 2026-05) | 전체 게임 CFR을 짧게 돌린 뒤 패별 기댓값 특징을 k-means++로 묶는다 | 한 번 만드는 추상화이고, 전체 게임 순회가 필요하다 |
+| KrwEmd (arXiv 2511.12089), Beyond Outcome-Based Imperfect-Recall (arXiv 2510.15094) | 불완전 기억 추상화의 특징·거리 개선 | 학습 전에 만드는 정적 추상화 |
+| Abstraction Agent (Li & Huang, Findings of EMNLP 2026) | LLM이 특징을 만들고 k-means로 묶는다 | 정적 |
+| Brown & Sandholm, IJCAI 2015 (Simultaneous Abstraction and Equilibrium Finding) | 풀이 중 행동 추상화에 행동을 더한다 | 정보 추상화가 아니라 행동 추상화다 |
+
+**실무:**
+- 공개된 최상위 시스템이 쓰는 방식은 다음과 같다.
+  - Libratus·Pluribus: 미리 만든 고정 추상화 + MCCFR 청사진 + 실시간 탐색
+  - DeepStack·ReBeL·Student of Games: 학습 + 탐색
+- 표본 기반 regret으로 정보 추상화를 정제한다는 공개 기록은 찾지 못했다. 비공개 사용 여부는 확인할 수 없다.
+
+**남은 확인:**
+1. 학술지판의 Google Scholar "인용한 논문" 목록을 직접 훑는다.
+2. 원문 분할 규칙을 그대로 MCCFR에 넣은 "표본 CFR+IRA" 비교 실험을 mini-stud에서 해 본다. 같은 표본 수에서 과분할 또는 미분할이 나오는지 보면, "그냥 바꿔 끼우면 된다"를 직접 반박하거나 확인할 수 있다.
+
 ## 정리와 다음 단계
 
 - **직접 경쟁(CFR+IRA)과의 비교:**

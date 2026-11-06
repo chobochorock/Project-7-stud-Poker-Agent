@@ -31,6 +31,9 @@ ap.add_argument("--rho-roots", type=int, default=0); ap.add_argument("--rho-only
 # ReBeL (partition rebel): roots are self-play hands (--min-roots does not apply), a search runs at every street, so
 # its LBR hands run on --rebel-threads threads inside one evaluation; --rebel-pairs overrides --pairs for it
 ap.add_argument("--rebel-threads", type=int, default=1); ap.add_argument("--rebel-pairs", type=int, default=0)
+# --only-average: the average policy only (tabular arms, ESCHER); MMD and ReBeL have no average policy, so their one
+# output policy (MMD's last iterate, ReBeL's search policy, stored as "current") is evaluated as their final strategy
+ap.add_argument("--only-average", action="store_true")
 a = ap.parse_args()
 suffix = f"_{a.tag}" if a.tag else ""
 
@@ -73,6 +76,7 @@ for spec in a.runs:
         policies = (("average", "current") if kind == "escher" else ("current",)) if partition == "net" \
             else ("current",) if partition == "rebel" \
             else ("average",) if a.rho_only else ("average", "current")
+        if a.only_average and "average" in policies: policies = ("average",)
         for policy in policies:
             if (snap[0], policy) not in have:
                 jobs.append((d, snap, policy, partition, atlas))

@@ -879,6 +879,36 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 - 이미 끝난 100M 실행에는 온라인 행이 없다. 이 지표로 비교하려면 새 출력 폴더에서 다시 돌려야 한다.
 - `-Action plot`은 온라인 행이 있으면 100행과 2,000행 그림을 함께 만든다(`results_s1_online_w100.png`, `_w2000.png`).
 
+## SOTA 비교 실행의 기록 항목 (2026-11-06)
+
+`-Out ...\runs_online` 실행에서 남는 데이터와 그 파일이다. 모든 기록은 학습 결과를 바꾸지 않는다(켜고 끈 실행의 스냅숏이 바이트 단위로 같고, 중단·재개해도 기록이 같다).
+
+| 항목 | 파일 (열) | x축 | 비교군 |
+|---|---|---|---|
+| 실제 학습 시간 | `curve.csv`, `snapshots.csv`, `log.csv`의 `seconds` (온라인 LBR 시간 제외) | — | 모두 |
+| 온라인 LBR (`-OnlineLbrParticles`, 학습 전 측정, 두 좌석) | `online_lbr.csv` (`roots`, `seconds`, `lbr_pair`, `online_seconds`) | roots, 학습 초 | 모두 |
+| 분할 직전 LBR (256파티클 등) | `-Action presplit` → `eval_presplit<P>.jsonl` (epoch 스냅숏 = 분할 직전 정책) | roots, 학습 초(`snapshots.csv`) | 표 기반·MMD·ESCHER (ReBeL은 선택) |
+| bucket 양의 누적 평균 regret 합 | `regret.csv` (`regret_sum_per_root` = Σ_B max(0, max_a R_B(a)) / 창 roots, epoch 창, `kind`=running/epoch) | roots | `-LogRegret`: history·aswiss 비교군 (`-LogRegretKmeans`: k-means) |
+| 메모리 | `curve.csv`의 `peak_rss_mb`, `rss_mb`, `commit_mb` (Windows: 최대/현재 working set, private bytes) | roots, 학습 초 | 모두 |
+
+**평가하는 정책 (평균 정책만):**
+- 온라인 LBR: 표 기반은 평균 정책이다. ESCHER는 감시용 평균망이다. 반복마다 전략 저수지로 500스텝을 이어서 학습하고, 별도 난수를 쓰며, 그 시간은 평가 시간으로 뺀다.
+- 오프라인: `-AverageOnly`(eval/final)와 presplit은 평균 정책만 평가한다.
+- MMD(마지막 반복)와 ReBeL(탐색 정책)은 평균 정책이 없어서, 그 하나뿐인 출력 정책을 최종 전략으로 평가한다.
+
+**파티클 수:**
+- 70k `hist_bbf` 스냅숏, 같은 2,000 pair에서 잰 값이다.
+
+  | 파티클 | LBR | pair당 시간 |
+  |---:|---:|---:|
+  | 16 | 4.67 | 15 ms |
+  | 64 | 5.76 | 53 ms |
+  | 256 | 6.33 | 0.15 s |
+  | 512 | 6.05 | 0.27 s |
+
+  - 64파티클 대비 256은 +0.57 ± 1.64, 512는 +0.29 ± 1.86(95%)으로 유의하지 않다.
+- mini-stud에서는 16파티클이 64파티클보다 일찍 바닥에 닿았다(`../README_KO.md`). 그래서 온라인은 64, 분할 직전은 256을 쓴다.
+
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 
 **조건**

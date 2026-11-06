@@ -26,6 +26,7 @@ ap.add_argument("--runs", nargs="+", required=True)
 ap.add_argument("--baseline", default="")
 ap.add_argument("--note", default="")
 ap.add_argument("--drop-stalls", type=float, default=0)
+ap.add_argument("--eval-file", default="eval.jsonl", help="evaluation rows to draw, e.g. eval_presplit256.jsonl")
 a = ap.parse_args()
 colors = ["#444444", "#6a51a3", "#1b9e77", "#000000", "#e6550d", "#3182bd", "#777777", "#d62728", "#17becf"]
 fig, ax = plt.subplots(2, 2, figsize=(14, 10))
@@ -52,7 +53,8 @@ for i, spec in enumerate(a.runs):
     ls = "--" if name == a.baseline else "-"
     lab = label + (f" [{group}]" if group else "")
     for j, policy in enumerate(("average", "current")):
-        rows = [json.loads(l) for l in open(os.path.join(d, "eval.jsonl"))]
+        epath = os.path.join(d, a.eval_file)
+        rows = [json.loads(l) for l in open(epath)] if os.path.exists(epath) else []
         rows = sorted((r for r in rows if r["policy"] == policy and r["file"] in secs), key=lambda r: secs[r["file"]])
         x = [secs[r["file"]] for r in rows]; y = [r["lbr_ante"] for r in rows]; e = [1.96 * r["lbr_se"] for r in rows]
         ax[0][j].errorbar(x, y, yerr=e, color=color, ls=ls, marker="o", ms=3, lw=1.1, capsize=2, label=lab if j == 0 else None)

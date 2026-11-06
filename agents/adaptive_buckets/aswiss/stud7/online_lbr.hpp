@@ -30,6 +30,9 @@ struct OnlineLbr {
     double seconds = 0;   // cumulative time spent in evaluations
     std::string path;
     std::ofstream out;
+    // trainer-specific state of the evaluation (ESCHER: its monitoring average network), saved with the online state
+    std::function<void(std::ofstream&)> extra_save;
+    std::function<void(std::ifstream&)> extra_load;
 
     bool on() const { return every > 0; }
     bool due(long long t) const { return on() && t > 0 && t % every == 0; }
@@ -99,6 +102,7 @@ struct OnlineLbr {
         for (long long v : {dealt, rows}) f.write(reinterpret_cast<const char*>(&v), sizeof(v));
         f.write(reinterpret_cast<const char*>(&seconds), sizeof(seconds));
         f.write(reinterpret_cast<const char*>(&b), sizeof(b));
+        if (extra_save) extra_save(f);
     }
     // returns the online_lbr.csv length at the checkpoint
     uint64_t load(std::ifstream& f) {
@@ -110,6 +114,7 @@ struct OnlineLbr {
         for (long long* v : {&dealt, &rows}) f.read(reinterpret_cast<char*>(v), sizeof(*v));
         f.read(reinterpret_cast<char*>(&seconds), sizeof(seconds));
         f.read(reinterpret_cast<char*>(&b), sizeof(b));
+        if (extra_load) extra_load(f);
         return b;  // later evaluations are at roots past `dealt`, so the last deck itself is not needed
     }
 };

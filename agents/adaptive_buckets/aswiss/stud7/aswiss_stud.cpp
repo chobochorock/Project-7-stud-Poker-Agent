@@ -79,6 +79,17 @@
 // LBR seed and particles for every snapshot) and the sampled BR-gap proxy on fixed deals (sum over the
 // traverser's visited information states of max_a Q - sum_a pi Q under external sampling, mean of both
 // seats, ante/hand). Neither is exact exploitability.
+#ifdef _WIN32  // process memory on Windows, declared by hand: <windows.h> macros would collide with the engine's names
+#include <cstddef>
+extern "C" {
+struct AswMemoryCounters {  // layout of PROCESS_MEMORY_COUNTERS (DWORD = unsigned long, SIZE_T = size_t)
+    unsigned long cb, page_faults;
+    size_t peak_working_set, working_set, quota_peak_paged, quota_paged, quota_peak_nonpaged, quota_nonpaged, pagefile, peak_pagefile;
+};
+__declspec(dllimport) void* __stdcall GetCurrentProcess(void);
+__declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void* process, AswMemoryCounters* counters, unsigned long cb);
+}
+#endif
 #define STUD_MCCFR_NO_MAIN
 #include "../../../cpp_mccfr/stud_mccfr.cpp"
 
@@ -550,6 +561,7 @@ public:
         const auto r = std::make_pair(avg_nodes_, filled_nodes_); avg_nodes_ = filled_nodes_ = 0; return r;
     }
     void count_root() { if (track_rwin_) ++rwin_roots_; }
+    uint64_t iterate_window_roots() const { return rwin_roots_; }
     // sum_B max(0, max_a R_B(a)) / roots / 2 over the window (ante per root), then the window restarts if `reset`
     double iterate_regret_half(bool reset) {
         double total = 0;
@@ -1611,12 +1623,30 @@ std::unique_ptr<PowerAtlas> load_atlas(const std::string& path, size_t cache) {
     return atlas;
 }
 
-double peak_rss_mb() {  // VmHWM of this process (Linux); -1 elsewhere
+// Process memory in MB (-1 if unknown): peak and current resident memory (Linux VmHWM / VmRSS, Windows peak / current
+// working set) and committed private memory (Linux VmData, Windows private bytes): memory_mb(0|1|2).
+double memory_mb(int which) {
+#ifdef _WIN32
+    AswMemoryCounters c{};
+    c.cb = sizeof(c);
+    if (!K32GetProcessMemoryInfo(GetCurrentProcess(), &c, sizeof(c))) return -1;
+    const size_t v = which == 0 ? c.peak_working_set : which == 1 ? c.working_set : c.pagefile;
+    return static_cast<double>(v) / (1024.0 * 1024.0);
+#else
+    static const char* const field[3] = {"VmHWM:", "VmRSS:", "VmData:"};
     std::ifstream status("/proc/self/status");
     std::string line;
     while (std::getline(status, line))
-        if (line.rfind("VmHWM:", 0) == 0) return std::stod(line.substr(6)) / 1024.0;
+        if (line.rfind(field[which], 0) == 0) return std::stod(line.substr(std::strlen(field[which]))) / 1024.0;
     return -1;
+#endif
+}
+double peak_rss_mb() { return memory_mb(0); }
+// the three memory columns of curve.csv: peak_rss_mb, rss_mb, commit_mb
+std::string memory_columns() {
+    std::ostringstream m;
+    m << memory_mb(0) << ',' << memory_mb(1) << ',' << memory_mb(2);
+    return m.str();
 }
 
 volatile std::sig_atomic_t g_stop = 0;
@@ -1643,7 +1673,7 @@ struct LoopState {
 // Checkpoint = config line + loop state + model state, written to checkpoint.tmp and renamed over checkpoint.bin.
 // On load, checkpoint.bin is preferred; a complete checkpoint.tmp left by an interrupted rename is also accepted.
 void write_checkpoint(const std::string& out, const std::string& config, const LoopState& s, const Model& model,
-                      OnlineLbr* online = nullptr) {
+                      OnlineLbr* online = nullptr, const uint64_t* regret_bytes = nullptr) {
     const std::string tmp = out + "/checkpoint.tmp", path = out + "/checkpoint.bin";
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
@@ -1654,6 +1684,7 @@ void write_checkpoint(const std::string& out, const std::string& config, const L
         put_string(f, s.deal_rng); put_string(f, s.rng);
         model.save_state(f);
         if (online && online->on()) online->save(f);  // only with --online-lbr-every (part of the config line)
+        if (regret_bytes) put(f, *regret_bytes);       // only with --log-regret (part of the config line)
         f.write("ASWEND01", 8);
         if (!f) throw std::runtime_error("failed to write " + tmp);
     }
@@ -1665,7 +1696,7 @@ void write_checkpoint(const std::string& out, const std::string& config, const L
     }
 }
 bool read_checkpoint(const std::string& file, const std::string& config, LoopState& s, Model& model, OnlineLbr* online = nullptr,
-                     uint64_t* online_bytes = nullptr) {
+                     uint64_t* online_bytes = nullptr, uint64_t* regret_bytes = nullptr) {
     std::ifstream f(file, std::ios::binary);
     if (!f) return false;
     char magic[8];
@@ -1679,6 +1710,7 @@ bool read_checkpoint(const std::string& file, const std::string& config, LoopSta
     s.deal_rng = get_string(f); s.rng = get_string(f);
     model.load_state(f);
     if (online && online->on()) *online_bytes = online->load(f);
+    if (regret_bytes) get(f, *regret_bytes);
     f.read(magic, 8);
     return f && std::string(magic, 8) == "ASWEND01";
 }
@@ -1704,7 +1736,8 @@ int train(int argc, char** argv) {
                                 {"--backward-max-subkeys", "4000000"}, {"--backward-test", "pair"},
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
-                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
+                                {"--log-regret", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1745,7 +1778,13 @@ int train(int argc, char** argv) {
     if (threads > 1 && !label_pass) std::cerr << "note: --threads only affects --label avg|window+avg; this run is serial\n";
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
-    model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0);
+    // --log-regret 1: regret.csv, the bucket regret total sum_B max(0, max_a R_B(a)) per root of the current epoch's window
+    // (R_B: the sampled counterfactual regrets of the training iterates, before RM+ clipping), at every curve row and
+    // at every epoch end before the split; the window restarts at each epoch end (with --gate-eps: at each judgment).
+    // It only reads the regrets the training adds: the training is unchanged.
+    if (o["--log-regret"] != "0" && o["--log-regret"] != "1") throw std::runtime_error("--log-regret must be 0 or 1");
+    const bool log_regret = o["--log-regret"] == "1";
+    model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret);
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -1771,18 +1810,21 @@ int train(int argc, char** argv) {
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
-    cfg << online.config();
+    cfg << online.config() << (log_regret ? ";log_regret=1" : "");
     const std::string config = cfg.str();
 
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
+    const std::string regret_path = out + "/regret.csv";
     LoopState s;
     s.L = epoch0;
-    uint64_t online_bytes = 0;
-    const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model, &online, &online_bytes) ||
-                         read_checkpoint(out + "/checkpoint.tmp", config, s, model, &online, &online_bytes);
+    uint64_t online_bytes = 0, regret_bytes = 0;
+    uint64_t* regret_slot = log_regret ? &regret_bytes : nullptr;
+    const bool resumed = read_checkpoint(out + "/checkpoint.bin", config, s, model, &online, &online_bytes, regret_slot) ||
+                         read_checkpoint(out + "/checkpoint.tmp", config, s, model, &online, &online_bytes, regret_slot);
     online.open(out, resumed, online_bytes);
+    if (resumed && log_regret) std::filesystem::resize_file(regret_path, regret_bytes);
     if (resumed) {
         rng_load(deal_rng, s.deal_rng); rng_load(rng, s.rng);
         // drop rows written after the checkpoint; they are reproduced exactly by the replay
@@ -1806,13 +1848,16 @@ int train(int argc, char** argv) {
                                    "C_per_root,H_per_root,seconds,power_cache_hits,power_cache_misses,bucket_records,"
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb,rss_mb,commit_mb\n";
+        if (log_regret) std::ofstream(regret_path) << "roots,seconds,epoch,kind,window_roots,buckets,bucket_records,regret_sum_per_root\n";
         if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,iterate_regret_half,eps,judged\n";
         if (avg_fill) std::ofstream(fill_path) << "epoch,roots,buckets,traverser_nodes,filled_nodes\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
+    std::ofstream regret;
+    if (log_regret) regret.open(regret_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
     const std::string stop_file = out + "/STOP";
     std::filesystem::remove(stop_file);
@@ -1826,12 +1871,17 @@ int train(int argc, char** argv) {
     // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
     auto elapsed = [&] { return base_seconds + std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() - (online.seconds - online0); };
     auto live_total = [&] { const auto l = model.live_buckets(); return l[0] + l[1] + l[2]; };
+    auto regret_row = [&](const char* kind) {  // --log-regret
+        regret << s.t << ',' << elapsed() << ',' << s.k << ',' << kind << ',' << model.iterate_window_roots() << ',' << live_total()
+               << ',' << model.bucket_records() << ',' << 2 * model.iterate_regret_half(false) << '\n';
+    };
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         s.seconds = elapsed(); s.deal_rng = rng_text(deal_rng); s.rng = rng_text(rng);
         s.log_bytes = file_size_or_zero(log_path); s.index_bytes = file_size_or_zero(index_path);
         s.curve_bytes = file_size_or_zero(curve_path);
-        write_checkpoint(out, config, s, model, &online);
+        if (log_regret) { regret.flush(); regret_bytes = file_size_or_zero(regret_path); }
+        write_checkpoint(out, config, s, model, &online, regret_slot);
     };
     const bool track = partition == Partition::Aswiss || partition == Partition::History;
     uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
@@ -1860,8 +1910,9 @@ int train(int argc, char** argv) {
             const double n = s.curve_roots, mean = s.curve_sum / n;
             const double se = n > 1 ? std::sqrt(std::max(0.0, (s.curve_sq - n * mean * mean) / (n - 1) / n)) : 0.0;
             curve << s.t << ',' << elapsed() << ',' << s.curve_roots << ',' << mean << ',' << se << ',' << live_total() << ','
-                  << peak_rss_mb() << '\n';
+                  << memory_columns() << '\n';
             s.curve_sum = s.curve_sq = 0; s.curve_roots = 0;
+            if (log_regret) regret_row("running");
         }
         const bool epoch_done = s.t == epoch_end;
         if (snapshot_every && s.t % snapshot_every == 0 && !epoch_done) {
@@ -1873,6 +1924,7 @@ int train(int argc, char** argv) {
             const std::string file = "snapshot_" + std::to_string(s.k) + ".bin";
             model.save(out + "/" + file);
             index << file << ',' << s.t << ",epoch," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
+            if (log_regret) regret_row("epoch");  // the epoch's whole window, before its split
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
             int splits = 0;
@@ -2037,6 +2089,7 @@ int train(int argc, char** argv) {
                 << model.h4_live() << ',' << model.last_h4_splits() << '\n';
             std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
                       << " splits=" << splits << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
+            if (log_regret && !gated) model.iterate_regret_half(true);  // the next epoch's window (gated: reset at judgments)
             s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = std::min(T, s.t + s.L);
         }
         if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();

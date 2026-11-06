@@ -23,7 +23,8 @@ int train_net(int argc, char** argv) {
                                 {"--escher-capacity", "500000"}, {"--escher-lr", "1e-3"}, {"--escher-value-lr", "1e-3"},
                                 {"--escher-hidden1", "128"}, {"--escher-hidden2", "64"}, {"--escher-reward-scale", "10"},
                                 {"--escher-reinit", "1"}, {"--escher-value-explore", "0.25"},
-                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
+                                {"--online-lbr-avg-steps", "500"}});
     const std::string algo = o["--algo"];
     if (algo != "mmd" && algo != "escher") throw std::runtime_error("--partition net needs --algo mmd or escher");
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition net uses the heuristic H4 (--h4 heuristic)");
@@ -40,9 +41,14 @@ int train_net(int argc, char** argv) {
     cfg << ";input=deep_cfr_tensor";
     // online LBR: MMD has only its last iterate; ESCHER's average network is trained only at snapshots, so its online
     // rows are the current policy (regret matching on the regret networks)
+    // online LBR policies: MMD has only its last iterate (current). ESCHER: average (default) = a monitoring average
+    // network trained, before every iteration with due evaluations, --online-lbr-avg-steps warm-started steps on the
+    // strategy reservoir with its own RNG (the training is unchanged; its time counts as evaluation time); current =
+    // regret matching on the regret networks.
     OnlineLbr online;
-    online.setup(o, seed, false, true);
-    cfg << online.config();
+    online.setup(o, seed, algo == "escher", true);
+    const int monitor_steps = std::stoi(o["--online-lbr-avg-steps"]);
+    cfg << online.config() << (online.on() && algo == "escher" ? ";online_avg_steps=" + o["--online-lbr-avg-steps"] : "");
     const std::string config = cfg.str();
     Stud7Game game;
     std::unique_ptr<Mmd<Stud7Game>> mmd;
@@ -69,6 +75,17 @@ int train_net(int argc, char** argv) {
         esc = std::make_unique<Escher<Stud7Game>>(game, c);
     }
     const long long params = static_cast<long long>(mmd ? mmd->pol.parameters() : esc->avg.parameters());
+    Mlp monitor; Adam monitor_opt; std::mt19937_64 monitor_rng(seed ^ 0x6a09e667f3bcc908ull);
+    const bool monitor_on = esc && online.on() &&
+                            std::find(online.policies.begin(), online.policies.end(), "average") != online.policies.end();
+    if (monitor_on) {
+        monitor = Mlp(game.input_dim(), esc->cfg.hidden1, esc->cfg.hidden2, Stud7Game::A, seed * 7 + 77);
+        monitor_opt.lr = esc->cfg.lr; monitor_opt.init(monitor);
+        online.extra_save = [&](std::ofstream& f) { save_mlp(f, monitor); save_adam(f, monitor_opt); put_rng(f, monitor_rng); };
+        online.extra_load = [&](std::ifstream& f) {
+            monitor = load_mlp(f); monitor_opt.init(monitor); load_adam(f, monitor_opt); get_rng(f, monitor_rng);
+        };
+    }
     auto roots_done = [&] { return mmd ? mmd->episodes_done : esc->roots_done; };
     NetLoop L;
     L.epoch_len = epoch0; L.next_epoch_roots = epoch0;
@@ -90,7 +107,7 @@ int train_net(int argc, char** argv) {
         if (std::filesystem::exists(log_path)) throw std::runtime_error(out + " already has log.csv but no usable checkpoint; use a new --out");
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after," << head << ",seconds\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb,rss_mb,commit_mb\n";
         std::ofstream(out + "/net_kind.txt") << algo << "\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
@@ -131,10 +148,19 @@ int train_net(int argc, char** argv) {
         if (online.on()) {  // test, then train: the roots of the next update / iteration, on the tabular deal stream
             const long long d0 = roots_done();
             const long long step = mmd ? mmd->cfg.episodes : esc->cfg.value_hands + 2LL * esc->cfg.traversals;
-            for (long long t = (d0 / online.every + 1) * online.every; t <= d0 + step; t += online.every) {
-                NetPolicy target{mmd ? mmd->pol : esc->avg, std::mt19937_64(online.target_seed(t, "current"))};
-                if (esc) { target.regret[0] = &esc->regret[0]; target.regret[1] = &esc->regret[1]; }
-                online.evaluate(t, online.deck_at(t), target, "current", elapsed());
+            const long long first = (d0 / online.every + 1) * online.every;
+            if (monitor_on && first <= d0 + step) {  // refresh the monitoring average network once for this iteration
+                const auto m0 = std::chrono::steady_clock::now();
+                esc->train_average_monitor(monitor, monitor_opt, monitor_rng, monitor_steps);
+                online.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - m0).count();
+            }
+            for (long long t = first; t <= d0 + step; t += online.every) {
+                for (const auto& policy : online.policies) {
+                    const bool average = policy == "average";
+                    NetPolicy target{mmd ? mmd->pol : average ? monitor : esc->avg, std::mt19937_64(online.target_seed(t, policy))};
+                    if (esc && !average) { target.regret[0] = &esc->regret[0]; target.regret[1] = &esc->regret[1]; }
+                    online.evaluate(t, online.deck_at(t), target, policy, elapsed());
+                }
             }
         }
         if (mmd) { auto batch = mmd->collect(); mmd->update(batch); }
@@ -142,7 +168,7 @@ int train_net(int argc, char** argv) {
         const long long done = roots_done();
         const double secs = elapsed();
         while (done >= L.next_curve) {
-            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ",-1\n";
+            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << '\n';
             L.curve_roots0 = done; L.next_curve += curve_every;
         }
         bool saved = false;

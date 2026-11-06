@@ -17,6 +17,10 @@ OUT=${OUT:-agents/adaptive_buckets/aswiss/stud7/data/runs_100m}; WORKERS=${WORKE
 H4=${H4:-heuristic}; SNAPSHOT_EVERY=${SNAPSHOT_EVERY:-5000000}; CHECKPOINT_EVERY=${CHECKPOINT_EVERY:-1000000}
 CURVE_EVERY=${CURVE_EVERY:-100000}; THREADS=${THREADS:-1}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
 ONLINE_LBR_EVERY=${ONLINE_LBR_EVERY:-0}; ONLINE_LBR_REBEL_EVERY=${ONLINE_LBR_REBEL_EVERY:-10}; ONLINE_LBR_PARTICLES=${ONLINE_LBR_PARTICLES:-16}
+# LOG_REGRET=1 (history/aswiss arms) / LOG_REGRET_KMEANS=1 (atom arms): regret.csv; AVERAGE_ONLY=1: eval/final average policies
+# only; presplit: epoch snapshots with PRESPLIT_PARTICLES=256 particles and PRESPLIT_PAIRS=2000 pairs
+LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; AVERAGE_ONLY=${AVERAGE_ONLY:-0}
+PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-2000}
 EXE=$HERE/aswiss_stud
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
@@ -64,6 +68,8 @@ run)
             every=$ONLINE_LBR_EVERY; [ "${PART[$a]}" = rebel ] && every=$ONLINE_LBR_REBEL_EVERY
             online="--online-lbr-every $every --online-lbr-particles $ONLINE_LBR_PARTICLES"
         fi
+        case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
+                            atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \
             --epoch0 10000 --checkpoint-every "$CHECKPOINT_EVERY" --snapshot-every "$SNAPSHOT_EVERY" --curve-every "$CURVE_EVERY" \
             --h4 "$H4" ${EXTRA[$a]:-} $online $( [ "$THREADS" -gt 1 ] && echo --threads "$THREADS" ) --out "$OUT/$name" \
@@ -79,14 +85,22 @@ status)
 stop)
     for a in $ARMS; do touch "$OUT/${NAME[$a]}$SUFFIX/STOP"; done
     echo "STOP files written; each arm checkpoints within ~1000 roots and exits" ;;
-eval|final)
+eval|final|presplit)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${PART[$a]}:$(atlas "${K[$a]}")"); done
     extra=(--min-roots 100000); [ "$ACTION" = final ] && extra=(--latest --pairs 20000 --tag final)
+    [ "$ACTION" = presplit ] && extra=(--kinds epoch --min-roots 0 --particles "$PRESPLIT_PARTICLES" --pairs "$PRESPLIT_PAIRS"
+                                       --rebel-pairs "$PRESPLIT_PAIRS" --gap-roots 0 --only-average --tag "presplit$PRESPLIT_PARTICLES")
+    [ "$AVERAGE_ONLY" = 1 ] && [ "$ACTION" != presplit ] && extra+=(--only-average)
     "$PYTHON" "$HERE/evaluate.py" "$EXE" "$OUT" --runs "${specs[@]}" --workers "$WORKERS" --rebel-threads "$WORKERS" "${extra[@]}" ;;
 plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run
     "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only
+    pre=eval_presplit$PRESPLIT_PARTICLES.jsonl
+    if ls "$OUT"/*/"$pre" > /dev/null 2>&1; then  # pre-split evaluations (presplit action)
+        "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results${SUFFIX}_presplit$PRESPLIT_PARTICLES" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only --eval-file "$pre"
+        "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_presplit${PRESPLIT_PARTICLES}_time.png" --runs "${specs[@]}" --eval-file "$pre"
+    fi
     ospecs=(); for a in $ARMS; do [ -f "$OUT/${NAME[$a]}$SUFFIX/online_lbr.csv" ] && ospecs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     if [ ${#ospecs[@]} -gt 0 ]; then  # online LBR: moving average of the last 100 and of the last 2000 deals
         obase=(); [ -f "$OUT/${NAME[$base]}$SUFFIX/online_lbr.csv" ] && obase=(--baseline "${NAME[$base]}$SUFFIX")
@@ -94,5 +108,5 @@ plot)
     fi ;;
 pack)  # small result files of every run in OUT (no snapshots) -> results_data, for git or sharing
     "$PYTHON" "$HERE/pack_summaries.py" "$OUT" "$HERE/results_data/runs_100m${SUFFIX}_summaries.tar.gz" ;;
-*) echo "usage: $0 run|status|stop|eval|final|plot|pack"; exit 2 ;;
+*) echo "usage: $0 run|status|stop|eval|final|presplit|plot|pack"; exit 2 ;;
 esac

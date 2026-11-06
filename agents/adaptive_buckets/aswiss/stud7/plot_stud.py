@@ -20,6 +20,7 @@ ap.add_argument("--runs", nargs="+", help="NAME:LABEL; default: the seed-1 compa
 ap.add_argument("--baseline", default="atom_k256_s1")
 ap.add_argument("--lw", type=float, default=1.1, help="line width (markers and error bars scale with it)")
 ap.add_argument("--epoch-only", action="store_true", help="draw only epoch-end snapshots (skip the periodic ones)")
+ap.add_argument("--eval-file", default="eval.jsonl", help="evaluation rows to draw, e.g. eval_presplit256.jsonl")
 a = ap.parse_args()
 LW = a.lw
 R, OUT, BASELINE = a.runs_dir, a.out, a.baseline
@@ -48,10 +49,10 @@ def style(run):
 SERIES, MISSING = [], []
 for spec in (a.runs or DEFAULT):
     run, label = spec.split(":", 1)
-    if os.path.exists(f"{R}/{run}/eval.jsonl"): SERIES.append((run, label) + style(run))
+    if os.path.exists(f"{R}/{run}/{a.eval_file}"): SERIES.append((run, label) + style(run))
     else: MISSING.append(run)
 if BASELINE not in [run for run, *_ in SERIES] and BASELINE not in MISSING: MISSING.append(BASELINE)
-for run in MISSING: print(f"not drawn: {run} has no eval.jsonl in {R}" + (" (baseline: difference and ratio panels stay empty)" if run == BASELINE else ""))
+for run in MISSING: print(f"not drawn: {run} has no {a.eval_file} in {R}" + (" (baseline: difference and ratio panels stay empty)" if run == BASELINE else ""))
 
 
 def load(run, name):
@@ -65,7 +66,7 @@ def load(run, name):
             k = r["epoch"]
             r["file"] = f"snapshot_{k}.bin"; r["roots"] = int(log[k]["roots"])
             r["buckets"] = int(log[k - 1]["buckets_after"]) if run.startswith("aswiss") and k > 0 else int(log[k]["buckets_after"])
-        if a.epoch_only and r.get("kind", "epoch") != "epoch" and name == "eval.jsonl": continue
+        if a.epoch_only and r.get("kind", "epoch") != "epoch" and name == a.eval_file: continue
         rows[(r["file"], r["policy"])] = r
     return rows
 
@@ -83,7 +84,7 @@ def paired(run, row, base_row, tag=""):
     return float(d.mean()), 1.96 * float(d.std(ddof=1)) / len(d) ** 0.5
 
 
-data = {run: load(run, "eval.jsonl") for run, *_ in SERIES}
+data = {run: load(run, a.eval_file) for run, *_ in SERIES}
 final = {run: load(run, "eval_final.jsonl") for run, *_ in SERIES}
 off_scale = {run for run, *_ in SERIES if data[run] and max(data[run].values(), key=lambda r: r["roots"])["lbr_ante"] > OFF_SCALE_LBR}
 learned_h4 = any(r.get("h4") == "learned" for rows in data.values() for r in rows.values())

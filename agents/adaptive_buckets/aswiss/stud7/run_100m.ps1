@@ -4,6 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action stop     # checkpoint and exit
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval     # LBR / gap of new snapshots
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final    # newest snapshot, 20k pairs
+#   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action presplit # epoch snapshots (taken right before each split), -PresplitParticles
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot     # figures
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack     # results -> results_data
 # Each arm is one process (one core). "run" again after a stop, crash or reboot resumes every unfinished arm from its
@@ -17,7 +18,7 @@
 # The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
 # C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
-    [ValidateSet("run", "status", "stop", "eval", "final", "plot", "pack")] [string]$Action = "run",
+    [ValidateSet("run", "status", "stop", "eval", "final", "presplit", "plot", "pack")] [string]$Action = "run",
     [long]$Roots = 100000000,
     [int]$Seed = 1,
     [string[]]$Arms = @("aswiss", "k256", "k341", "k512", "k1024"),
@@ -32,6 +33,11 @@ param(
     [long]$OnlineLbrEvery = 0,       # online LBR every N roots (0: off; 1000 adds about 2% to a tabular arm)
     [long]$OnlineLbrRebelEvery = 10, # ReBeL: every N hands (one LBR pair costs about 1.5 training hands)
     [int]$OnlineLbrParticles = 16,
+    [switch]$LogRegret,          # history/aswiss arms: regret.csv, the bucket regret total per root of each epoch window
+    [switch]$LogRegretKmeans,    # the same for the k-means (atom) arms
+    [switch]$AverageOnly,        # eval/final: average policies only (MMD and ReBeL keep their one output policy)
+    [int]$PresplitParticles = 256,
+    [int]$PresplitPairs = 2000,
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
@@ -114,6 +120,9 @@ if ($Action -eq "run") {
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
         if ($Threads -gt 1) { $argv += @("--threads", $Threads) }
         if ($Arm[$a][4]) { $argv += $Arm[$a][4] -split " " }
+        if (($LogRegret -and $Arm[$a][1] -in @("history", "aswiss")) -or ($LogRegretKmeans -and $Arm[$a][1] -eq "atom")) {
+            $argv += @("--log-regret", "1")
+        }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)
@@ -141,11 +150,16 @@ elseif ($Action -eq "stop") {
     foreach ($a in $Arms) { New-Item -ItemType File -Force (Join-Path (Join-Path $Out (RunName $a)) "STOP") | Out-Null }
     Write-Host "STOP files written; each arm saves a checkpoint within ~1000 roots and exits. Resume with -Action run."
 }
-elseif ($Action -in @("eval", "final")) {
+elseif ($Action -in @("eval", "final", "presplit")) {
     if (-not (Test-Path $Exe)) { throw "build first (-Action run builds $Exe)" }
     # @(...) keeps one arm an array: splatting a lone string (@specs) would pass it character by character
     $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][1]):$(AtlasPath $Arm[$_][2])" })
-    $extra = if ($Action -eq "final") { @("--latest", "--pairs", "20000", "--tag", "final") } else { @("--min-roots", "100000") }
+    $extra = if ($Action -eq "final") { @("--latest", "--pairs", "20000", "--tag", "final") }
+             elseif ($Action -eq "presplit") {  # epoch snapshots = the policy right before each split, many particles
+                 @("--kinds", "epoch", "--min-roots", "0", "--particles", $PresplitParticles, "--pairs", $PresplitPairs,
+                   "--rebel-pairs", $PresplitPairs, "--gap-roots", "0", "--only-average", "--tag", "presplit$PresplitParticles")
+             } else { @("--min-roots", "100000") }
+    if ($AverageOnly -and $Action -ne "presplit") { $extra += "--only-average" }
     # ReBeL searches at every street: its LBR hands run on $Workers threads inside one evaluation
     & $Python (Join-Path $Here "evaluate.py") $Exe $Out --runs @specs --workers $Workers --rebel-threads $Workers @extra
 }
@@ -155,6 +169,12 @@ elseif ($Action -eq "plot") {
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
     & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
+    # pre-split evaluations (-Action presplit): the same figures from eval_presplit<P>.jsonl
+    $pre = "eval_presplit$PresplitParticles.jsonl"
+    if (@($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) $pre) }).Count -gt 0) {
+        & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results${Suffix}_presplit$PresplitParticles") --runs @specs --baseline (RunName $base) --epoch-only --eval-file $pre
+        & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_time.png") --runs @specs --eval-file $pre
+    }
     # online LBR (runs trained with -OnlineLbrEvery): moving average of the last 100 and of the last 2000 deals
     $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
     if ($online.Count -gt 0) {

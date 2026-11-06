@@ -219,6 +219,27 @@ struct Escher {
         for (int i = 0; i < 2; ++i) { traverse(i); train_regret(i); }
     }
 
+    // The average policy for monitoring (online LBR) without touching the training: its own network, optimizer and RNG,
+    // warm-started across calls, `steps` steps of the same weighted cross-entropy on the strategy reservoir (read only).
+    void train_average_monitor(Mlp& net, Adam& opt, std::mt19937_64& r, int steps) const {
+        const auto& mem = smem.data;
+        if (mem.empty() || steps <= 0) return;
+        Mlp::Grad g; g.init(net);
+        std::uniform_int_distribution<size_t> pick(0, mem.size() - 1);
+        for (int st = 0; st < steps; ++st) {
+            for (int b = 0; b < cfg.batch; ++b) {
+                const StratSample& ss = mem[pick(r)];
+                Mlp::Cache c; net.forward(ss.x, c);
+                double p[A]; masked_softmax(c.y.data(), ss.mask, A, p);
+                const float wn = ss.w / static_cast<float>(t);
+                float dy[A] = {};
+                for (int a = 0; a < A; ++a) if (ss.mask >> a & 1) dy[a] = wn * static_cast<float>(p[a] - ss.v[a]);
+                net.backward(ss.x, c, dy, g);
+            }
+            opt.step(net, g, 1.0f / static_cast<float>(cfg.batch));
+        }
+    }
+
     // average policy network from the strategy reservoir (fresh, weighted cross-entropy)
     void train_average() {
         avg = Mlp(game.input_dim(), cfg.hidden1, cfg.hidden2, A, cfg.seed * 7 + 5 + 1000 * static_cast<uint64_t>(t));

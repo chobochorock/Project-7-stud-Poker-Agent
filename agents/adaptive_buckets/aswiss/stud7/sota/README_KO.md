@@ -199,6 +199,51 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - 온라인 LBR(학습 중 test-then-train 지표)은 `-OnlineLbrEvery 1000`으로 켠다(ReBeL은 10판마다). 설명과 검증은 `../README_KO.md`의 "온라인 LBR" 절에 있다. MMD·ESCHER는 현재 정책, ReBeL은 탐색 정책을 잰다.
 - 하이퍼파라미터는 `--mmd-*`, `--escher-*`, `--rebel-*` 옵션으로 바꾼다. 바꾸면 checkpoint 설정이 달라지므로 새 출력 폴더가 필요하다.
 
+## GPU 실험 계획 (노트북 RTX 5060, CPU 실험 다음)
+
+**질문:** GPU를 쓸 수 있는 비교군이 GPU를 썼을 때도, ASWISS(CPU)와의 "학습 시간 대비 성능" 관계가 유지되는가.
+
+**대상 알고리즘:**
+
+| 알고리즘 | GPU가 돕는 부분 | GPU 이점을 보려면 |
+|---|---|---|
+| MMD | 자기대전 배치 추론, 큰 배치 학습 | 망(예: 512×512)과 갱신당 판 수를 키운다. 지금 크기(128×64)는 실행 지연이 커서 이득이 작을 수 있다 |
+| ESCHER | 가치·후회·평균망 학습(지금 시간의 대부분), 순회의 망 호출 | 망 호출을 여러 판 묶어 배치로 부른다 |
+| ReBeL | 5·6구 벡터 CFR과 잎 가치망(원 구현도 GPU 텐서 연산), 7구 버킷 게임의 행렬곱 | 가치망을 키우고(원 논문은 훨씬 큰 망), 풀이 전체를 텐서로 옮긴다 |
+| (후보) Deep CFR | 저장소의 `cpp_mccfr/train_deep_cfr_7th.py` (C++ 순회 + PyTorch, TCP) | `--device cuda`로 바로 돌릴 수 있으나 평가 경로를 맞춰야 한다 |
+
+- 표 기반(ASWISS, k-means)은 해시 표와 표본 순회라 GPU 이점이 없다. 지금처럼 CPU 코어 하나로 둔다.
+
+**구조:**
+- 규칙, 딜, 특징, LBR은 지금의 C++ 엔진을 그대로 쓴다.
+- 학습과 배치 추론만 PyTorch(GPU)로 옮긴다.
+- 둘 사이는 C API 공유 라이브러리(ctypes)나, 저장소에 이미 있는 배치 TCP 방식으로 잇는다.
+- 학습한 망은 지금과 같은 스냅숏 형식(`STUDNET1`, `STUDESC1`, `STUDRBL1`)으로 내보낸다. 그러면 오프라인·온라인 LBR이 CPU 실행과 같은 C++ 평가기로 계산된다.
+
+**변인 통제:**
+- 비교군마다 쓴 하드웨어를 함께 적는다. 표 기반은 CPU 코어 1개, GPU 비교군은 CPU 코어 1개 + GPU다.
+- GPU 비교군은 한 번에 하나씩 돌린다. VRAM 8GB를 나눠 쓰면 시간이 섞이기 때문이다.
+- 게임, seed, deal, 온라인 LBR(16파티클), 오프라인 LBR(64파티클)은 CPU 실험과 같다.
+- 같은 알고리즘의 CPU판과 GPU판을 나란히 두면 GPU의 효과만 따로 볼 수 있다.
+- 원하면 GPU 전력(`nvidia-smi`)도 기록해 에너지 대비로 비교한다.
+
+**0단계, 노트북 점검 (약 1분):**
+```powershell
+python agents\adaptive_buckets\aswiss\stud7\gpu\gpu_check.py --out agents\adaptive_buckets\aswiss\stud7\gpu\gpu_check.json
+```
+- 점검하는 것: PyTorch 로드, CUDA 빌드 여부, Blackwell(sm_120) 커널 지원, 실제 커널 실행.
+- 위 망 크기들의 CPU 1스레드 대비 GPU 시간도 잰다. 결과 JSON을 보고 어느 부분을 GPU로 옮길지와 망 크기를 정한다.
+- 걸릴 수 있는 곳:
+  1. 저장소 기록상 노트북의 번들 PyTorch는 CPU 전용이다(`../../../../cpp_mccfr/README.md`).
+  2. RTX 50 시리즈는 CUDA 12.8 이상 빌드(PyTorch 2.7 이상)가 필요하다.
+  3. 이전에 pip 패키지 DLL이 Windows 애플리케이션 제어(WinError 4551)에 막힌 적이 있다. 막히면 WSL2(Ubuntu)에서 리눅스판 PyTorch로 돌리는 것이 우회로다. 이때 bash 실행기(`run_100m.sh`)를 쓴다.
+
+**구현 순서 (점검 통과 뒤):**
+1. MMD-GPU: 가장 단순하고 배치 이득이 크다.
+2. ESCHER-GPU
+3. ReBeL-GPU: 풀이를 텐서로 옮기는 일이 가장 크다.
+- 각 단계마다 Kuhn·Leduc에서 CPU판과 같은 설정으로 결과가 같은 분포인지 확인하고, 7-stud 속도를 잰다.
+
 ## 남은 일
 
 1. ReBeL 학습 곡선 확인(이 컨테이너에서 짧게): 판 수에 따라 LBR이 내려가는지.

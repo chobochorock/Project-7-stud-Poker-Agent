@@ -873,8 +873,17 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 - 16파티클은 64파티클보다 일찍(exploitability 약 0.2) 바닥에 닿았다.
 - 7-stud에서는 비율이 더 낮을 것으로 보지만 확인하지 않았다.
 
-**노트북 설정 권장:** `-OnlineLbrEvery 1000`(ReBeL은 `-OnlineLbrRebelEvery 10`), 16파티클.
-- 부담은 표 기반이 약 2%(1,000 roots 학습 약 0.7초에 pair 하나 15ms), MMD·ESCHER는 2% 이하, ReBeL은 약 15%다.
+**노트북 설정 권장:** `-OnlineLbrEvery 1000`(ReBeL은 `-OnlineLbrRebelEvery 10`), `-OnlineLbrParticles 64`.
+- 부담(온라인 시간 / 학습 시간, 이 컨테이너에서 잼, 2026-11-06):
+
+  | 비교군 | 16파티클 | 64파티클 | 측정 |
+  |---|---:|---:|---|
+  | 표 기반 (`hist_bbf`) | 약 2% | 6% (한 행 41 ms) | 7만 roots |
+  | MMD | 4% | 9% (한 행 18 ms) | 6.1만 roots |
+  | ReBeL | 18% | 22% (한 행 1.7초) | 100판. 비용 대부분이 대상 정책의 탐색이라 파티클 수에 둔감하다 |
+
+  - ESCHER는 LBR 자체는 MMD와 비슷하고, 반복마다 감시용 평균망 500스텝이 더해진다.
+  - 이 시간은 학습 초에서 빠지지만 벽시계 시간은 그만큼 길어진다.
 - 1억 roots면 10만 행이다. 100행 창은 10만 roots, 2,000행 창은 200만 roots에 걸친다.
 - 이미 끝난 100M 실행에는 온라인 행이 없다. 이 지표로 비교하려면 새 출력 폴더에서 다시 돌려야 한다.
 - `-Action plot`은 온라인 행이 있으면 100행과 2,000행 그림을 함께 만든다(`results_s1_online_w100.png`, `_w2000.png`).

@@ -267,7 +267,7 @@ int train_rebel(int argc, char** argv) {
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after,examples6,examples7,loss6,loss7,solves5,solves6,solves7,"
                                    "solve5_s,solve6_s,solve7_s,train_s,gap7_mean,seconds\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb,rss_mb,commit_mb\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
         std::ofstream(out + "/net_kind.txt") << "rebel\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);

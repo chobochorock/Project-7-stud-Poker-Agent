@@ -35,6 +35,7 @@ param(
     [int]$OnlineLbrParticles = 16,
     [switch]$LogRegret,          # history/aswiss arms: regret.csv, the bucket regret total per root of each epoch window
     [switch]$LogRegretKmeans,    # the same for the k-means (atom) arms
+    [switch]$LogSplits,          # history arms: splits.csv, one row per child bucket of every split (keys, label, z)
     [switch]$AverageOnly,        # eval/final: average policies only (MMD and ReBeL keep their one output policy)
     [int]$PresplitParticles = 256,
     [int]$PresplitPairs = 2000,
@@ -123,6 +124,7 @@ if ($Action -eq "run") {
         if (($LogRegret -and $Arm[$a][1] -in @("history", "aswiss")) -or ($LogRegretKmeans -and $Arm[$a][1] -eq "atom")) {
             $argv += @("--log-regret", "1")
         }
+        if ($LogSplits -and $Arm[$a][1] -eq "history") { $argv += @("--log-splits", "1") }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)

@@ -107,7 +107,7 @@ int train_net(int argc, char** argv) {
         if (std::filesystem::exists(log_path)) throw std::runtime_error(out + " already has log.csv but no usable checkpoint; use a new --out");
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after," << head << ",seconds\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb,rss_mb,commit_mb\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
         std::ofstream(out + "/net_kind.txt") << algo << "\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);

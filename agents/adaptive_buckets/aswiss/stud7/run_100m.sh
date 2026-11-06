@@ -17,9 +17,9 @@ OUT=${OUT:-agents/adaptive_buckets/aswiss/stud7/data/runs_100m}; WORKERS=${WORKE
 H4=${H4:-heuristic}; SNAPSHOT_EVERY=${SNAPSHOT_EVERY:-5000000}; CHECKPOINT_EVERY=${CHECKPOINT_EVERY:-1000000}
 CURVE_EVERY=${CURVE_EVERY:-100000}; THREADS=${THREADS:-1}; SUFFIX=_s$SEED; [ "$H4" = learn ] && SUFFIX=_h4_s$SEED
 ONLINE_LBR_EVERY=${ONLINE_LBR_EVERY:-0}; ONLINE_LBR_REBEL_EVERY=${ONLINE_LBR_REBEL_EVERY:-10}; ONLINE_LBR_PARTICLES=${ONLINE_LBR_PARTICLES:-16}
-# LOG_REGRET=1 (history/aswiss arms) / LOG_REGRET_KMEANS=1 (atom arms): regret.csv; AVERAGE_ONLY=1: eval/final average policies
-# only; presplit: epoch snapshots with PRESPLIT_PARTICLES=256 particles and PRESPLIT_PAIRS=2000 pairs
-LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; AVERAGE_ONLY=${AVERAGE_ONLY:-0}
+# LOG_REGRET=1 (history/aswiss arms) / LOG_REGRET_KMEANS=1 (atom arms): regret.csv; LOG_SPLITS=1 (history arms): splits.csv;
+# AVERAGE_ONLY=1: eval/final average policies only; presplit: epoch snapshots with PRESPLIT_PARTICLES=256 particles and PRESPLIT_PAIRS=2000 pairs
+LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; LOG_SPLITS=${LOG_SPLITS:-0}; AVERAGE_ONLY=${AVERAGE_ONLY:-0}
 PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-2000}
 EXE=$HERE/aswiss_stud
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
@@ -68,6 +68,7 @@ run)
             every=$ONLINE_LBR_EVERY; [ "${PART[$a]}" = rebel ] && every=$ONLINE_LBR_REBEL_EVERY
             online="--online-lbr-every $every --online-lbr-particles $ONLINE_LBR_PARTICLES"
         fi
+        [ "${PART[$a]}" = history ] && [ "$LOG_SPLITS" = 1 ] && online="$online --log-splits 1"
         case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
                             atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \

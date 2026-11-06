@@ -890,6 +890,28 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 | 분할 직전 LBR (256파티클 등) | `-Action presplit` → `eval_presplit<P>.jsonl` (epoch 스냅숏 = 분할 직전 정책) | roots, 학습 초(`snapshots.csv`) | 표 기반·MMD·ESCHER (ReBeL은 선택) |
 | bucket 양의 누적 평균 regret 합 | `regret.csv` (`regret_sum_per_root` = Σ_B max(0, max_a R_B(a)) / 창 roots, epoch 창, `kind`=running/epoch) | roots | `-LogRegret`: history·aswiss 비교군 (`-LogRegretKmeans`: k-means) |
 | 메모리 | `curve.csv`의 `peak_rss_mb`, `rss_mb`, `commit_mb` (Windows: 최대/현재 working set, private bytes) | roots, 학습 초 | 모두 |
+| 프로세스 CPU 시간, 절대 시각 | `curve.csv`의 `cpu_seconds`(프로세스 누적 CPU 초, 온라인 LBR 포함), `unix_time`(행을 쓴 시각, Unix 초) | 학습 초 | 모두 |
+| 분할 기록 | `splits.csv` (`epoch,roots,kind,street,legal_mask,parent,child,label_window,label_average,label_bits,keys,visits,regret,regret_sq,z`) | epoch | `-LogSplits`: history 비교군 |
+
+**CPU 시간과 시각의 쓰임:**
+- `cpu_seconds / 경과 초`가 1보다 꽤 작으면 그 구간에 그 프로세스가 CPU를 다 받지 못한 것이다(다른 프로세스와 경쟁, 절전, 느린 코어 배치).
+- `unix_time`으로 비교군끼리 같은 시각의 구간을 맞춰 볼 수 있다. 예: 한 비교군이 끝난 뒤 다른 비교군이 빨라졌는지.
+- 이 둘은 경쟁을 막지 않는다. 경쟁이 있었는지, 얼마나 있었는지를 기록에서 확인하게 해 줄 뿐이다.
+
+**분할 기록 (`splits.csv`):**
+- 앞 방향 분할: 부모 bucket의 자식 하나마다 한 줄이다. 라벨은 창 라벨과 평균 라벨(행동 번호, 없으면 -1)이다. `keys`는 옮겨 간 키 수다. `visits`, `regret`, `regret_sq`, `z`는 그 라벨을 정한 쪽(평균 라벨이 있으면 평균, 없으면 창)의 구성원 합이다.
+- 역방향 분할: 자식마다 한 줄(`label_bits` = 라벨 비트)과 나머지 한 줄(비트 0)이다.
+- 재개하면 checkpoint 이후의 행을 잘라 낸다(`backward.csv`와 같다). 1억 roots의 `hist_bbf`에서는 수백 MB가 될 수 있어 `-Action pack`에는 넣지 않는다. 해석 도구(`../INTERPRETABILITY_PLAN_KO.md`)에서 스냅숏과 함께 쓴다.
+- 확인(70k roots `hist_bbf`): 켜고 끈 실행의 스냅숏이 바이트 단위로 같았다. 31k에서 멈췄다 이은 실행의 `splits.csv`(656행), `regret.csv`, `online_lbr.csv`가 끊지 않은 실행과 같았다.
+
+**분할 직전 LBR의 비용 (`-Action presplit`):**
+- 학습과 따로 도는 평가다. 학습이 epoch 끝(분할 직전)마다 스냅숏 파일을 남기고, presplit은 나중에 그 파일을 읽는 별도 프로세스다. 학습 시간(`seconds`)에는 들어가지 않는다. 그림의 시간 축은 그 스냅숏의 학습 초(`snapshots.csv`)다.
+- 스냅숏 하나에 2,000 pair(= 4,000 핸드, 같은 deal을 두 좌석에서)를 평가한다. `-PresplitPairs`로 바꾼다.
+- 1.27M roots 스냅숏에서 256파티클, 한 스레드로 잰 pair당 시간: `hist_bbf` 0.134초, k-means 256 0.111초, MMD 0.053초.
+  - 스냅숏 하나(2,000 pair): `hist_bbf` 약 4.5분, k-means 약 3.7분, MMD 약 1.8분.
+  - 비교군당 14개: `hist_bbf` 약 1시간, k-means 약 50분, MMD·ESCHER 약 25–30분. 뒤 스냅숏은 표가 커서 조금 더 느릴 수 있다.
+  - `-Workers 4`면 네 비교군 합계 약 3 CPU 시간, 벽시계 약 45분–1시간이다.
+- 학습이 도는 동안 돌리면 같은 CPU를 나눠 써서 학습의 실제 시간 측정이 흐려진다. 학습이 모두 끝난 뒤에 돌린다.
 
 **평가하는 정책 (평균 정책만):**
 - 온라인 LBR: 표 기반은 평균 정책이다. ESCHER는 감시용 평균망이다. 반복마다 전략 저수지로 500스텝을 이어서 학습하고, 별도 난수를 쓰며, 그 시간은 평가 시간으로 뺀다.

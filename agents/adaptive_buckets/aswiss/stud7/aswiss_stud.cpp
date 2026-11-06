@@ -88,6 +88,9 @@ struct AswMemoryCounters {  // layout of PROCESS_MEMORY_COUNTERS (DWORD = unsign
 };
 __declspec(dllimport) void* __stdcall GetCurrentProcess(void);
 __declspec(dllimport) int __stdcall K32GetProcessMemoryInfo(void* process, AswMemoryCounters* counters, unsigned long cb);
+struct AswFileTime { unsigned long low, high; };  // FILETIME
+__declspec(dllimport) int __stdcall GetProcessTimes(void* process, AswFileTime* creation, AswFileTime* exit, AswFileTime* kernel,
+                                                    AswFileTime* user);
 }
 #endif
 #define STUD_MCCFR_NO_MAIN
@@ -561,6 +564,8 @@ public:
         const auto r = std::make_pair(avg_nodes_, filled_nodes_); avg_nodes_ = filled_nodes_ = 0; return r;
     }
     void count_root() { if (track_rwin_) ++rwin_roots_; }
+    // --log-splits: rows of the next hsplit / hbackward go to `log`, tagged with this epoch and root count
+    void set_split_log(std::ostream* log, uint64_t epoch, uint64_t roots) { split_log_ = log; split_epoch_ = epoch; split_roots_ = roots; }
     uint64_t iterate_window_roots() const { return rwin_roots_; }
     // sum_B max(0, max_a R_B(a)) / roots / 2 over the window (ante per root), then the window restarts if `reset`
     double iterate_regret_half(bool reset) {
@@ -775,10 +780,28 @@ public:
     }
     int hsplit(double z, const HMap* avg = nullptr, bool use_window = true) {
         auto label = [z](const HFull& k, const AtomStats& st) { return hlabel(k, st, z); };
-        struct Labels { int window = -1, average = -1; };
+        struct Labels { int window = -1, average = -1; const AtomStats* wst = nullptr; const AtomStats* ast = nullptr; };
         std::unordered_map<HFull, Labels, HFullHash> labels_of;
-        if (use_window) for (const auto& [k, st] : hatoms_) labels_of[k].window = label(k, st);
-        if (avg) for (const auto& [k, st] : *avg) labels_of[k].average = label(k, st);
+        if (use_window) for (const auto& [k, st] : hatoms_) { auto& l = labels_of[k]; l.window = label(k, st); l.wst = &st; }
+        if (avg) for (const auto& [k, st] : *avg) { auto& l = labels_of[k]; l.average = label(k, st); l.ast = &st; }
+        // --log-splits: per child, the keys moved into it and the statistics behind their label (the average-policy
+        // label's when there is one, else the window's): visits, sum of the label action's regret R and of its squares Q
+        struct ChildLog { uint64_t keys = 0; double visits = 0, r = 0, q = 0; int window = -1, average = -1; };
+        std::map<uint32_t, ChildLog> child_log;
+        auto note_key = [&](uint32_t nb, uint16_t ctx, const HKey& m) {
+            if (!split_log_) return;
+            ChildLog& cl = child_log[nb];
+            ++cl.keys;
+            const auto it = labels_of.find(HFull{ctx, m});
+            if (it == labels_of.end()) return;
+            const Labels& l = it->second;
+            cl.window = l.window; cl.average = l.average;
+            const int a = l.average >= 0 ? l.average : l.window;
+            const AtomStats* st = l.average >= 0 ? l.ast : l.wst ? l.wst : l.ast;
+            if (!st) return;
+            cl.visits += st->visits;
+            if (a >= 0) { cl.r += st->r[a]; cl.q += st->sq[a]; }
+        };
         std::map<uint16_t, std::vector<std::pair<HKey, int>>> by_ctx;  // ordered: reproducible bucket ids
         for (const auto& [k, l] : labels_of)
             by_ctx[k.ctx].push_back({k.m, !avg ? l.window : !use_window ? l.average
@@ -817,14 +840,25 @@ public:
                 if (it == child.end()) continue;
                 const auto l = label_of.find(m);
                 c.member[m] = it->second.at(l == label_of.end() ? -1 : l->second);
+                note_key(c.member[m], ctx, m);
             }
             for (const auto& [m, b] : implicit) {  // unlabelled ones keep following their ancestor entry or the rest
                 const auto it = child.find(b);
                 const int label = label_of.at(m);
-                if (it != child.end() && label >= 0) c.member[m] = it->second.at(label);
+                if (it != child.end() && label >= 0) { c.member[m] = it->second.at(label); note_key(c.member[m], ctx, m); }
             }
             const auto rest = child.find(c.rest);
             if (rest != child.end()) c.rest = rest->second.at(-1);
+            if (split_log_)
+                for (const auto& [b, by_label] : child)
+                    for (const auto& [code, nb] : by_label) {
+                        const ChildLog cl = child_log.count(nb) ? child_log[nb] : ChildLog{};
+                        const int w = !avg ? code : use_window && code >= 0 ? code / 16 - 1 : (avg && !use_window) ? -1 : cl.window;
+                        const int g = !avg ? -1 : !use_window ? code : code >= 0 ? code % 16 - 1 : -1;
+                        *split_log_ << split_epoch_ << ',' << split_roots_ << ",forward," << (ctx >> 8) << ',' << (ctx & 0xff) << ','
+                                    << b << ',' << nb << ',' << w << ',' << g << ",-1," << cl.keys << ',' << cl.visits << ',' << cl.r << ','
+                                    << cl.q << ',' << (cl.q > 0 ? cl.r / std::sqrt(cl.q) : 0.0) << '\n';
+                    }
         }
         return splits;
     }
@@ -925,11 +959,18 @@ public:
                 for (const auto& [sig, keys] : sigs) {
                     const uint32_t nb = child();
                     for (const HKey& m : keys) c.member[m] = nb;
+                    if (split_log_)  // label_bits: the labels the sub-keys of these previous keys carried
+                        *split_log_ << split_epoch_ << ',' << split_roots_ << ",backward," << (ctx >> 8) << ',' << (ctx & 0xff) << ','
+                                    << b << ',' << nb << ",-1,-1," << sig[0] << ',' << keys.size() << ",0,0,0,0\n";
                 }
                 if (others) {
                     const uint32_t nb = child();
-                    for (const HKey& m : ex) if (!marked.count(m)) c.member[m] = nb;
+                    uint64_t moved = 0;
+                    for (const HKey& m : ex) if (!marked.count(m)) { c.member[m] = nb; ++moved; }
                     if (c.rest == b) c.rest = nb;
+                    if (split_log_)
+                        *split_log_ << split_epoch_ << ',' << split_roots_ << ",backward," << (ctx >> 8) << ',' << (ctx & 0xff) << ','
+                                    << b << ',' << nb << ",-1,-1,0," << moved << ",0,0,0,0\n";
                 }
             }
         }
@@ -1304,6 +1345,8 @@ private:
     std::unordered_map<uint16_t, HContext> hctx_;
     std::vector<uint32_t> parent_;  // bucket -> the bucket it was split from (kNone: a context's first bucket)
     bool track_rwin_ = false;
+    std::ostream* split_log_ = nullptr;       // --log-splits (history partition): splits.csv
+    uint64_t split_epoch_ = 0, split_roots_ = 0;
     bool avg_fill_ = false;
     double fill_reach_ = 1e-4, plain_clock_ = 0;
     std::vector<std::array<double, A>> plain_;
@@ -1642,10 +1685,27 @@ double memory_mb(int which) {
 #endif
 }
 double peak_rss_mb() { return memory_mb(0); }
-// the three memory columns of curve.csv: peak_rss_mb, rss_mb, commit_mb
+// CPU seconds of this process (all threads, user + kernel), -1 if unknown
+double cpu_seconds() {
+#ifdef _WIN32
+    AswFileTime c{}, e{}, k{}, u{};
+    if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return -1;
+    auto ticks = [](const AswFileTime& f) { return static_cast<double>((static_cast<uint64_t>(f.high) << 32) | f.low); };
+    return (ticks(k) + ticks(u)) * 1e-7;
+#else
+    timespec ts{};
+    if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) != 0) return -1;
+    return static_cast<double>(ts.tv_sec) + 1e-9 * static_cast<double>(ts.tv_nsec);
+#endif
+}
+// the resource columns of curve.csv (kResourceHeader): memory (see memory_mb), process CPU seconds and the wall-clock
+// time as Unix seconds (shows sleep / stalls and when other runs started or ended)
+constexpr const char* kResourceHeader = "peak_rss_mb,rss_mb,commit_mb,cpu_seconds,unix_time";
 std::string memory_columns() {
     std::ostringstream m;
-    m << memory_mb(0) << ',' << memory_mb(1) << ',' << memory_mb(2);
+    m << memory_mb(0) << ',' << memory_mb(1) << ',' << memory_mb(2) << ',' << cpu_seconds() << ','
+      << std::fixed << std::setprecision(3)
+      << std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
     return m.str();
 }
 
@@ -1737,7 +1797,7 @@ int train(int argc, char** argv) {
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--log-regret", "0"}});
+                                {"--log-regret", "0"}, {"--log-splits", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1784,6 +1844,11 @@ int train(int argc, char** argv) {
     // It only reads the regrets the training adds: the training is unchanged.
     if (o["--log-regret"] != "0" && o["--log-regret"] != "1") throw std::runtime_error("--log-regret must be 0 or 1");
     const bool log_regret = o["--log-regret"] == "1";
+    // --log-splits 1 (history partition): splits.csv, one row per child bucket of every forward and backward split
+    // (see Model::hsplit / hbackward): parent, child, labels, keys moved, the label's visits, R, Q and R / sqrt(Q).
+    // Logging only; rows of epochs after a checkpoint are rewritten on resume.
+    if (o["--log-splits"] != "0" && o["--log-splits"] != "1") throw std::runtime_error("--log-splits must be 0 or 1");
+    const bool log_splits = o["--log-splits"] == "1" && partition == Partition::History;
     model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret);
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
@@ -1816,7 +1881,7 @@ int train(int argc, char** argv) {
     std::mt19937_64 deal_rng(std::stoull(o["--seed"])), rng(std::stoull(o["--seed"]) ^ 0x9e3779b97f4a7c15ull);
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
-    const std::string regret_path = out + "/regret.csv";
+    const std::string regret_path = out + "/regret.csv", splits_path = out + "/splits.csv";
     LoopState s;
     s.L = epoch0;
     uint64_t online_bytes = 0, regret_bytes = 0;
@@ -1831,7 +1896,8 @@ int train(int argc, char** argv) {
         std::filesystem::resize_file(log_path, s.log_bytes);
         std::filesystem::resize_file(index_path, s.index_bytes);
         std::filesystem::resize_file(curve_path, s.curve_bytes);
-        for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}, std::pair{avg_fill, fill_path}}) {
+        for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}, std::pair{avg_fill, fill_path},
+                                       std::pair{log_splits, splits_path}}) {
             if (!on) continue;  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
             std::ifstream in(path);
             std::string line, kept;
@@ -1848,16 +1914,19 @@ int train(int argc, char** argv) {
                                    "C_per_root,H_per_root,seconds,power_cache_hits,power_cache_misses,bucket_records,"
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
         std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets,peak_rss_mb,rss_mb,commit_mb\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
         if (log_regret) std::ofstream(regret_path) << "roots,seconds,epoch,kind,window_roots,buckets,bucket_records,regret_sum_per_root\n";
+        if (log_splits) std::ofstream(splits_path) << "epoch,roots,kind,street,legal_mask,parent,child,label_window,label_average,"
+                                                     "label_bits,keys,visits,regret,regret_sq,z\n";
         if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,iterate_regret_half,eps,judged\n";
         if (avg_fill) std::ofstream(fill_path) << "epoch,roots,buckets,traverser_nodes,filled_nodes\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
-    std::ofstream regret;
+    std::ofstream regret, splits_log;
     if (log_regret) regret.open(regret_path, std::ios::app);
+    if (log_splits) splits_log.open(splits_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
     const std::string stop_file = out + "/STOP";
     std::filesystem::remove(stop_file);
@@ -1881,6 +1950,7 @@ int train(int argc, char** argv) {
         s.log_bytes = file_size_or_zero(log_path); s.index_bytes = file_size_or_zero(index_path);
         s.curve_bytes = file_size_or_zero(curve_path);
         if (log_regret) { regret.flush(); regret_bytes = file_size_or_zero(regret_path); }
+        if (log_splits) splits_log.flush();
         write_checkpoint(out, config, s, model, &online, regret_slot);
     };
     const bool track = partition == Partition::Aswiss || partition == Partition::History;
@@ -2029,6 +2099,7 @@ int train(int argc, char** argv) {
                     }
                     replay_secs = elapsed() - replay_start;
                 }
+                if (log_splits) model.set_split_log(&splits_log, s.k, s.t);
                 if (judge) splits = model.hsplit(z, &avg, label_rule == "window+avg");
                 std::cerr << "average-policy pass: " << n << " roots, " << avg.size() << " keys (" << pass_secs << " s"
                           << (backward && judge ? ", replay " + std::to_string(replay_secs) + " s" : "") << ", " << threads

@@ -21,7 +21,10 @@ ONLINE_LBR_EVERY=${ONLINE_LBR_EVERY:-0}; ONLINE_LBR_REBEL_EVERY=${ONLINE_LBR_REB
 # AVERAGE_ONLY=1: eval/final average policies only; presplit: epoch snapshots with PRESPLIT_PARTICLES=256 particles and PRESPLIT_PAIRS=2000 pairs
 LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; LOG_SPLITS=${LOG_SPLITS:-0}; AVERAGE_ONLY=${AVERAGE_ONLY:-0}
 PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-2000}
-EXE=$HERE/aswiss_stud
+# BUDGET_CPU_SECONDS=S: mmd / escher / rebel arms stop when their training CPU time reaches S (rerun without it to continue)
+# EXE=PATH: executable to build and use (a second name lets new arms use new code while older arms keep running)
+BUDGET_CPU_SECONDS=${BUDGET_CPU_SECONDS:-0}
+EXE=${EXE:-$HERE/aswiss_stud}
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
@@ -38,7 +41,7 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [hist_bb]="--history-cards street --label avg --label-cap 2560000 --backward 1"
                   [hist_bbf]="--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain"
                   [mmd]="--algo mmd" [escher]="--algo escher"
-                  [rebel]="--roots 60000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
+                  [rebel]="--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
                   [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly"
@@ -69,6 +72,7 @@ run)
             online="--online-lbr-every $every --online-lbr-particles $ONLINE_LBR_PARTICLES"
         fi
         [ "${PART[$a]}" = history ] && [ "$LOG_SPLITS" = 1 ] && online="$online --log-splits 1"
+        case ${PART[$a]} in net|rebel) [ "$BUDGET_CPU_SECONDS" != 0 ] && online="$online --budget-cpu-seconds $BUDGET_CPU_SECONDS" ;; esac
         case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
                             atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \

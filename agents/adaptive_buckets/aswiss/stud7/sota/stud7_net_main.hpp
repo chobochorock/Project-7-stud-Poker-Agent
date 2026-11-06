@@ -14,17 +14,29 @@ int train_net(int argc, char** argv) {
                                 {"--epoch0", "10000"}, {"--z", "2"}, {"--seed", "1"}, {"--out", ""}, {"--power-cache", "1000000"},
                                 {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"}, {"--curve-every", "10000"},
                                 {"--h4", "heuristic"}, {"--threads", "1"},
-                                {"--mmd-episodes", "2048"}, {"--mmd-epochs", "2"}, {"--mmd-minibatch", "512"}, {"--mmd-lr", "3e-4"},
-                                {"--mmd-value-lr", "1e-3"}, {"--mmd-alpha", "0.2"}, {"--mmd-alpha-halflife", "0"}, {"--mmd-beta", "1"},
-                                {"--mmd-magnet-every", "0"}, {"--mmd-hidden1", "128"}, {"--mmd-hidden2", "64"},
+                                // MMD defaults: Sokota et al.'s deep multi-agent setting (appendix J, p.37) = RLlib PPO's defaults
+                                // (ray 1.12: 4,000 steps per update ~ 1,000 7-stud hands, 30 epochs x minibatch 128, lr 5e-5,
+                                // clip 0.3, gamma 0.99, GAE lambda 1) with the KL term replaced by MMD's and the schedule
+                                // alpha_t = eta_t = 0.05 sqrt(1e7 / t); 512 x 512 hidden units as their released networks
+                                // (ReLU here, tanh there)
+                                {"--mmd-episodes", "1000"}, {"--mmd-epochs", "30"}, {"--mmd-minibatch", "128"}, {"--mmd-lr", "5e-5"},
+                                {"--mmd-value-lr", "5e-5"}, {"--mmd-alpha", "0.05"}, {"--mmd-alpha-halflife", "0"}, {"--mmd-beta", "1"},
+                                {"--mmd-schedule", "sqrt"}, {"--mmd-eta", "0.05"}, {"--mmd-horizon", "10000000"},
+                                {"--mmd-clip", "0.3"}, {"--mmd-gamma", "0.99"},
+                                {"--mmd-magnet-every", "0"}, {"--mmd-hidden1", "512"}, {"--mmd-hidden2", "512"},
                                 {"--mmd-reward-scale", "10"}, {"--mmd-normalize", "1"},
-                                {"--escher-value-hands", "4096"}, {"--escher-value-steps", "200"}, {"--escher-traversals", "8192"},
-                                {"--escher-regret-steps", "300"}, {"--escher-avg-steps", "2000"}, {"--escher-batch", "512"},
-                                {"--escher-capacity", "500000"}, {"--escher-lr", "1e-3"}, {"--escher-value-lr", "1e-3"},
-                                {"--escher-hidden1", "128"}, {"--escher-hidden2", "64"}, {"--escher-reward-scale", "10"},
-                                {"--escher-reinit", "1"}, {"--escher-value-explore", "0.25"},
+                                // ESCHER defaults: the paper's Table 3 (p.17: 1,000 regret and 1,000 value traversals, batch
+                                // 2048, 5,000 / 5,000 / 10,000 training steps) and value exploration 0.01 (p.18); where the
+                                // paper is silent, the official code's defaults (256 x 128 networks, learning rate 1e-3,
+                                // memories of 1e5, value network re-initialized each iteration, argmax fallback)
+                                {"--escher-value-hands", "1000"}, {"--escher-value-steps", "5000"}, {"--escher-traversals", "1000"},
+                                {"--escher-regret-steps", "5000"}, {"--escher-avg-steps", "10000"}, {"--escher-batch", "2048"},
+                                {"--escher-capacity", "100000"}, {"--escher-lr", "1e-3"}, {"--escher-value-lr", "1e-3"},
+                                {"--escher-hidden1", "256"}, {"--escher-hidden2", "128"}, {"--escher-reward-scale", "10"},
+                                {"--escher-reinit", "1"}, {"--escher-value-explore", "0.01"}, {"--escher-value-reinit", "1"},
+                                {"--escher-fallback", "argmax"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--online-lbr-avg-steps", "500"}});
+                                {"--online-lbr-avg-steps", "500"}, {"--budget-cpu-seconds", "0"}});
     const std::string algo = o["--algo"];
     if (algo != "mmd" && algo != "escher") throw std::runtime_error("--partition net needs --algo mmd or escher");
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition net uses the heuristic H4 (--h4 heuristic)");
@@ -35,6 +47,11 @@ int train_net(int argc, char** argv) {
     const long long T = std::stoll(o["--roots"]), epoch0 = std::stoll(o["--epoch0"]);
     const long long checkpoint_every = std::stoll(o["--checkpoint-every"]), snapshot_every = std::stoll(o["--snapshot-every"]);
     const long long curve_every = std::stoll(o["--curve-every"]);
+    // --budget-cpu-seconds S (0 = none): stop when the training CPU time (TrainCpuClock) reaches S, with a budget snapshot
+    // and a checkpoint. Not a setting of the run: rerun with --budget-cpu-seconds 0 (or a larger S) to continue the same
+    // training towards --roots; the continuation is the run that never stopped (budget snapshots use their own RNG).
+    const double budget = std::stod(o["--budget-cpu-seconds"]);
+    if (budget < 0) throw std::runtime_error("--budget-cpu-seconds must be >= 0");
     std::ostringstream cfg;  // settings that must match on resume (--roots may grow; output cadences may change)
     cfg << "net;algo=" << algo << ";seed=" << seed << ";epoch0=" << epoch0;
     for (const auto& [k, v] : o) if (k.rfind("--" + algo + "-", 0) == 0) cfg << ";" << k.substr(2) << "=" << v;
@@ -61,6 +78,9 @@ int train_net(int argc, char** argv) {
         c.magnet_every = std::stoi(o["--mmd-magnet-every"]); c.hidden1 = std::stoi(o["--mmd-hidden1"]);
         c.hidden2 = std::stoi(o["--mmd-hidden2"]); c.reward_scale = std::stod(o["--mmd-reward-scale"]);
         c.normalize = o["--mmd-normalize"] == "1"; c.seed = seed;
+        c.schedule = o["--mmd-schedule"]; c.eta0 = std::stod(o["--mmd-eta"]); c.horizon = std::stod(o["--mmd-horizon"]);
+        c.clip = std::stod(o["--mmd-clip"]); c.gamma = std::stod(o["--mmd-gamma"]);
+        if (c.schedule != "const" && c.schedule != "sqrt") throw std::runtime_error("--mmd-schedule must be const or sqrt");
         mmd = std::make_unique<Mmd<Stud7Game>>(game, c);
     } else {
         EscherConfig c;
@@ -72,6 +92,8 @@ int train_net(int argc, char** argv) {
         c.hidden1 = std::stoi(o["--escher-hidden1"]); c.hidden2 = std::stoi(o["--escher-hidden2"]);
         c.reward_scale = std::stod(o["--escher-reward-scale"]); c.reinit = o["--escher-reinit"] == "1";
         c.value_explore = std::stod(o["--escher-value-explore"]); c.seed = seed;
+        c.value_reinit = o["--escher-value-reinit"] == "1"; c.fallback = o["--escher-fallback"];
+        if (c.fallback != "argmax" && c.fallback != "uniform") throw std::runtime_error("--escher-fallback must be argmax or uniform");
         esc = std::make_unique<Escher<Stud7Game>>(game, c);
     }
     const long long params = static_cast<long long>(mmd ? mmd->pol.parameters() : esc->avg.parameters());
@@ -97,7 +119,7 @@ int train_net(int argc, char** argv) {
     uint64_t online_bytes = 0;
     const bool resumed = mmd ? load_checkpoint(ck_path, config, *mmd, L, &online, &online_bytes)
                              : load_checkpoint(ck_path, config, *esc, L, &online, &online_bytes);
-    const std::string head = mmd ? "updates,samples,alpha,entropy,kl_old,value_loss,return_abs" : "iterations,regret_samples,value_loss,regret_loss0,regret_loss1";
+    const std::string head = mmd ? "updates,samples,alpha,beta,entropy,kl_old,value_loss,return_abs" : "iterations,regret_samples,value_loss,regret_loss0,regret_loss1";
     if (resumed) {
         std::filesystem::resize_file(log_path, L.log_bytes);
         std::filesystem::resize_file(index_path, L.index_bytes);
@@ -106,12 +128,20 @@ int train_net(int argc, char** argv) {
     } else {
         if (std::filesystem::exists(log_path)) throw std::runtime_error(out + " already has log.csv but no usable checkpoint; use a new --out");
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after," << head << ",seconds\n";
-        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
+        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds,train_cpu_seconds\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader
+                                  << ",train_cpu_seconds\n";
         std::ofstream(out + "/net_kind.txt") << algo << "\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     online.open(out, resumed, online_bytes);
+    if (budget > 0 && L.train_cpu >= budget) {
+        std::cerr << "CPU budget " << budget << " s already reached (training CPU " << L.train_cpu << " s at root " << roots_done()
+                  << "); rerun with --budget-cpu-seconds 0 or a larger budget to continue towards --roots\n";
+        return 0;
+    }
+    TrainCpuClock clock;
+    clock.begin(L.train_cpu);
     const double base = L.seconds, online0 = online.seconds;
     const auto t0 = std::chrono::steady_clock::now();
     // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
@@ -119,6 +149,7 @@ int train_net(int argc, char** argv) {
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         L.seconds = elapsed();
+        L.train_cpu = clock.now();
         L.log_bytes = static_cast<std::streamoff>(std::filesystem::file_size(log_path));
         L.index_bytes = static_cast<std::streamoff>(std::filesystem::file_size(index_path));
         L.curve_bytes = static_cast<std::streamoff>(std::filesystem::file_size(curve_path));
@@ -131,7 +162,7 @@ int train_net(int argc, char** argv) {
     };
     auto stats = [&] {
         std::ostringstream s;
-        if (mmd) s << mmd->updates << ',' << mmd->samples_done << ',' << mmd->alpha() << ',' << mmd->last_entropy << ','
+        if (mmd) s << mmd->updates << ',' << mmd->samples_done << ',' << mmd->alpha() << ',' << mmd->beta() << ',' << mmd->last_entropy << ','
                    << mmd->last_kl << ',' << mmd->last_value_loss << ',' << mmd->last_return_abs;
         else s << esc->t << ',' << esc->regret_samples << ',' << esc->last_value_loss << ',' << esc->last_regret_loss[0] << ','
                << esc->last_regret_loss[1];
@@ -146,6 +177,7 @@ int train_net(int argc, char** argv) {
             return 0;
         }
         if (online.on()) {  // test, then train: the roots of the next update / iteration, on the tabular deal stream
+            const double cpu0 = cpu_seconds();
             const long long d0 = roots_done();
             const long long step = mmd ? mmd->cfg.episodes : esc->cfg.value_hands + 2LL * esc->cfg.traversals;
             const long long first = (d0 / online.every + 1) * online.every;
@@ -162,13 +194,15 @@ int train_net(int argc, char** argv) {
                     online.evaluate(t, online.deck_at(t), target, policy, elapsed());
                 }
             }
+            clock.online += cpu_seconds() - cpu0;
         }
         if (mmd) { auto batch = mmd->collect(); mmd->update(batch); }
         else esc->iterate();
         const long long done = roots_done();
         const double secs = elapsed();
         while (done >= L.next_curve) {
-            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << '\n';
+            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << ','
+                  << clock.now() << '\n';
             L.curve_roots0 = done; L.next_curve += curve_every;
         }
         bool saved = false;
@@ -176,7 +210,7 @@ int train_net(int argc, char** argv) {
             const std::string file = "snapshot_" + std::to_string(L.k) + ".net";
             snapshot(file);
             const double s2 = elapsed();  // includes training the average network (ESCHER)
-            index << file << ',' << done << ",epoch," << L.k << ',' << params << ',' << s2 << '\n';
+            index << file << ',' << done << ",epoch," << L.k << ',' << params << ',' << s2 << ',' << clock.now() << '\n';
             log << L.k << ',' << done << ',' << params << ',' << params << ',' << stats() << ',' << s2 << '\n';
             std::cerr << "epoch " << L.k << " roots=" << done << " " << stats() << " (" << s2 << "s)\n";
             ++L.k;
@@ -186,12 +220,28 @@ int train_net(int argc, char** argv) {
         if (done >= L.next_snapshot && done < T) {
             const std::string file = "snapshot_r" + std::to_string(done) + ".net";
             snapshot(file);
-            index << file << ',' << done << ",periodic," << L.k << ',' << params << ',' << elapsed() << '\n';
+            index << file << ',' << done << ",periodic," << L.k << ',' << params << ',' << elapsed() << ',' << clock.now() << '\n';
             while (L.next_snapshot <= done) L.next_snapshot += snapshot_every;
         }
         if (done >= L.next_checkpoint || saved || done >= T) {
             while (L.next_checkpoint <= done) L.next_checkpoint += checkpoint_every;
             checkpoint();
+        }
+        if (budget > 0 && done < T && clock.now() >= budget) {  // CPU budget: snapshot, curve row, checkpoint, stop
+            const std::string file = "snapshot_b" + std::to_string(done) + ".net";
+            snapshot(file);
+            const double s2 = elapsed();
+            index << file << ',' << done << ",budget," << L.k << ',' << params << ',' << s2 << ',' << clock.now() << '\n';
+            if (done > L.curve_roots0) {
+                curve << done << ',' << s2 << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << ','
+                      << clock.now() << '\n';
+                L.curve_roots0 = done;
+            }
+            L.budget_mark = budget;
+            checkpoint();
+            std::cerr << "CPU budget " << budget << " s reached at root " << done << " (training CPU " << L.train_cpu
+                      << " s); snapshot " << file << " and checkpoint saved. Rerun with --budget-cpu-seconds 0 (or larger) to continue\n";
+            return 0;
         }
     }
     return 0;

@@ -57,9 +57,13 @@ struct NetPolicy {
         std::array<double, kActionCount> p{};
         if (regret[0]) {
             Mlp::Cache c; regret[seat]->forward(x, c);
-            double z = 0; int n = 0;
-            for (int a = 0; a < kActionCount; ++a) if (mask >> a & 1) { p[a] = std::max(0.0, static_cast<double>(c.y[a])); z += p[a]; ++n; }
-            for (int a = 0; a < kActionCount; ++a) p[a] = z > 0 ? p[a] / z : ((mask >> a & 1) ? 1.0 / n : 0.0);
+            double z = 0; int best = -1;
+            for (int a = 0; a < kActionCount; ++a) if (mask >> a & 1) {
+                p[a] = std::max(0.0, static_cast<double>(c.y[a])); z += p[a];
+                if (best < 0 || c.y[a] > c.y[best]) best = a;
+            }
+            // as Escher::current with the default fallback: the largest predicted regret when none is positive
+            for (int a = 0; a < kActionCount; ++a) p[a] = z > 0 ? p[a] / z : (a == best ? 1.0 : 0.0);
             return p;
         }
         Mlp::Cache c; net.forward(x, c);
@@ -140,6 +144,18 @@ struct NetLoop {  // counters the checkpoint restores
     double seconds = 0;
     std::streamoff log_bytes = 0, index_bytes = 0, curve_bytes = 0;
     long long curve_roots0 = 0;
+    double train_cpu = 0;    // training CPU seconds over all processes of the run (TrainCpuClock)
+    double budget_mark = 0;  // the --budget-cpu-seconds at which the last budget stop happened (0: none)
+};
+
+// Training CPU clock of the network and ReBeL trainers (--budget-cpu-seconds, column train_cpu_seconds): CPU time of this
+// process since training (re)started, minus the CPU time spent in the online LBR evaluation (which adds what it spends
+// to `online`), plus the training CPU time of the earlier processes of the run (NetLoop::train_cpu). The trainers are
+// single-threaded, so this is the CPU time the training itself used, whatever else ran on the machine.
+struct TrainCpuClock {
+    double base = 0, start = 0, online = 0;
+    void begin(double saved) { base = saved; start = cpu_seconds(); online = 0; }
+    double now() const { return base + (cpu_seconds() - start) - online; }
 };
 
 inline void save_checkpoint(const std::string& path, const std::string& config, const Mmd<Stud7Game>& t, const NetLoop& L,

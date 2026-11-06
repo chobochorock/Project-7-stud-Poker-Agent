@@ -7,6 +7,12 @@
 // where A is the Monte Carlo return of the acting seat minus the value network's estimate, normalized per batch, and
 // both KL terms are exact over the legal actions of each sampled state (uniform = the magnet). The value network
 // regresses returns / reward_scale. alpha follows alpha0 / sqrt(1 + update / alpha_halflife) (0: constant).
+// schedule "sqrt" (Sokota et al., appendix J, p.37: the deep multi-agent experiments): alpha_t = alpha0 * sqrt(H / t) and
+// beta_t = 1 / eta_t with eta_t = eta0 * sqrt(H / t), t = decision samples so far (the paper's environment time steps),
+// H = `horizon` (paper: alpha0 = eta0 = 0.05, H = 10 million).
+// clip > 0: PPO's clipped surrogate min(r A, clip(r, 1 - clip, 1 + clip) A) in place of r A (the paper modified RLlib's
+// PPO, whose default clip is 0.3). gamma < 1: a sample's return is gamma^k times the seat's final utility, k = the
+// seat's later decisions in the hand (RLlib's default gamma 0.99 with GAE lambda = 1).
 // magnet_every K > 0: the magnet is not uniform but a frozen copy of the policy network, replaced by the current one
 // every K updates (as R-NaD moves its reference policy). With a fixed magnet the last iterate converges (tabular) to the
 // regularized equilibrium of that magnet; moving it walks those equilibria toward a Nash equilibrium.
@@ -31,6 +37,9 @@ struct MmdConfig {
     int episodes = 2048, epochs = 4, minibatch = 512;
     float lr = 3e-4f, value_lr = 1e-3f;
     double alpha0 = 0.2, alpha_halflife = 0, beta = 1.0, reward_scale = 1.0;
+    std::string schedule = "const";      // const (alpha0 [halflife], beta) | sqrt (alpha0, eta0, horizon)
+    double eta0 = 0.05, horizon = 1e7;
+    double clip = 0, gamma = 1.0;
     int magnet_every = 0;
     bool normalize = true;  // advantages divided by their batch standard deviation (then alpha is relative to it)
     uint64_t seed = 1;
@@ -61,7 +70,12 @@ struct Mmd {
     }
 
     double alpha() const {
+        if (cfg.schedule == "sqrt") return cfg.alpha0 * std::sqrt(cfg.horizon / std::max(1.0, static_cast<double>(samples_done)));
         return cfg.alpha_halflife > 0 ? cfg.alpha0 / std::sqrt(1.0 + static_cast<double>(updates) / cfg.alpha_halflife) : cfg.alpha0;
+    }
+    double beta() const {  // weight of KL(pi || pi_old) = 1 / stepsize
+        if (cfg.schedule == "sqrt") return std::sqrt(std::max(1.0, static_cast<double>(samples_done)) / cfg.horizon) / cfg.eta0;
+        return cfg.beta;
     }
 
     std::vector<Sample> collect() {
@@ -97,7 +111,13 @@ struct Mmd {
             }
             const double u0 = game.utility(s, 0), u1 = game.utility(s, 1);
             abs_ret += std::fabs(u0);
-            for (size_t i = first; i < batch.size(); ++i) batch[i].ret = static_cast<float>(batch[i].seat == 0 ? u0 : u1);
+            int later[2] = {0, 0};  // the seat's decisions after sample i (discount exponent)
+            for (size_t i = batch.size(); i-- > first;) {
+                const int seat = batch[i].seat;
+                const double g = cfg.gamma < 1.0 ? std::pow(cfg.gamma, later[seat]) : 1.0;
+                batch[i].ret = static_cast<float>(g * (seat == 0 ? u0 : u1));
+                ++later[seat];
+            }
         }
         episodes_done += cfg.episodes; samples_done += static_cast<long long>(batch.size());
         last_return_abs = abs_ret / cfg.episodes;
@@ -116,7 +136,7 @@ struct Mmd {
         for (auto& smp : batch) sq += (smp.adv - mean) * (smp.adv - mean);
         const double sd = std::sqrt(sq / std::max<size_t>(1, batch.size() - 1)) + 1e-8;
         for (auto& smp : batch) smp.adv = cfg.normalize ? static_cast<float>((smp.adv - mean) / sd) : smp.adv;
-        const double al = alpha();
+        const double al = alpha(), be = beta();
         std::vector<size_t> order(batch.size());
         std::iota(order.begin(), order.end(), 0);
         Mlp::Grad gp, gv; gp.init(pol); gv.init(val);
@@ -138,13 +158,15 @@ struct Mmd {
                         klo += p[k] * (std::log(p[k]) - std::log(std::max(1e-12, static_cast<double>(smp.p_old[k]))));
                     }
                     const double ratio = p[smp.action] / std::max(1e-12, static_cast<double>(smp.p_old[smp.action]));
+                    // clipped surrogate: no gradient through r A where min() takes the clipped term
+                    const bool clipped = cfg.clip > 0 && ((smp.adv >= 0 && ratio > 1.0 + cfg.clip) || (smp.adv < 0 && ratio < 1.0 - cfg.clip));
                     float dz[A] = {};
                     for (int k = 0; k < A; ++k) {
                         if (!(smp.mask >> k & 1)) continue;
                         const double lp = std::log(std::max(1e-300, p[k]));
                         const double gu = lp - std::log(std::max(1e-12, static_cast<double>(smp.p_mag[k]))), go = lp - std::log(std::max(1e-12, static_cast<double>(smp.p_old[k])));
-                        double d = -smp.adv * ratio * ((k == smp.action) - p[k]);
-                        d += al * p[k] * (gu - klu) + cfg.beta * p[k] * (go - klo);
+                        double d = clipped ? 0.0 : -smp.adv * ratio * ((k == smp.action) - p[k]);
+                        d += al * p[k] * (gu - klu) + be * p[k] * (go - klo);
                         dz[k] = static_cast<float>(d);
                     }
                     pol.backward(smp.x, c, dz, gp);

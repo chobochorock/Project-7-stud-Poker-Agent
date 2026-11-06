@@ -6,7 +6,10 @@
 //     such exploratory action are kept (their continuation followed sigma_t, so the return is an unbiased sample of
 //     v_sigma_t there), so the network also learns the values after actions sigma_t rarely takes, which step 2 needs.
 //     The network maps the full history (both players' private information) to player 0's return (/ reward_scale);
-//     `value_steps` minibatch Adam steps, warm-started across iterations.
+//     `value_steps` minibatch Adam steps on this iteration's data only, from a fresh initialization each iteration when
+//     value_reinit (the official code's default; the paper's Algorithm 2 line 4 "retrain q on data from pi"), else
+//     warm-started. The paper (p.18) and the official code mix 0.01 uniform into the policy for these hands; the code
+//     corrects the targets with importance ratios, this keeps only the histories after the last exploratory action.
 //  2. for each player i, `traversals` hands in which i acts from a fixed sampling policy (uniform over legal actions)
 //     and the opponent from sigma_t. At each of i's information sets on the path, with history h:
 //         r(a) = q(h,a) - sum_b sigma_t(b) q(h,b),   q(h,a) = V(h.a) (the exact utility when h.a is terminal),
@@ -16,7 +19,9 @@
 //  3. player i's regret network is retrained (from a fresh initialization by default, as Deep CFR) on its reservoir
 //     with loss sum_t t * ||R(x) - r||^2 over legal actions; sigma_{t+1} = regret matching on R.
 // The average policy network (softmax) is trained on the strategy reservoir (weighted cross-entropy) when a snapshot
-// is taken; it is the policy the tabular guarantee is about. The current policy is regret matching on R.
+// is taken, with its own RNG (taking a snapshot does not change the training); it is the policy the tabular guarantee
+// is about. The current policy is regret matching on R; when no predicted regret is positive it plays the action with
+// the largest one (fallback "argmax": Deep CFR and the official ESCHER code) or the uniform policy ("uniform").
 //
 // Additional game interface: void history_features(const State&, Sparse&) const; int history_dim() const.
 #pragma once
@@ -31,8 +36,9 @@ struct EscherConfig {
     int value_hands = 1024, value_steps = 200, traversals = 1024, regret_steps = 400, avg_steps = 2000, batch = 256;
     size_t regret_capacity = 1000000, strategy_capacity = 1000000;
     float lr = 1e-3f, value_lr = 1e-3f;
-    double reward_scale = 1.0, value_explore = 0.25;
-    bool reinit = true;
+    double reward_scale = 1.0, value_explore = 0.01;
+    bool reinit = true, value_reinit = true;
+    std::string fallback = "argmax";  // argmax | uniform
     uint64_t seed = 1;
 };
 
@@ -77,14 +83,21 @@ struct Escher {
         smem.capacity = c.strategy_capacity;
     }
 
-    // regret matching on the predicted regrets (uniform when none is positive)
+    // regret matching on the predicted regrets (fallback when none is positive: see cfg.fallback)
     void current(int seat, const Sparse& x, uint8_t mask, double* p) const {
         Mlp::Cache c; regret[seat].forward(x, c);
         double z = 0;
         for (int a = 0; a < A; ++a) { p[a] = (mask >> a & 1) ? std::max(0.0, static_cast<double>(c.y[a])) : 0.0; z += p[a]; }
+        if (z > 0) { for (int a = 0; a < A; ++a) p[a] /= z; return; }
+        if (cfg.fallback == "argmax") {
+            int best = -1;
+            for (int a = 0; a < A; ++a) if ((mask >> a & 1) && (best < 0 || c.y[a] > c.y[best])) best = a;
+            for (int a = 0; a < A; ++a) p[a] = a == best ? 1.0 : 0.0;
+            return;
+        }
         int n = 0;
         for (int a = 0; a < A; ++a) n += mask >> a & 1;
-        for (int a = 0; a < A; ++a) p[a] = z > 0 ? p[a] / z : ((mask >> a & 1) ? 1.0 / n : 0.0);
+        for (int a = 0; a < A; ++a) p[a] = (mask >> a & 1) ? 1.0 / n : 0.0;
     }
     void average(const Sparse& x, uint8_t mask, double* p) const {
         Mlp::Cache c; avg.forward(x, c); masked_softmax(c.y.data(), mask, A, p);
@@ -130,6 +143,11 @@ struct Escher {
             for (size_t i = first; i < data.size(); ++i) data[i].ret = static_cast<float>(u0 / cfg.reward_scale);
         }
         roots_done += cfg.value_hands;
+        if (cfg.value_reinit) {
+            value = Mlp(game.history_dim(), cfg.hidden1, cfg.hidden2, 1, cfg.seed * 7 + 1 + 100 * static_cast<uint64_t>(t));
+            opt_v.init(value);
+        }
+        if (data.empty()) return;
         Mlp::Grad g; g.init(value);
         double loss = 0; long long n = 0;
         std::uniform_int_distribution<size_t> pick(0, data.size() - 1);
@@ -240,17 +258,19 @@ struct Escher {
         }
     }
 
-    // average policy network from the strategy reservoir (fresh, weighted cross-entropy)
+    // average policy network from the strategy reservoir (fresh, weighted cross-entropy, its own RNG: the training's
+    // RNG is untouched, so snapshots at any roots leave the training unchanged)
     void train_average() {
         avg = Mlp(game.input_dim(), cfg.hidden1, cfg.hidden2, A, cfg.seed * 7 + 5 + 1000 * static_cast<uint64_t>(t));
         Adam opt; opt.lr = cfg.lr; opt.init(avg);
         auto& mem = smem.data;
         if (mem.empty()) return;
+        std::mt19937_64 r(cfg.seed ^ 0x2b7e151628aed2a6ull ^ (0x9e3779b97f4a7c15ull * static_cast<uint64_t>(t + 1)));
         Mlp::Grad g; g.init(avg);
         std::uniform_int_distribution<size_t> pick(0, mem.size() - 1);
         for (int st = 0; st < cfg.avg_steps; ++st) {
             for (int b = 0; b < cfg.batch; ++b) {
-                const StratSample& ss = mem[pick(rng)];
+                const StratSample& ss = mem[pick(r)];
                 Mlp::Cache c; avg.forward(ss.x, c);
                 double p[A]; masked_softmax(c.y.data(), ss.mask, A, p);
                 const float wn = ss.w / static_cast<float>(t);

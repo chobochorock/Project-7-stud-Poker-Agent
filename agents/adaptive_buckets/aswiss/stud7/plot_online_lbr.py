@@ -133,7 +133,10 @@ titles = (f"Online LBR, mean of the last {a.window} deals ({a.level:.0%} interva
           f"... vs training {'CPU' if a.clock == 'cpu' else 'wall-clock'} seconds (online LBR time excluded)")
 for j in range(2):
     ax[j].set_xscale("log"); ax[j].axhline(0, color="black", lw=0.6); ax[j].grid(True, which="both", alpha=0.3)
-    ax[j].set_title(titles[j], fontsize=10); ax[j].set_ylabel("LBR winnings, ante/hand (pair mean)")
+    ax[j].set_title(titles[j], fontsize=10); ax[j].set_ylabel("LBR winnings, ante/hand (pair mean; symlog, linear within +-0.1)")
+    ax[j].set_yscale("symlog", linthresh=0.1, linscale=0.5)  # log-like, and negative windows stay visible
+    lo = ax[j].dataLim.y0
+    ax[j].set_ylim(bottom=1.5 * lo if lo < -0.1 else -0.1)
 ax[0].set_xlabel("training roots (each arm's own unit: hands for ReBeL)"); ax[1].set_xlabel(f"training {'CPU' if a.clock == 'cpu' else 'wall-clock'} seconds" + (f" (wall for: {', '.join(sorted(wall_only))})" if wall_only else ""))
 if a.baseline:
     ax[2].set_xscale("log"); ax[2].axhline(0, color="black", lw=0.6); ax[2].grid(True, which="both", alpha=0.3)

@@ -9,7 +9,7 @@ memory bandwidth, so seconds compare only within a group or under the same load.
 Panels: average and current policy LBR (95% interval; hollow circles = newest snapshot with more pairs) against
 seconds; training roots against seconds; seconds per 1M roots against roots (from curve.csv, label passes included
 in the 100k-root chunk where an epoch ends). LBR is an approximate exploitability lower bound and can be negative,
-so it stays on a linear axis.
+so its axis is symmetric-log (linear within +-0.1 ante): log-like for the usual 0.5-100 range, negatives still drawn.
 --clock cpu: x = training CPU seconds instead of training wall-clock seconds (the equal-CPU-time comparison). Network
 and ReBeL runs record it (train_cpu_seconds in curve.csv / snapshots.csv). For tabular runs it is reconstructed from
 curve.csv's process CPU time (summed over resumptions) minus the online LBR's time (online_lbr.csv online_seconds,
@@ -40,8 +40,7 @@ a = ap.parse_args()
 from train_clock import cpu_clock  # noqa: E402  (training CPU seconds; see train_clock.py)
 colors = ["#444444", "#6a51a3", "#1b9e77", "#000000", "#e6550d", "#3182bd", "#777777", "#d62728", "#17becf"]
 fig, ax = plt.subplots(2, 2, figsize=(14, 10))
-YCAP = 20.0  # LBR panels grow up to this (ante/hand); points above are listed in the panel
-ymax, above = [0.0, 0.0], [[], []]
+LBR_LT = 0.1  # LBR panels: symmetric log, linear within +-LBR_LT ante (negative values stay visible); nothing is cut off
 for i, spec in enumerate(a.runs):
     name, rest = spec.split(":", 1)
     label, _, group = rest.partition("|")
@@ -74,9 +73,6 @@ for i, spec in enumerate(a.runs):
         rows = sorted((r for r in rows if r["policy"] == policy and r["file"] in secs), key=lambda r: secs[r["file"]])
         x = [secs[r["file"]] for r in rows]; y = [r["lbr_ante"] for r in rows]; e = [1.96 * r["lbr_se"] for r in rows]
         ax[0][j].errorbar(x, y, yerr=e, color=color, ls=ls, marker="o", ms=3, lw=1.1, capsize=2, label=lab if j == 0 else None)
-        ymax[j] = max([ymax[j]] + y)
-        over = [v for v in y if v > YCAP]
-        if over: above[j].append(f"{label}: {len(over)} point{'s' if len(over) > 1 else ''} (max {max(over):.1f})")
         fpath = os.path.join(d, "eval_final.jsonl")
         if os.path.exists(fpath):
             for r in map(json.loads, open(fpath)):
@@ -92,12 +88,12 @@ tag = f" (stalls > {a.drop_stalls:g}x median removed)" if a.drop_stalls > 0 else
 CLOCK = "CPU" if a.clock == "cpu" else "wall-clock"
 for j, policy in enumerate(("Average", "Current")):
     ax[0][j].set_xscale("log"); ax[0][j].axhline(0, color="black", lw=0.6)
-    if above[j]:  # points above the axis are listed, not dropped silently
-        ax[0][j].text(0.01, 0.98, f"above {YCAP:g}, not drawn:\n" + "\n".join(above[j]), transform=ax[0][j].transAxes,
-                      fontsize=7, va="top")
     ax[0][j].set_title(f"{policy} policy: Policy-LBR (95%) against training time{tag}", fontsize=10)
-    ax[0][j].set_xlabel(f"training {CLOCK} seconds (evaluation excluded)"); ax[0][j].set_ylabel("LBR winnings, ante/hand")
-    ax[0][j].set_ylim(bottom=-0.5, top=min(YCAP, max(4.0, 1.1 * ymax[j]))); ax[0][j].grid(True, which="both", alpha=0.3)
+    ax[0][j].set_xlabel(f"training {CLOCK} seconds (evaluation excluded)")
+    ax[0][j].set_ylabel(f"LBR winnings, ante/hand (symlog, linear within +-{LBR_LT:g})")
+    ax[0][j].set_yscale("symlog", linthresh=LBR_LT, linscale=0.5); ax[0][j].grid(True, which="both", alpha=0.3)
+    lo = ax[0][j].dataLim.y0  # only a sliver below 0 unless a value is negative
+    ax[0][j].set_ylim(bottom=1.5 * lo if lo < -LBR_LT else -LBR_LT)
 ax[1][0].set_xscale("log"); ax[1][0].set_yscale("log"); ax[1][0].set_title(f"Training roots against {CLOCK} seconds" + tag, fontsize=10)
 ax[1][0].set_xlabel(f"training {CLOCK} seconds"); ax[1][0].set_ylabel("training roots (5th-street deals)"); ax[1][0].grid(True, which="both", alpha=0.3)
 ax[1][1].set_xscale("log"); ax[1][1].set_yscale("log"); ax[1][1].set_title(f"{CLOCK} seconds per 1M roots (curve.csv chunks; epoch-end label passes show as spikes)", fontsize=10)

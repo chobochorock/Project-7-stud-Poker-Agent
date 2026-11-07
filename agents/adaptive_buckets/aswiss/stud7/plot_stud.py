@@ -32,12 +32,21 @@ STYLE = {"atom_k1024": (INK, "o", (0, (5, 3))), "aswiss_b_": ("#6250d6", "v", "-
          "history_bb_": ("#eb6834", "*", "-"), "history_bbl_": ("#e87ba4", "*", (0, (3, 2))),
          "aswiss": ("#eb6834", "s", "-"), "atom_kmatched": ("#2a78d6", "D", "-"),
          "atom_k341": ("#2a78d6", "D", "-"), "atom_k512": ("#1baf7a", "^", "-"), "atom_k256": (INK, "P", "-"),
-         "context": (MUTED, "X", (0, (1, 2)))}
+         "context": (MUTED, "X", (0, (1, 2))),
+         "history_bbf_": ("#eb6834", "*", "-"), "net_mmd": ("#1baf7a", "^", (0, (6, 2))),
+         "net_escher": ("#6250d6", "v", (0, (6, 2))), "rebel": ("#2a78d6", "D", (0, (2, 2)))}
 DEFAULT = ["atom_k1024_s1:k-means 1024 = atoms trained directly", "aswiss_k1024_z2_s1:ASWISS (context start, atom labels, z=2)",
            "atom_kmatched_s1:k-means, K matched to ASWISS buckets", "atom_k256_s1:k-means 256 (project standard) = baseline",
            "context_s1:context only, no card information"]
-OFF_SCALE_LBR = 20.0  # runs whose newest LBR exceeds this (the no-card context arm, ~64) are listed in the note, not drawn
-AXIS_FROM = 1e5       # LBR axes are scaled to points from this many roots on; earlier, larger points are clipped
+OFF_SCALE_LBR = float("inf")  # every run is drawn: the LBR axes are symmetric-log (below), so large values fit
+LBR_LT = 0.1  # LBR axes: symmetric log, linear within +-LBR_LT ante (negative LBR stays visible, not hidden by a log axis)
+
+
+def lbr_axis(ax):
+    ax.set_yscale("symlog", linthresh=LBR_LT, linscale=0.5)
+    ax.set_ylabel(ax.get_ylabel() + f" (symlog, linear within +-{LBR_LT:g})")
+    lo = ax.dataLim.y0  # keep only a sliver below 0 unless some value (or interval) is negative
+    ax.set_ylim(bottom=1.5 * lo if lo < -LBR_LT else -LBR_LT)
 
 
 def style(run):
@@ -145,9 +154,7 @@ for col, policy in enumerate(("average", "current")):
                 axes[2, col].errorbar([r["roots"] * 1.12], [m], yerr=[e], color=colour, **HOLLOW)
     styled(axes[0, col], f"{policy.capitalize()} policy: Policy-LBR (95% interval)", "LBR winnings, ante/hand", False)
     axes[0, col].axhline(0, color=MUTED, lw=1)
-    shown = [r["lbr_ante"] + 1.96 * r["lbr_se"] for run, *_ in SERIES if run not in off_scale
-             for (f, p), r in data[run].items() if p == policy and r["roots"] >= AXIS_FROM]
-    if shown: axes[0, col].set_ylim(top=1.1 * max(shown))
+    lbr_axis(axes[0, col])
     styled(axes[1, col], f"{policy.capitalize()} policy: sampled BR-gap proxy (fixed deals)", "proxy, ante/hand (log)", True)
     styled(axes[2, col], f"{policy.capitalize()} policy: LBR minus {BASELINE} (paired deals, 95%)", "LBR difference, ante/hand", False)
     axes[2, col].axhline(0, color=INK, lw=1.2)
@@ -213,7 +220,8 @@ notes = [f"{run}: newest snapshot LBR > {OFF_SCALE_LBR:g}, not drawn" for run in
        "street's first decision or at every decision), buckets start as one per (street, legal mask); no betting summary."]
       if any(r.startswith("history_") for r, *_ in SERIES) else []),
     "Intervals are deal-sampling intervals only; training-seed variation is not included. "
-    f"LBR axes are scaled to points from {AXIS_FROM:.0e} roots on; earlier points may be clipped."]
+    f"LBR axes are symmetric-log (linear within +-{LBR_LT:g} ante) so that negative values stay visible; "
+    "difference panels are linear."]
 fig.text(0.01, 0.005, "\n".join(textwrap.fill(n, 200, subsequent_indent="  ") for n in notes), fontsize=8, color=INK, va="bottom", ha="left", family="monospace")
 handles, labels = axes[0, 0].get_legend_handles_labels()
 handles.append(plt.Line2D([], [], color=MUTED, **{k: v for k, v in HOLLOW.items() if k != "capsize"})); labels.append("re-evaluated with more pairs")
@@ -242,6 +250,7 @@ for ax, key, title, logy in ((axes[0], "lbr_ante", "Newest average policy: Polic
     ax.set_title(title, color=INK, loc="left"); ax.set_xlabel("buckets in the evaluated partition" + (" (betting + 4th-street)" if learned_h4 else "")); ax.set_ylabel("ante/hand")
     for side in ("top", "right"): ax.spines[side].set_visible(False)
 axes[0].axhline(0, color=MUTED, lw=1)
+lbr_axis(axes[0])
 axes[0].legend(frameon=False, fontsize=8, loc="best")
 guard_log(axes)
 fig.tight_layout(); fig.savefig(f"{OUT}_frontier.png", dpi=140)

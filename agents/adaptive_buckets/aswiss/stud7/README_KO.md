@@ -980,7 +980,7 @@ ASWISS·k-means는 1억 roots로 돌리고, 신경망 비교군(MMD, ESCHER, ReB
 - **k-means는 더 학습하면 나빠졌다:** 64파티클 LBR이 40.95M 1.40 → 81.91M 1.62 → 100M 1.81, 256파티클로 1.61 → 1.73 → 2.02. 고정 추상화의 평균 전략이 추상 게임의 균형으로 가면서 원 게임에서는 더 공략당하는 모습이다(seed 하나라 확정은 아니다). 최종 차이의 일부는 이 때문이다.
 - **ESCHER(이전 설정)는 발산했다:** 평균 정책 LBR이 0.63M에 5.38로 가장 낮았다가 100M에 93.65가 됐다. 가치 손실도 223(81.92M) → 1,100(100M)으로 커졌다. 이어서 학습한 가치망(warm start)과 탐색 0.25가 의심된다. 고친 설정(반복마다 재초기화, 탐색 0.01, 원문 학습량)에서 같은 일이 생기는지는 `runs_fair`의 온라인 LBR로 본다.
 - **메모리:** ASWISS의 최대 working set이 epoch 끝마다 커져 40.95M 끝에서 6.8 GB였다(private commit은 약 1.2 GB). 라벨 판정 순회의 일시적 사용이다. 81.91M epoch 끝에서는 더 클 수 있으니 다섯 비교군을 함께 돌릴 때 RAM을 확인한다.
-- **그림:**
+- **그림:** LBR 축은 대칭 로그(symlog, ±0.1 ante 안은 선형)다(2026-11-07부터 모든 LBR 그림). 0.5–100 ante를 로그처럼 보이면서 음수 LBR도 그린다. 같은 deal 차이 패널은 선형이다. 축을 넘는 값을 빼던 규칙(LBR > 20이면 그리지 않음)은 없앴다.
   - `results_online_s1_cputime.png`: LBR 대 학습 CPU 초
   - `results_online_s1_curves.png`, `results_online_s1_presplit256_curves.png`: roots 축(64파티클, 분할 직전 256파티클)
   - `results_online_s1_online_cpu_w2000.png`: 온라인 LBR 2,000행 이동평균

@@ -74,7 +74,9 @@ for i, spec in enumerate(a.runs):
         rows = sorted((r for r in rows if r["policy"] == policy and r["file"] in secs), key=lambda r: secs[r["file"]])
         x = [secs[r["file"]] for r in rows]; y = [r["lbr_ante"] for r in rows]; e = [1.96 * r["lbr_se"] for r in rows]
         ax[0][j].errorbar(x, y, yerr=e, color=color, ls=ls, marker="o", ms=3, lw=1.1, capsize=2, label=lab if j == 0 else None)
-        ymax[j] = max([ymax[j]] + y); above[j] += [f"{lab} {v:.1f}" for v in y if v > YCAP]
+        ymax[j] = max([ymax[j]] + y)
+        over = [v for v in y if v > YCAP]
+        if over: above[j].append(f"{label}: {len(over)} point{'s' if len(over) > 1 else ''} (max {max(over):.1f})")
         fpath = os.path.join(d, "eval_final.jsonl")
         if os.path.exists(fpath):
             for r in map(json.loads, open(fpath)):
@@ -91,16 +93,17 @@ CLOCK = "CPU" if a.clock == "cpu" else "wall-clock"
 for j, policy in enumerate(("Average", "Current")):
     ax[0][j].set_xscale("log"); ax[0][j].axhline(0, color="black", lw=0.6)
     if above[j]:  # points above the axis are listed, not dropped silently
-        ax[0][j].text(0.01, 0.98, f"above {YCAP:g}, not drawn: " + "; ".join(above[j]), transform=ax[0][j].transAxes,
-                      fontsize=7, va="top", wrap=True)
+        ax[0][j].text(0.01, 0.98, f"above {YCAP:g}, not drawn:\n" + "\n".join(above[j]), transform=ax[0][j].transAxes,
+                      fontsize=7, va="top")
     ax[0][j].set_title(f"{policy} policy: Policy-LBR (95%) against training time{tag}", fontsize=10)
     ax[0][j].set_xlabel(f"training {CLOCK} seconds (evaluation excluded)"); ax[0][j].set_ylabel("LBR winnings, ante/hand")
     ax[0][j].set_ylim(bottom=-0.5, top=min(YCAP, max(4.0, 1.1 * ymax[j]))); ax[0][j].grid(True, which="both", alpha=0.3)
-ax[1][0].set_xscale("log"); ax[1][0].set_yscale("log"); ax[1][0].set_title("Training roots against wall-clock seconds" + tag, fontsize=10)
+ax[1][0].set_xscale("log"); ax[1][0].set_yscale("log"); ax[1][0].set_title(f"Training roots against {CLOCK} seconds" + tag, fontsize=10)
 ax[1][0].set_xlabel(f"training {CLOCK} seconds"); ax[1][0].set_ylabel("training roots (5th-street deals)"); ax[1][0].grid(True, which="both", alpha=0.3)
-ax[1][1].set_xscale("log"); ax[1][1].set_yscale("log"); ax[1][1].set_title("Seconds per 1M roots (100k-root chunks; epoch-end label passes show as spikes)")
+ax[1][1].set_xscale("log"); ax[1][1].set_yscale("log"); ax[1][1].set_title(f"{CLOCK} seconds per 1M roots (curve.csv chunks; epoch-end label passes show as spikes)", fontsize=10)
 ax[1][1].set_xlabel("training roots"); ax[1][1].set_ylabel(f"{CLOCK} seconds per 1M roots"); ax[1][1].grid(True, which="both", alpha=0.3)
-ax[0][0].legend(fontsize=8, loc="upper right")
+handles, labels = ax[0][0].get_legend_handles_labels()
+fig.legend(handles, labels, fontsize=8, loc="upper center", ncol=min(5, max(1, len(labels))), frameon=False)
 if a.note: fig.text(0.01, 0.005, a.note, fontsize=8, family="monospace", va="bottom")
-fig.tight_layout(rect=(0, 0.04 if a.note else 0, 1, 1)); fig.savefig(a.out, dpi=130)
+fig.tight_layout(rect=(0, 0.04 if a.note else 0, 1, 0.95)); fig.savefig(a.out, dpi=130)
 print("saved", a.out)

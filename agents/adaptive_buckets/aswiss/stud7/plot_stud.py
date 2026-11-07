@@ -85,6 +85,8 @@ def paired(run, row, base_row, tag=""):
 
 
 data = {run: load(run, a.eval_file) for run, *_ in SERIES}
+# pair files carry the evaluation's tag: eval.jsonl -> lbr_pairs_<snapshot>_..., eval_<tag>.jsonl -> lbr_pairs_<tag>_<snapshot>_...
+TAG = "_" + a.eval_file[len("eval_"):-len(".jsonl")] if a.eval_file.startswith("eval_") and a.eval_file.endswith(".jsonl") else ""
 final = {run: load(run, "eval_final.jsonl") for run, *_ in SERIES}
 off_scale = {run for run, *_ in SERIES if data[run] and max(data[run].values(), key=lambda r: r["roots"])["lbr_ante"] > OFF_SCALE_LBR}
 learned_h4 = any(r.get("h4") == "learned" for rows in data.values() for r in rows.values())
@@ -128,11 +130,12 @@ for col, policy in enumerate(("average", "current")):
         rows = sorted((v for (f, p), v in data[run].items() if p == policy), key=lambda r: r["roots"])
         x = [r["roots"] for r in rows]
         line(axes[0, col], x, [r["lbr_ante"] for r in rows], colour, marker, ls, label, [1.96 * r["lbr_se"] for r in rows])
-        line(axes[1, col], x, [r["gap_proxy_ante"] for r in rows], colour, marker, ls)
+        gx = [(r["roots"], r["gap_proxy_ante"]) for r in rows if r.get("gap_roots", 1) > 0]  # presplit: gap not computed
+        if gx: line(axes[1, col], [g[0] for g in gx], [g[1] for g in gx], colour, marker, ls)
         if run != BASELINE:
             shared = [(r, base_by_roots[(r["roots"], policy)]) for r in rows if (r["roots"], policy) in base_by_roots]
             if shared:
-                diff, se = zip(*[paired(run, r, b) for r, b in shared])
+                diff, se = zip(*[paired(run, r, b, TAG) for r, b in shared])
                 line(axes[2, col], [r["roots"] for r, _ in shared], diff, colour, marker, ls, err=se)
         for r in (v for (f, p), v in final[run].items() if p == policy):
             axes[0, col].errorbar([r["roots"] * 1.12], [r["lbr_ante"]], yerr=[1.96 * r["lbr_se"]], color=colour, **HOLLOW)
@@ -152,7 +155,9 @@ ax = axes[0, 2]
 for run, label, colour, marker, ls in SERIES:
     if run == BASELINE or run in off_scale: continue
     rows = sorted((v for (f, p), v in data[run].items() if p == "average"), key=lambda r: r["roots"])
-    shared = [(r, base_by_roots[(r["roots"], "average")]) for r in rows if (r["roots"], "average") in base_by_roots]
+    shared = [(r, base_by_roots[(r["roots"], "average")]) for r in rows if (r["roots"], "average") in base_by_roots
+              and r.get("gap_roots", 1) > 0 and base_by_roots[(r["roots"], "average")].get("gap_roots", 1) > 0
+              and base_by_roots[(r["roots"], "average")]["gap_proxy_ante"] > 0]
     if shared:
         line(ax, [r["roots"] for r, _ in shared], [r["gap_proxy_ante"] / b["gap_proxy_ante"] for r, b in shared], colour, marker, ls)
 styled(ax, f"Average policy: gap proxy / {BASELINE}", "ratio at the same budget (log)", True)

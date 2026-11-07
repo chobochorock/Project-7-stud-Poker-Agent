@@ -30,7 +30,11 @@ import matplotlib.pyplot as plt
 ap = argparse.ArgumentParser()
 ap.add_argument("out"); ap.add_argument("game"); ap.add_argument("prefix")
 ap.add_argument("--seeds", nargs="+", type=int, default=[1])
+ap.add_argument("--speedup", nargs="*", default=[],
+                help="NAME=F: also draw NAME's deployed-policy curve with its training time divided by F (dotted), e.g. the measured "
+                     "speed-up of a BLAS build of the network step (calib/); a rescaling, not a run")
 a = ap.parse_args()
+SPEEDUP = {k: float(v) for k, v in (x.split("=") for x in a.speedup)}
 METHODS = [("aswiss", "ASWISS (pure MCCFR, from P0, no prior)", "#eb6834", "*"),
            ("mccfr", "MCCFR, no abstraction (pure)", "#444444", "o"),
            ("kmeans", "k-means fixed (pure MCCFR, ASWISS's bucket count)", "#000000", "P"),
@@ -64,6 +68,9 @@ for m, label, c, mk in METHODS:
         t = [float(x["train_seconds"]) for x in r]; s = [samples(m, x) for x in r]
         avg = [float(x["expl_bucket_avg"]) for x in r]; cur = [float(x["expl_current"]) for x in r]
         ax[0].plot(t, avg, color=c, marker=mk, ms=4, lw=lw, label=lab)
+        if m in SPEEDUP:
+            ax[0].plot([x / SPEEDUP[m] for x in t], avg, color=c, ls=":", lw=1.0, alpha=0.7,
+                       label=f"{label}: time / {SPEEDUP[m]:g} (rescaled, not run)" if i == 0 else None)
         ax[1].plot(t, cur, color=c, marker=mk, ms=4, lw=lw, ls="--" if m == "mmd" else "-",
                    label=(label + " [its only policy]" if m == "mmd" else label) if i == 0 else None)
         ax[2].plot(t, s, color=c, marker=mk, ms=3, lw=1.0, label=lab)
@@ -118,6 +125,10 @@ notes = ["Exact exploitability. Equal training-time budget, one CPU core per run
          "GPU or a BLAS library would speed up. Panel (d) removes the hardware.",
          "ESCHER: training of its average-policy network at each checkpoint (10,000 steps) is excluded from the clock (table: wall time).",
          "ReBeL: not run (no implementation on these trees; ours is specific to 7-card stud)."]
+if SPEEDUP:
+    notes.insert(2, "Dotted (a): training time divided by the measured speed-up of a one-thread BLAS network step (calib/: "
+                 + ", ".join(f"{k} {v:g}x" for k, v in SPEEDUP.items())
+                 + "); an upper bound on that gain (a small part of the time is not network training). Rescaled, not run.")
 if missing: notes.append("no results: " + "; ".join(missing))
 if len(a.seeds) == 1: notes.append(f"seed {a.seeds[0]} only: intervals over training seeds are not available.")
 fig.text(0.01, 0.005, "\n".join(notes), fontsize=7.5, family="monospace", va="bottom")

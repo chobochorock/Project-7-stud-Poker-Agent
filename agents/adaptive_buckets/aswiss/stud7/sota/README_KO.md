@@ -358,5 +358,11 @@ python agents\adaptive_buckets\aswiss\stud7\gpu\gpu_check.py --out agents\adapti
 
 ## 남은 일
 
-1. ReBeL 학습 곡선 확인(이 컨테이너에서 짧게): 판 수에 따라 LBR이 내려가는지.
-2. 노트북에서 세 비교군 학습과 평가. 그 뒤 ASWISS·k-means와 같은 deal로 학습 roots 축과 벽시계 축 비교를 한다.
+1. 노트북 `runs_fair`(다섯 비교군, 학습 CPU 24시간씩): 원문 설정의 MMD·ESCHER·ReBeL과 ASWISS·k-means를 CPU 시간 축으로 비교한다. ESCHER는 온라인 LBR이 30–60반복 뒤 오르는지(이전 설정의 발산) 본다.
+2. **ESCHER 저수지 크기 민감도 (다음 실행):**
+   - 원문이 저수지 크기를 정하지 않아 기본값은 공식 코드의 1e5(저수지마다)다. Deep CFR 원문은 최대 4천만을 썼다.
+   - 원문 표 3의 속도로 반복당 후회 표본이 약 3,500개(두 좌석 합) 생긴다(`runs_fair` 10반복에 35,343개). 그래서 1e5 저수지는 약 57반복부터 표본을 버리기 시작하고, 1e6이면 24 CPU시간(노트북 150–180반복, 약 60만 개) 동안 하나도 버리지 않는다. 그 이상은 이 예산에서 차이가 없다.
+   - 비교군: `escher`(1e5)와 `escher_m1m`(1e6, 러너에 추가함). 같은 seed와 같은 CPU 예산으로 돌린다. 메모리는 1e6이 가득 차면 약 1.7 GB다(이전 실행: 저수지 3개 × 5e5에 최대 0.83 GB).
+   - 명령: `run_100m.ps1 -Arms escher_m1m -ExeName aswiss_stud_sota.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out ...\runs_fair`(`runs_fair`와 같은 폴더). 끝나면 `plot_online_lbr.py ... --runs net_escher_s1:... net_escher_m1m_s1:... --baseline net_escher_s1 --clock cpu`로 같은 deal 차이를 본다.
+   - 판단: 1e6이 발산을 막거나 LBR을 유의하게 낮추면 저수지가 병목이다. 아니면 가치 함수 편향(위 "7-stud 발산")이 남은 원인이다.
+3. GPU 실험(노트북 RTX 5060): 원문 규모의 학습량과 저수지로 ESCHER·MMD가 달라지는지.

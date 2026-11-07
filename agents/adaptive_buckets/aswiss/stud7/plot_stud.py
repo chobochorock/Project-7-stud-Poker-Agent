@@ -34,7 +34,8 @@ STYLE = {"atom_k1024": (INK, "o", (0, (5, 3))), "aswiss_b_": ("#6250d6", "v", "-
          "atom_k341": ("#2a78d6", "D", "-"), "atom_k512": ("#1baf7a", "^", "-"), "atom_k256": (INK, "P", "-"),
          "context": (MUTED, "X", (0, (1, 2))),
          "history_bbf_": ("#eb6834", "*", "-"), "net_mmd": ("#1baf7a", "^", (0, (6, 2))),
-         "net_escher": ("#6250d6", "v", (0, (6, 2))), "rebel": ("#2a78d6", "D", (0, (2, 2)))}
+         "net_escher_m": ("#e87ba4", "v", (0, (2, 2))), "net_escher": ("#6250d6", "v", (0, (6, 2))),
+         "rebel": ("#2a78d6", "D", (0, (2, 2)))}
 DEFAULT = ["atom_k1024_s1:k-means 1024 = atoms trained directly", "aswiss_k1024_z2_s1:ASWISS (context start, atom labels, z=2)",
            "atom_kmatched_s1:k-means, K matched to ASWISS buckets", "atom_k256_s1:k-means 256 (project standard) = baseline",
            "context_s1:context only, no card information"]

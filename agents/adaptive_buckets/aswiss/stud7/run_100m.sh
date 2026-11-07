@@ -28,11 +28,11 @@ EXE=${EXE:-$HERE/aswiss_stud}
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
-                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [mmd]=net_mmd [escher]=net_escher [rebel]=rebel)
+                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [rebel]=rebel)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
-                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history [mmd]=net [escher]=net [rebel]=rebel)
+                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history [mmd]=net [escher]=net [escher_m1m]=net [rebel]=rebel)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [mmd]=1024 [escher]=1024 [rebel]=1024)
+              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [mmd]=1024 [escher]=1024 [escher_m1m]=1024 [rebel]=1024)
 # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
 declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
                   [hist_b]="--history-cards street --label avg --label-cap 2560000"
@@ -40,7 +40,7 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [hist_every]="--history-cards every --label-cap 2560000"
                   [hist_bb]="--history-cards street --label avg --label-cap 2560000 --backward 1"
                   [hist_bbf]="--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain"
-                  [mmd]="--algo mmd" [escher]="--algo escher"
+                  [mmd]="--algo mmd" [escher]="--algo escher" [escher_m1m]="--algo escher --escher-capacity 1000000"
                   [rebel]="--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
                   [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
@@ -51,7 +51,7 @@ declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b
                   [hist_every]="bucket-history keys, cards at every decision"
                   [hist_bb]="ASWISS: bucket-history keys, method B, backward split"
                   [hist_bbf]="ASWISS + hybrid average for labels (--avg-fill plain)"
-                  [mmd]="MMD self-play (policy network)" [escher]="ESCHER (neural CFR)" [rebel]="ReBeL (scaled: search + value networks)")
+                  [mmd]="MMD self-play (policy network)" [escher]="ESCHER (neural CFR)" [escher_m1m]="ESCHER, reservoirs of 1e6" [rebel]="ReBeL (scaled: search + value networks)")
 atlas() { echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }
 mkdir -p "$OUT"
 case $ACTION in

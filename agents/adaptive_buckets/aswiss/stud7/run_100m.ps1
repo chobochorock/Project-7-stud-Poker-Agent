@@ -71,6 +71,9 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
     escher    = @("net_escher", "net", 1024, "ESCHER (neural CFR)", "--algo escher")
+    # ESCHER reservoir sensitivity: 1e6 samples per reservoir (default 1e5, the official code's) keeps every sample a
+    # 24-CPU-hour run generates at the paper's Table 3 rate (~3,500 regret samples per iteration); ~1.7 GB when full
+    escher_m1m = @("net_escher_m1m", "net", 1024, "ESCHER, reservoirs of 1e6", "--algo escher --escher-capacity 1000000")
     # scaled-down ReBeL (sota/rebel.hpp): roots = self-play hands, each solving up to three street subgames (~1 s);
     # its own budget and cadences override the 100M ones (60k hands ~ the wall-clock of a 100M tabular arm)
     rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")

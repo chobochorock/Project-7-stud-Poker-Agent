@@ -82,6 +82,10 @@ for seed in a.seeds:
     r = rows(seed, "mccfr")
     if r: infosets = float(r[-1]["buckets_after"]); break
 if infosets: ax[4].axhline(infosets, color="#444444", ls="--", lw=1, label=f"information sets ({infosets:.0f})")
+p0 = os.path.join(a.out, "tree", "bucket_timestep.bin")
+if os.path.exists(p0):
+    n0 = len(np.unique(np.fromfile(p0, np.int32)))
+    ax[4].axhline(n0, color="#eb6834", ls=":", lw=1, label=f"ASWISS start: P0, one bucket per time step ({n0})")
 # (f) ratios at shared tabular checkpoints (same iteration counts); the last budget checkpoints differ in iterations
 for ref, c in (("kmeans", "#000000"), ("mccfr", "#444444")):
     if "aswiss" not in by_iter or ref not in by_iter: continue
@@ -92,6 +96,9 @@ for ref, c in (("kmeans", "#000000"), ("mccfr", "#444444")):
             ax[5].plot([2 * x for x in shared], [A[x] / B[x] for x in shared], color=c, marker="o", ms=4,
                        ls="-" if ref == "kmeans" else ":", label=f"ASWISS / {ref}" if i == 0 else None)
 ax[5].axhline(1, color="#999999", lw=0.8)
+if "kmeans" in final and "mccfr" in final and infosets and all(x["b"] == infosets for x in final["kmeans"]):
+    ax[5].text(0.02, 0.02, "k-means has every information set in its own bucket here: it is the same run as MCCFR",
+               transform=ax[5].transAxes, fontsize=7.5)
 name = NAMES.get(a.game, a.game)
 titles = [f"{name}: deployed policy (average; MMD: last iterate)", "current policy (MMD: same as left)",
           "Samples processed against time", "Deployed policy against samples (hardware-independent)",

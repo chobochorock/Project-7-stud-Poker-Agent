@@ -168,3 +168,122 @@ CFR+IRA는 매 반복 전체 트리를 순회해야 한다. 본문 방법은 외
   - mini-stud는 seed 1개 트리 하나, 예산 하나다.
   - CFR+IRA의 원 설정(평균 지연 100, ε 도달 시 정지)과 다른 점은 위 "구현"에 적었다.
 - **다음:** 7-stud 비교군 선정(신경망 일반화 계열, 실시간 탐색)은 대화에서 논의 중이다.
+
+---
+
+# SOTA 비교 2단계: 같은 학습 시간에서 MMD, ESCHER, k-means, MCCFR (2026-11-07)
+
+ASWISS를 **순수 MCCFR** 위에서 돌린다. 외부 샘플링에, RM+ 하한이 없는 regret matching과 균등 평균을 쓰며 MCCFR+가 아니다(`--plain 1`). 카드 군집 같은 사전 정보는 쓰지 않는다. 라벨은 정보집합마다 구간 표본 후회로 매기고, 출발점은 P₀(시점마다 bucket 하나)다.
+
+모든 방법에 같은 학습 시간을 준다. 모든 체크포인트에서 정확한 exploitability(NashConv/2)와 그때까지 처리한 표본 수(root 수)를 잰다.
+
+## 비교 조건
+
+| 항목 | 조건 |
+|---|---|
+| 하드웨어 | 같은 기계(이 컨테이너, 4코어). 런마다 코어 하나, 동시에 도는 런은 4개 이하 |
+| 예산 | 학습 시계 `train_seconds` = 경과 시간 − 체크포인트 저장·진단 시간. Kuhn 300초, Leduc과 mini-stud 1,800초. 예산을 넘긴 뒤 진행 중이던 반복/갱신까지 마치고 멈춘다(ESCHER Leduc 1,851초) |
+| 구현 | 모두 같은 C++(`-O3`, 단일 스레드). 신경망은 `../stud7/sota/nn.hpp`(BLAS·GPU 없음) |
+| 평가 | 같은 정확한 평가기(`../eval.py`)와 같은 트리. 실전 정책(평균 정책, MMD는 마지막 반복)과 현재 정책을 따로 잰다 |
+| seed | 1개(seed 1). seed 사이 구간은 아직 없다 |
+
+- **ASWISS:** P₀에서 출발. 정보집합마다 구간 표본 후회 R로 라벨을 매긴다. R(a*) > z·√Q(a*)(z = 2)일 때만 라벨이 붙는다.
+- **MCCFR:** 같은 순수 MCCFR, 추상화 없음.
+- **k-means:** 카드 특징 k-means(`../kmeans.py`). 시점 묶음마다 bucket 수를 ASWISS의 최종 분할에 맞추고, 같은 순수 MCCFR로 푼다.
+  - 특징: 자기 카드·공개 카드의 rank 개수, 이전 street 베팅.
+  - 남는 차이: 묶음 안의 서로 다른 특징 행 수가 상한이다. 그래서 mini-stud에서는 11,693개밖에 못 만들었다(ASWISS 21,722개). 또 ASWISS는 런마다 표본 후회로 정보집합을 나누고, k-means는 표본과 무관한 고정 특징으로 나눈다.
+  - Kuhn에서는 ASWISS가 정보집합 12개를 모두 나누므로 k-means도 MCCFR과 같은 런이 된다.
+- **MMD:** 논문 심층 설정. α_t = η_t = 0.05·√(1e7/t), clip 0.3, γ 0.99, 30 epoch × minibatch 128, lr 5e-5, 128×128.
+- **ESCHER:** 논문 Table 4 예산. 가치 1,000판 + 후회 1,000판, 배치 2048, 500/500/10,000 스텝, 256×128, 저수지 1e5, 가치 탐험 0.01, 가치망 매 반복 재초기화, argmax fallback.
+  - 평균 정책망 학습(체크포인트마다 10,000 스텝)은 학습 시계에서 뺐다. 원 논문도 평가할 때만 이 학습을 한다.
+  - 표의 "실제 시간"에는 이 학습 시간이 들어 있다.
+- **ReBeL:** 이 트리용 구현이 없어 돌리지 않았다. 우리 구현은 7-card stud 전용이다.
+
+## 실행
+
+```bash
+bash agents/adaptive_buckets/aswiss/compare/run_walltime.sh kuhn  OUT/kuhn  300  1 4
+bash agents/adaptive_buckets/aswiss/compare/run_walltime.sh leduc OUT/leduc 1800 1 4
+bash agents/adaptive_buckets/aswiss/compare/run_walltime.sh small OUT/small 1800 1 4
+python agents/adaptive_buckets/aswiss/compare/plot_walltime_compare.py OUT/small small walltime_small \
+    --speedup mmd=2.5 escher=2.3 --floor "ASWISS final partition=FLOOR/aswiss/exploitability.csv" ...
+```
+
+- 컨테이너가 08:42에 재시작됐다. 이때 끊긴 Leduc ESCHER·k-means와 mini-stud 런 5개는 같은 설정의 `results_data/walltime/job_after_restart.sh`로 코어 4개 큐에서 다시 돌렸다.
+- 그림: `walltime_{kuhn,leduc,small}.png`. 표: 같은 이름의 `.md`. 원자료: `results_data/walltime/`.
+
+## 결과: 학습 시간 끝의 exploitability (NashConv/2, 실전 정책)
+
+| 게임 (정보집합 수) | ASWISS | MCCFR (추상화 없음) | k-means | MMD | ESCHER |
+|---|---:|---:|---:|---:|---:|
+| Kuhn 300초 (12) | 1.4e-5 (12 bucket) | 2.2e-5 | 3.0e-5 (= MCCFR 런) | 0.047 | 0.154 |
+| Leduc 1,800초 (288) | 2.6e-4 (206 bucket) | 1.9e-4 | 0.77 (206 bucket) | 0.42 | 2.09 |
+| mini-stud 1,800초 (51,114) | 0.047 (21,722 bucket) | 1.1e-3 | 0.31 (11,693 bucket) | 0.62 | 2.24 |
+
+| 게임 | 처리한 표본 (같은 시간) | ESCHER 실제 시간 |
+|---|---|---:|
+| Kuhn | 표 기반 3.5e9 순회 · MMD 2.1e5판 · ESCHER 1.8e4판(6반복) | 1,796초 |
+| Leduc | 표 기반 5.5e9–6.3e9 순회 · MMD 6.5e5판 · ESCHER 8.1e4판(27반복) | 4,679초 |
+| mini-stud | 표 기반 1.4e9–1.5e9 순회 · MMD 5.9e5판 · ESCHER 6.9e4판(23반복) | 4,956초 |
+
+같은 반복 수(같은 체크포인트)에서의 비율은 다음과 같다. 1보다 작으면 ASWISS가 낮다. 외삽은 하지 않았다.
+
+| 게임 | 순회 2e6 | 3.3e7 | 5.2e8 | 1e9 |
+|---|---|---|---|---|
+| Leduc ASWISS/k-means | 0.052 | 0.015 | 0.0012 | 0.00079 |
+| Leduc ASWISS/MCCFR | 2.6 | 3.7 | 1.2 | 1.05 |
+| mini-stud ASWISS/k-means | 1.7 | 0.60 | 0.14 | 0.079 |
+| mini-stud ASWISS/MCCFR | 6.4 | 14.6 | 20.1 | 17.6 |
+
+**mini-stud 분할의 바닥.** 각 최종 분할을 고정하고 전체 순회 CFR+를 5,110반복 돌렸다(`results_data/walltime/small_s1/floor_*`).
+
+| 분할 | exploitability |
+|---|---|
+| ASWISS 최종 분할(21,722) | 4.7e-3–5.0e-3에서 평평해짐 |
+| k-means 분할(11,693) | 0.28–0.29 |
+| 추상화 없음 | 3.8e-4, 계속 내려감 |
+
+ASWISS 분할은 학습 중에도 계속 세분되므로, 이 바닥은 1,800초 시점 분할의 값일 뿐이다.
+
+## 해석
+
+1. **고정 추상화(k-means) 대비:**
+   - Leduc과 mini-stud 모두 k-means는 추상화 오차의 바닥(0.77, 0.29)에 막힌다. ASWISS는 그 아래로 계속 내려간다.
+   - 학습 시간 끝의 비율: Leduc 3e-4, mini-stud 0.16.
+   - 단, mini-stud의 짧은 예산(순회 2e6 부근, 2초)에서는 ASWISS가 k-means보다 1.7배 높다. 교차는 측정 체크포인트 사이에서 일어났다.
+2. **추상화 없는 순수 MCCFR 대비:**
+   - Leduc에서는 1,800초 끝에 1.37배 높다. 차이가 줄어드는 중이다(같은 체크포인트에서 3.7 → 1.05–1.34).
+   - mini-stud에서는 끝에 41배 높고, 같은 체크포인트에서도 15–20배로 비율이 줄지 않는다. 원인은 두 가지가 겹친 것이다.
+     - ASWISS 최종 분할의 바닥(5e-3)이 MCCFR의 1,800초 값(1.1e-3)보다 이미 높다. 표본 z 검정을 아직 통과하지 못해 합쳐져 있는 정보집합이 남아 있다.
+     - ASWISS 런 자체(0.024–0.047)가 그 바닥보다 5–10배 위다. 분할된 자식은 후회와 평균 합을 0에서 다시 시작하는데, bucket이 끝까지 늘고 있어(1,288초 → 1,800초에 399개) 최근에 다시 시작한 bucket이 많다.
+   - 마지막 점(1,800초)이 1,288초보다 나쁜 것(0.047 > 0.024)도 같은 이유다. 예산이 마지막 epoch를 정상 길이의 40%에서 끊었고, 1,288초에 641개로 나뉜 자식이 아직 덜 수렴했다.
+   - 결론: 원 게임 표를 메모리에 그대로 둘 수 있는 크기에서는 순수 MCCFR이 더 낫다. ASWISS가 아끼는 것은 메모리(mini-stud에서 표의 42%)이고, 그 대가로 exploitability가 높다.
+3. **신경망 방법(MMD, ESCHER) 대비:**
+   - 같은 CPU 시간에서는 세 게임 모두 표 기반 방법이 2–5자릿수 낮다.
+   - 하드웨어를 뺀 표본 축(그림의 (d)) 결과:
+     - Kuhn과 Leduc에서는 같은 판 수에서도 표 기반이 낮다.
+     - mini-stud에서는 6e5판 부근에서 MMD(0.62)와 ASWISS(약 0.7)가 비슷하다.
+     - 표본 단위가 다르다는 점에 주의해야 한다. 외부 샘플링 순회 하나는 자기 차례의 모든 행동을 펼치고, MMD 한 판은 궤적 하나다.
+   - ESCHER는 1,800초 동안 23–27반복밖에 못 했고 균등 정책 근처(2.1–2.2)에 머문다. 시간의 대부분이 신경망 학습이다.
+
+## 공정성: GPU를 상정한 알고리즘을 CPU로 돌린 것에 대해
+
+- **측정한 것:**
+  - 신경망 기준선은 시간의 거의 전부를 신경망 학습에 쓴다. ESCHER Leduc 한 반복은 69초이고, 그중 1,500스텝 × 36ms = 54초가 학습이다.
+  - 같은 코어에서 우리 `nn.hpp` 한 스텝은 numpy + OpenBLAS(1스레드)보다 2.1–3.6배 느리다(`calib/`).
+  - 그림의 점선은 MMD와 ESCHER의 시간을 이 배수로 나눈 것이다. 결론은 바뀌지 않는다.
+- **측정하지 않은 것:** GPU 배속. 우리 게임과 망 크기(128×128, 256×128)에서 GPU가 몇 배인지 재지 않았으므로 숫자로 주장하지 않는다.
+- **결론의 범위:**
+  - MMD: Leduc에서 3.3e5판 → 6.5e5판 동안 0.420 → 0.419로, 표본 축에서도 평평하다. 이 구간에서는 속도보다 방법·설정이 한계다.
+  - ESCHER: 반복 수 자체가 모자라다. 이 결과로 GPU에서의 ESCHER 성능을 판단할 수 없다.
+- **논문에 쓸 때 제안하는 진술:**
+  1. "같은 기계, 코어 하나, 같은 학습 시간, 같은 언어·컴파일러의 구현"을 공정 조건으로 정확히 정의한다.
+  2. 신경망 기준선은 GPU용으로 설계되었고, 우리 CPU 구현은 BLAS를 쓰지 않아 측정상 2.1–3.6배 느리다는 점을 밝힌다.
+  3. 하드웨어와 무관한 표본 축 결과를 함께 낸다.
+  4. GPU 민감도 실험(가능하면 공식 ESCHER 코드)을 별도로 보고하거나, 하지 못했다면 한계로 적는다.
+
+## 한계
+
+- **seed:** 1개다. 구간이 없다.
+- **동시 실행:** 재시작 후 Leduc k-means는 mini-stud ESCHER(큰 가치망)와 함께 돌았다. 그래서 같은 1,800초에 MCCFR보다 순회가 약 10% 적다(5.5e9 대 6.1e9). Leduc ESCHER도 재시작 전보다 반복당 약 20% 느렸다(69초 대 57초).
+- **지표:** LBR이 아니라 정확한 exploitability다. 7-stud의 LBR 결과와 섞어 읽으면 안 된다.

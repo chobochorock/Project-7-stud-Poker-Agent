@@ -33,6 +33,9 @@ ap.add_argument("--seeds", nargs="+", type=int, default=[1])
 ap.add_argument("--speedup", nargs="*", default=[],
                 help="NAME=F: also draw NAME's deployed-policy curve with its training time divided by F (dotted), e.g. the measured "
                      "speed-up of a BLAS build of the network step (calib/); a rescaling, not a run")
+ap.add_argument("--floor", nargs="*", default=[],
+                help="LABEL=CSV: exploitability.csv of a full-traversal CFR+ run on a fixed partition (e.g. ASWISS's final one); "
+                     "its last value is drawn as a horizontal line in (a) and (d), an estimate of that partition's floor")
 a = ap.parse_args()
 SPEEDUP = {k: float(v) for k, v in (x.split("=") for x in a.speedup)}
 METHODS = [("aswiss", "ASWISS (pure MCCFR, from P0, no prior)", "#eb6834", "*"),
@@ -102,6 +105,13 @@ for ref, c in (("kmeans", "#000000"), ("mccfr", "#444444")):
         if shared:
             ax[5].plot([2 * x for x in shared], [A[x] / B[x] for x in shared], color=c, marker="o", ms=4,
                        ls="-" if ref == "kmeans" else ":", label=f"ASWISS / {ref}" if i == 0 else None)
+for j, spec in enumerate(a.floor):
+    lab, path = spec.split("=", 1)
+    fr = list(csv.DictReader(open(path)))
+    v = float(fr[-1]["expl_bucket_avg"])
+    for k in (0, 3):
+        ax[k].axhline(v, color=["#eb6834", "#000000", "#444444"][j % 3], ls=(0, (6, 3)), lw=0.9, alpha=0.8,
+                      label=f"floor: {lab}, full CFR+ {int(float(fr[-1]['iters']))} it. ({v:.2g})")
 ax[5].axhline(1, color="#999999", lw=0.8)
 if "kmeans" in final and "mccfr" in final and infosets and all(x["b"] == infosets for x in final["kmeans"]):
     ax[5].text(0.02, 0.02, "k-means has every information set in its own bucket here: it is the same run as MCCFR",

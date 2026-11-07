@@ -66,17 +66,21 @@ for i, spec in enumerate(a.runs):
             for r in snap if snap_cpu is None or r["file"] in snap_cpu}
     color = colors[i % len(colors)]
     ls = "--" if name == a.baseline else "-"
-    lab = label + (f" [{group}]" if group else "") + (" (wall)" if wall_only else "")
+    epath = os.path.join(d, a.eval_file)
+    allrows = [json.loads(l) for l in open(epath)] if os.path.exists(epath) else []
+    # one policy only (MMD: last iterate; ReBeL: search policy): it is what the method plays, so it is compared with
+    # the other runs' average policies (their deployed policies) and left out of the current-policy panel
+    single = bool(allrows) and not any(r["policy"] == "average" for r in allrows)
+    lab = label + (" [its only policy]" if single else "") + (f" [{group}]" if group else "") + (" (wall)" if wall_only else "")
     for j, policy in enumerate(("average", "current")):
-        epath = os.path.join(d, a.eval_file)
-        rows = [json.loads(l) for l in open(epath)] if os.path.exists(epath) else []
-        rows = sorted((r for r in rows if r["policy"] == policy and r["file"] in secs), key=lambda r: secs[r["file"]])
+        want = ("current" if single else "average") if policy == "average" else (None if single else "current")
+        rows = sorted((r for r in allrows if r["policy"] == want and r["file"] in secs), key=lambda r: secs[r["file"]])
         x = [secs[r["file"]] for r in rows]; y = [r["lbr_ante"] for r in rows]; e = [1.96 * r["lbr_se"] for r in rows]
         ax[0][j].errorbar(x, y, yerr=e, color=color, ls=ls, marker="o", ms=3, lw=1.1, capsize=2, label=lab if j == 0 else None)
         fpath = os.path.join(d, "eval_final.jsonl")
         if os.path.exists(fpath):
             for r in map(json.loads, open(fpath)):
-                if r["policy"] == policy and r["file"] in secs:
+                if r["policy"] == want and r["file"] in secs:
                     ax[0][j].errorbar([secs[r["file"]] * 1.08], [r["lbr_ante"]], yerr=[1.96 * r["lbr_se"]], color=color,
                                       marker="o", mfc="white", ms=7, capsize=3)
     sec_adj = sec - removed
@@ -88,7 +92,8 @@ tag = f" (stalls > {a.drop_stalls:g}x median removed)" if a.drop_stalls > 0 else
 CLOCK = "CPU" if a.clock == "cpu" else "wall-clock"
 for j, policy in enumerate(("Average", "Current")):
     ax[0][j].set_xscale("log"); ax[0][j].axhline(0, color="black", lw=0.6)
-    ax[0][j].set_title(f"{policy} policy: Policy-LBR (95%) against training time{tag}", fontsize=10)
+    ax[0][j].set_title(("Deployed policy: average (single-policy runs: their only policy)" if policy == "Average" else
+                        "Current policy") + f": Policy-LBR (95%) vs training time{tag}", fontsize=10)
     ax[0][j].set_xlabel(f"training {CLOCK} seconds (evaluation excluded)")
     ax[0][j].set_ylabel(f"LBR winnings, ante/hand (symlog, linear within +-{LBR_LT:g})")
     ax[0][j].set_yscale("symlog", linthresh=LBR_LT, linscale=0.5); ax[0][j].grid(True, which="both", alpha=0.3)

@@ -82,7 +82,8 @@ def load(run, name):
 
 def pairs(run, row, tag=""):
     stem = row["file"][:-4]
-    for name in (f"lbr_pairs{tag}_{stem}_{row['policy']}.csv", f"lbr_pairs{tag}_{row['epoch']}_{row['policy']}.csv"):
+    pol = row.get("pair_policy", row["policy"])  # single-policy runs: drawn as "average", stored under their own policy
+    for name in (f"lbr_pairs{tag}_{stem}_{pol}.csv", f"lbr_pairs{tag}_{row['epoch']}_{pol}.csv"):
         if os.path.exists(f"{R}/{run}/{name}"):
             return np.loadtxt(f"{R}/{run}/{name}", delimiter=",", skiprows=1, usecols=1)
     raise FileNotFoundError(f"{run}: pair file for {stem} {row['policy']}")
@@ -97,6 +98,20 @@ data = {run: load(run, a.eval_file) for run, *_ in SERIES}
 # pair files carry the evaluation's tag: eval.jsonl -> lbr_pairs_<snapshot>_..., eval_<tag>.jsonl -> lbr_pairs_<tag>_<snapshot>_...
 TAG = "_" + a.eval_file[len("eval_"):-len(".jsonl")] if a.eval_file.startswith("eval_") and a.eval_file.endswith(".jsonl") else ""
 final = {run: load(run, "eval_final.jsonl") for run, *_ in SERIES}
+# Runs with one policy only (MMD: its last iterate; ReBeL: its search policy) have no average policy. That one policy
+# is what they play, as the average policy is what the CFR-type runs play, so it is compared in the average-policy
+# panels (the deployed policy of every method) and left out of the current-policy panels.
+SINGLE = set()
+
+
+def as_deployed(rows):
+    return {(f, "average"): dict(v, policy="average", pair_policy=v["policy"]) for (f, p), v in rows.items() if p == "current"}
+
+
+for run, *_ in SERIES:
+    if data[run] and not any(p == "average" for (_, p) in data[run]):
+        SINGLE.add(run); data[run] = as_deployed(data[run]); final[run] = as_deployed(final[run])
+SERIES = [(run, label + (" [its only policy]" if run in SINGLE else ""), *rest) for run, label, *rest in SERIES]
 off_scale = {run for run, *_ in SERIES if data[run] and max(data[run].values(), key=lambda r: r["roots"])["lbr_ante"] > OFF_SCALE_LBR}
 learned_h4 = any(r.get("h4") == "learned" for rows in data.values() for r in rows.values())
 base_by_roots = {(r["roots"], r["policy"]): r for r in data.get(BASELINE, {}).values()}
@@ -152,7 +167,8 @@ for col, policy in enumerate(("average", "current")):
             if run != BASELINE and b:
                 m, e = paired(run, r, b, "_final")
                 axes[2, col].errorbar([r["roots"] * 1.12], [m], yerr=[e], color=colour, **HOLLOW)
-    styled(axes[0, col], f"{policy.capitalize()} policy: Policy-LBR (95% interval)", "LBR winnings, ante/hand", False)
+    styled(axes[0, col], ("Deployed policy: average (single-policy runs: their only policy)" if policy == "average"
+                          else "Current policy") + ": Policy-LBR (95%)", "LBR winnings, ante/hand", False)
     axes[0, col].axhline(0, color=MUTED, lw=1)
     lbr_axis(axes[0, col])
     styled(axes[1, col], f"{policy.capitalize()} policy: sampled BR-gap proxy (fixed deals)", "proxy, ante/hand (log)", True)
@@ -192,11 +208,12 @@ if have_curve:
 else:
     ax.axis("off")
 notes = [f"{run}: newest snapshot LBR > {OFF_SCALE_LBR:g}, not drawn" for run in sorted(off_scale)] + [
-    "Network arms (partition net; not MCCFR): MMD has one policy (its last iterate, current-policy panels); ESCHER has an "
+    "Network arms (partition net; not MCCFR): MMD has one policy (its last iterate), drawn in the average-policy panels as "
+    "the policy it deploys; ESCHER has an "
     "average-policy network and regret-matching current policy; their 'buckets' are the networks' parameters."] * any(
         r.startswith("net_") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
     "ReBeL (scaled, partition rebel; not MCCFR): its 'roots' are self-play hands (each solves up to three street "
-    "subgames), its search policy is drawn in the current-policy panels, 'buckets' = value-network parameters, gap "
+    "subgames), its search policy is drawn in the average-policy panels (the policy it deploys), 'buckets' = value-network parameters, gap "
     "proxy not computed. Compare it on the wall-clock axis (plot_stud_time.py)."] * any(
         r.startswith("rebel") for r in (s.split(":", 1)[0] for s in (a.runs or DEFAULT))) + [
     f"{run}: no evaluations found, not drawn" + (" - this is the baseline, so the difference and ratio panels are empty"

@@ -926,6 +926,8 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
 - 온라인 LBR: 표 기반은 평균 정책이다. ESCHER는 감시용 평균망이다. 반복마다 전략 저수지로 500스텝을 이어서 학습하고, 별도 난수를 쓰며, 그 시간은 평가 시간으로 뺀다.
 - 오프라인: `-AverageOnly`(eval/final)와 presplit은 평균 정책만 평가한다.
 - MMD(마지막 반복)와 ReBeL(탐색 정책)은 평균 정책이 없어서, 그 하나뿐인 출력 정책을 최종 전략으로 평가한다.
+  - 그림에서도 이 정책을 다른 비교군의 평균 정책과 같은 패널("Deployed policy")에 그린다. 실전에서 두는 전략끼리 비교하기 위해서다. 범례에 "[its only policy]"를 붙이고, 현재 정책 패널에서는 뺀다(2026-11-07).
+  - 온라인 LBR의 같은 deal 차이도 MMD는 기준(k-means)의 평균 정책과 짝짓는다. ReBeL은 roots가 판 수라 같은 roots로 짝짓지 않는다.
 
 **파티클 수:**
 - 70k `hist_bbf` 스냅숏, 같은 2,000 pair에서 잰 값이다.

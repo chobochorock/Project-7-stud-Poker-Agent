@@ -104,9 +104,13 @@ for i, spec in enumerate(a.runs):
     if data is None:
         summary.append(f"{name}: no online_lbr.csv, not drawn"); continue
     color = colors[i % len(colors)]
+    # one policy only (MMD: last iterate; ReBeL: search policy): what the method plays, like the others' average
+    # policies, so it is drawn solid and paired with the baseline's average policy
+    single = set(data) == {"current"}
     for policy, rows in sorted(data.items()):
-        ls = "-" if policy == "average" else "--"
-        lab = f"{label} [{policy}]" + (f" ({group})" if group else "")
+        deployed = policy == "average" or single
+        ls = "-" if deployed else "--"
+        lab = f"{label} [{'its only policy' if single else policy}]" + (f" ({group})" if group else "")
         mv = moving(rows, a.window)
         if not mv:
             summary.append(f"{name} {policy}: {len(rows)} rows < window {a.window}, not drawn"); continue
@@ -118,8 +122,9 @@ for i, spec in enumerate(a.runs):
         overhead = rows[-1][4] / max(1e-9, rows[-1][1])
         summary.append(f"{name} {policy}: last {a.window} rows (to {last[0]:,} roots) {last[2]:.2f} +- {last[3]:.2f} ante "
                        f"({a.level:.0%}), {len(rows):,} rows, {rows[-1][3]} particles, online time = {overhead:.1%} of training time")
-        if base and policy in base and name != a.baseline:
-            b = {r[0]: r[2] for r in base[policy]}
+        bpol = "average" if single else policy
+        if base and bpol in base and name != a.baseline and not name.startswith("rebel"):  # ReBeL: roots are hands
+            b = {r[0]: r[2] for r in base[bpol]}
             paired = [(r[0], r[1], r[2] - b[r[0]], 0, 0) for r in rows if r[0] in b]
             dm = moving(paired, a.window)
             if dm:

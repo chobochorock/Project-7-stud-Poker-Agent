@@ -94,6 +94,8 @@ vector<double> Q, S, Strue, Rw, Sq, mass, Rtmp, ExW, ExC;
 // changes only when its regrets do, so before each change the weight accumulated since its last change (plain_clock -
 // plain_last[b]) times the old strategy is added.
 bool avg_fill = false;
+bool plain_mccfr = false;  // --plain 1: regret matching without the RM+ floor and uniform averaging (vanilla CFR / MCCFR)
+double excluded_secs = 0;  // --seconds: checkpoint and diagnostic time kept out of the training clock
 double avg_fill_reach = 1e-4, plain_clock = 0;
 vector<double> Splain, plain_last;
 int filled_buckets = 0;
@@ -270,7 +272,8 @@ inline void plain_flush(int b) {
 void apply_regrets() {
     for (int b : touched) {
         if (avg_fill) plain_flush(b);
-        for (int i = b * W; i < (b + 1) * W; ++i) { Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
+        if (plain_mccfr) for (int i = b * W; i < (b + 1) * W; ++i) { Q[i] += Rtmp[i]; Rtmp[i] = 0; }
+        else for (int i = b * W; i < (b + 1) * W; ++i) { Q[i] = max(Q[i] + Rtmp[i], 0.0); Rtmp[i] = 0; }
         dirty[b] = 0;
     }
     touched.clear();
@@ -481,7 +484,7 @@ int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
                             {"--test", "normal"}, {"--delta", "0.05"}, {"--label", "window"},
-                            {"--replay-p", "0.01"}, {"--replay-seed", "777"}};
+                            {"--replay-p", "0.01"}, {"--replay-seed", "777"}, {"--plain", "0"}, {"--seconds", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -493,6 +496,12 @@ int main(int argc, char** argv) {
     for (int b : bucket) B = max(B, b + 1);
     rng.seed(stoull(opt["--seed"]));
     long long T = stoll(opt["--iters"]), L = stoll(opt["--epoch0"]);
+    // --plain 1: pure CFR / MCCFR (regret matching on cumulative regrets that may be negative, uniform averaging)
+    // instead of CFR+ / MCCFR+ (RM+ floor, linear averaging). --seconds S: stop at the epoch end reached when the
+    // training clock passes S seconds (training clock = wall time minus checkpoint saving and the diagnostics that
+    // the labels do not use; column train_seconds of log.csv).
+    plain_mccfr = opt["--plain"] == "1";
+    const double budget = stod(opt["--seconds"]);
     double tol = stod(opt["--tol"]), z = stod(opt["--z"]);
     bool split = opt["--split"] == "cum";
     long long exact_every = stoll(opt["--exact-every"]);
@@ -563,12 +572,14 @@ int main(int argc, char** argv) {
                 jd.backward, jd.inconsistent, jd.units, stem.c_str());
         fflush(judgment_log);
     };
-    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units%s\n", avg_fill ? ",filled_buckets" : "");
+    fprintf(log, "epoch,iters,buckets_after,splits,L_per_iter,C_per_iter,H_per_iter,seconds,exact_L_per_iter,exact_C_per_iter,exact_H_per_iter,exact_bound_expl,avg_rho_half,avg_rhoP_half,avg_H_half,avg_consistent,units%s,train_seconds\n", avg_fill ? ",filled_buckets" : "");
     auto t0 = chrono::steady_clock::now();
+    auto train_secs = [&] { return chrono::duration<double>(chrono::steady_clock::now() - t0).count() - excluded_secs; };
+    auto excluded = [&](auto&& f) { const auto x0 = chrono::steady_clock::now(); f(); excluded_secs += chrono::duration<double>(chrono::steady_clock::now() - x0).count(); };
     long long t = 0, epoch_end = L, epoch_start = 0; int k = 0;
     while (t < T) {
         ++t;
-        double weight = (double)t;  // linear averaging
+        double weight = plain_mccfr ? 1.0 : (double)t;  // uniform (pure) or linear averaging
         if (exact_every > 0 && t % exact_every == 0) {
             exact(0, 1, 1, 1, (double)exact_every, (double)exact_every * weight);
             ex_weight += (double)exact_every * weight;
@@ -580,6 +591,7 @@ int main(int argc, char** argv) {
         }
         if (mode == "full") { full(0, 1, 1, 1, weight); if (avg_fill) plain_clock += weight; apply_regrets(); }
         else for (int p = 0; p < 2; ++p) { es(0, p, weight); if (avg_fill) plain_clock += 0.5 * weight; apply_regrets(); }
+        if (budget > 0 && t < T && train_secs() >= budget) T = t;  // time budget: this iteration is the last
         const bool sched = t == epoch_end || t == T;
         if (sched) {
             // window diagnostics from the per-infoset window sums (sampled in es mode)
@@ -606,8 +618,9 @@ int main(int argc, char** argv) {
                 fill(ExW.begin(), ExW.end(), 0);
             }
             // regrets of the bucket average policy (the checkpoint policy_bucket_k): certificate diagnostics, method B labels
-            vector<double> avg_pol = label_policy(), Ravg((size_t)nI * W, 0.0);
-            exact_into(0, 1, 1, 1, avg_pol.data(), Ravg);
+            vector<double> avg_pol, Ravg((size_t)nI * W, 0.0);
+            auto avg_diag = [&] { avg_pol = label_policy(); exact_into(0, 1, 1, 1, avg_pol.data(), Ravg); };
+            if (label_rule == "avg") avg_diag(); else excluded(avg_diag);  // method B labels need it; otherwise a diagnostic
             double rho = 0, rhoP = 0;
             int consistent = 0;
             {
@@ -624,9 +637,11 @@ int main(int argc, char** argv) {
             int splits = 0, units = nI;
             if (split && label_rule == "avg") {
                 // checkpoint policies BEFORE any split (they describe the epoch just finished)
-                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
-                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
-                if (avg_fill) save(out + "/policy_label_" + to_string(k) + ".bin", avg_pol);
+                excluded([&] {
+                    save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                    save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                    if (avg_fill) save(out + "/policy_label_" + to_string(k) + ".bin", avg_pol);
+                });
                 if (!gated) {
                     Judgment jd = judge_avg(Ravg, history_unit, backward);
                     close_tree(t);
@@ -720,21 +735,25 @@ int main(int argc, char** argv) {
                     if (keep[nb] >= 0)
                         for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
                 // checkpoint policies BEFORE applying the split (they describe the epoch just finished)
-                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
-                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                excluded([&] {
+                    save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                    save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                });
                 bucket = next; B = B2; Q = Q2; S = S2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
             } else {
-                save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
-                save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                excluded([&] {
+                    save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                    save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                });
             }
-            save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false));
+            excluded([&] { save(out + "/policy_true_" + to_string(k) + ".bin", policy(Strue, false)); });
             double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
             double len = (double)(t - epoch_start);
             fprintf(log, "%d,%lld,%d,%d,%.9g,%.9g,%.9g,%.3f,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.6f,%d", k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs,
                     eL / len, eC / len, (eL - eC) / len, ex_weight > 0 ? eCum / (2 * ex_weight) : -1.0,
                     rho / 2, rhoP / 2, (rho - rhoP) / 2, (double)consistent / Bprev, units);
             if (avg_fill) fprintf(log, ",%d", filled_buckets);
-            fprintf(log, "\n");
+            fprintf(log, ",%.3f\n", train_secs());
             fflush(log);
             fprintf(stderr, "epoch %d iters=%lld buckets_after=%d splits=%d L/len=%.5f C/len=%.5f H/len=%.5f (%.1fs)\n",
                     k, t, B, splits, Lw / len, Cw / len, (Lw - Cw) / len, secs);

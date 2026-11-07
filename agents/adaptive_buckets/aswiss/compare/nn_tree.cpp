@@ -71,12 +71,16 @@ int main(int argc, char** argv) {
                           {"--value-steps", "200"}, {"--traversals", "1024"}, {"--regret-steps", "400"}, {"--avg-steps", "2000"},
                           {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}, {"--value-explore", "0.25"},
                           {"--schedule", "const"}, {"--eta", "0.05"}, {"--horizon", "10000000"}, {"--clip", "0"}, {"--gamma", "1"},
-                          {"--value-reinit", "0"}, {"--fallback", "uniform"}};
+                          {"--value-reinit", "0"}, {"--fallback", "uniform"}, {"--seconds", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
     }
     const string dir = o.at("--tree"), out = o.at("--out");
+    // --seconds S: stop at the first update / iteration after the training clock passes S seconds, with a last checkpoint.
+    // Training clock (column train_seconds) = wall time minus the checkpoints (policy tables, ESCHER's average network).
+    const double budget = stod(o["--seconds"]);
+    double excluded = 0;
     TreeGame g;
     g.players = load<int32_t>(dir + "/players.bin"); g.info = load<int32_t>(dir + "/info.bin");
     g.start = load<int64_t>(dir + "/start.bin"); g.degree = load<int32_t>(dir + "/degree.bin");
@@ -96,14 +100,18 @@ int main(int argc, char** argv) {
         sota::Escher<TreeGame> es(g, e);
         FILE* log = fopen((out + "/log.csv").c_str(), "w");
         if (!log) throw runtime_error("cannot write " + out + "/log.csv");
-        fprintf(log, "epoch,iters,buckets_after,iteration,regret_samples,value_loss,regret_loss0,regret_loss1,seconds\n");
+        fprintf(log, "epoch,iters,buckets_after,iteration,regret_samples,value_loss,regret_loss0,regret_loss1,seconds,train_seconds\n");
         const auto t0 = chrono::steady_clock::now();
-        const long long T = stoll(o["--iterations"]);
+        auto train_secs = [&] { return chrono::duration<double>(chrono::steady_clock::now() - t0).count() - excluded; };
+        long long T = stoll(o["--iterations"]);
         int k = 0; long long next = 1;
         for (long long it = 1; it <= T; ++it) {
             es.iterate();
+            if (budget > 0 && train_secs() >= budget) T = it;  // time budget: last iteration, checkpoint below
             if (it != next && it != T) continue;
             next *= 2;
+            const double train_now = train_secs();
+            const auto c0 = chrono::steady_clock::now();
             es.train_average();
             vector<double> pa(static_cast<size_t>(g.nI) * W, 0.0), pc(pa.size(), 0.0);
             sota::Sparse x;
@@ -123,8 +131,9 @@ int main(int argc, char** argv) {
             save(out + "/policy_bucket_" + to_string(k) + ".bin", pa); save(out + "/policy_true_" + to_string(k) + ".bin", pa);
             save(out + "/policy_current_" + to_string(k) + ".bin", pc);
             const double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-            fprintf(log, "%d,%lld,%d,%lld,%lld,%.6g,%.6g,%.6g,%.3f\n", k, es.roots_done, g.nI, it, es.regret_samples, es.last_value_loss,
-                    es.last_regret_loss[0], es.last_regret_loss[1], secs);
+            excluded += chrono::duration<double>(chrono::steady_clock::now() - c0).count();
+            fprintf(log, "%d,%lld,%d,%lld,%lld,%.6g,%.6g,%.6g,%.3f,%.3f\n", k, es.roots_done, g.nI, it, es.regret_samples, es.last_value_loss,
+                    es.last_regret_loss[0], es.last_regret_loss[1], secs, train_now);
             fflush(log);
             fprintf(stderr, "checkpoint %d iteration=%lld hands=%lld value_loss=%.4f regret_loss=%.4f/%.4f (%.1fs)\n", k, it,
                     es.roots_done, es.last_value_loss, es.last_regret_loss[0], es.last_regret_loss[1], secs);
@@ -145,14 +154,19 @@ int main(int argc, char** argv) {
     const long long total = stoll(o["--episodes-total"]);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");
     if (!log) throw runtime_error("cannot write " + out + "/log.csv");
-    fprintf(log, "epoch,iters,buckets_after,updates,samples,alpha,entropy,kl_old,value_loss,seconds\n");
+    fprintf(log, "epoch,iters,buckets_after,updates,samples,alpha,entropy,kl_old,value_loss,seconds,train_seconds\n");
     const auto t0 = chrono::steady_clock::now();
+    auto train_secs = [&] { return chrono::duration<double>(chrono::steady_clock::now() - t0).count() - excluded; };
     int k = 0; long long next = 1;
-    while (mmd.episodes_done < total) {
+    bool stop = false;
+    while (!stop && mmd.episodes_done < total) {
         auto batch = mmd.collect();
         mmd.update(batch);
-        if (mmd.updates != next && mmd.episodes_done < total) continue;
+        if (budget > 0 && train_secs() >= budget) stop = true;  // time budget: last update, checkpoint below
+        if (!stop && mmd.updates != next && mmd.episodes_done < total) continue;
         next *= 2;
+        const double train_now = train_secs();
+        const auto c0 = chrono::steady_clock::now();
         vector<double> pol(static_cast<size_t>(g.nI) * W, 0.0);
         sota::Sparse x;
         for (int I = 0; I < g.nI; ++I) {
@@ -162,8 +176,9 @@ int main(int argc, char** argv) {
         }
         for (const char* kind : {"bucket", "true", "current"}) save(out + "/policy_" + kind + "_" + to_string(k) + ".bin", pol);
         const double secs = chrono::duration<double>(chrono::steady_clock::now() - t0).count();
-        fprintf(log, "%d,%lld,%d,%lld,%lld,%.6g,%.6g,%.6g,%.6g,%.3f\n", k, mmd.episodes_done, g.nI, mmd.updates, mmd.samples_done,
-                mmd.alpha(), mmd.last_entropy, mmd.last_kl, mmd.last_value_loss, secs);
+        excluded += chrono::duration<double>(chrono::steady_clock::now() - c0).count();
+        fprintf(log, "%d,%lld,%d,%lld,%lld,%.6g,%.6g,%.6g,%.6g,%.3f,%.3f\n", k, mmd.episodes_done, g.nI, mmd.updates, mmd.samples_done,
+                mmd.alpha(), mmd.last_entropy, mmd.last_kl, mmd.last_value_loss, secs, train_now);
         fflush(log);
         fprintf(stderr, "checkpoint %d episodes=%lld updates=%lld entropy=%.3f kl=%.4f vloss=%.4f (%.1fs)\n", k, mmd.episodes_done,
                 mmd.updates, mmd.last_entropy, mmd.last_kl, mmd.last_value_loss, secs);

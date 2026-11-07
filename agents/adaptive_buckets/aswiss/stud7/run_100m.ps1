@@ -39,7 +39,7 @@ param(
     [switch]$AverageOnly,        # eval/final: average policies only (MMD and ReBeL keep their one output policy)
     [int]$PresplitParticles = 256,
     [int]$PresplitPairs = 2000,
-    # mmd / escher / rebel arms: stop when the arm's training CPU time reaches this many seconds (budget snapshot and
+    # every arm given in -Arms: stop when the arm's training CPU time reaches this many seconds (budget snapshot and
     # checkpoint; equal-CPU-time comparison). Run again without it (or with a larger value) to continue towards -Roots.
     [double]$BudgetCpuSeconds = 0,
     # executable to build and use (relative to this folder): a second name lets new arms start with new code while
@@ -131,7 +131,7 @@ if ($Action -eq "run") {
             $argv += @("--log-regret", "1")
         }
         if ($LogSplits -and $Arm[$a][1] -eq "history") { $argv += @("--log-splits", "1") }
-        if ($BudgetCpuSeconds -gt 0 -and $Arm[$a][1] -in @("net", "rebel")) { $argv += @("--budget-cpu-seconds", $BudgetCpuSeconds) }
+        if ($BudgetCpuSeconds -gt 0) { $argv += @("--budget-cpu-seconds", $BudgetCpuSeconds) }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)
@@ -202,5 +202,8 @@ elseif ($Action -eq "plot") {
 }
 elseif ($Action -eq "pack") {
     # small result files of every run in $Out (no snapshots or checkpoints) -> results_data, for git or sharing
-    & $Python (Join-Path $Here "pack_summaries.py") $Out (Join-Path $Here "results_data\runs_100m${Suffix}_summaries.tar.gz")
+    # named after the output folder (runs_online -> results_data\runs_online_s1_summaries.tar.gz), so packing one
+    # folder never overwrites another folder's archive
+    $packName = Split-Path -Leaf (Resolve-Path $Out).Path
+    & $Python (Join-Path $Here "pack_summaries.py") $Out (Join-Path $Here "results_data\${packName}${Suffix}_summaries.tar.gz")
 }

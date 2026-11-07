@@ -21,7 +21,7 @@ inline std::string config_string(const Config& c) {
     std::ostringstream s;
     s << "iters56=" << c.iters56 << ";iters7=" << c.iters7 << ";buckets=" << c.buckets << ";hidden=" << c.hidden << ";lr=" << c.lr
       << ";batch=" << c.batch << ";train_steps=" << c.train_steps << ";capacity=" << c.capacity << ";explore=" << c.explore
-      << ";floor=" << c.floor;
+      << ";floor=" << c.floor << ";explore_seats=" << c.explore_seats << ";random_iter=" << c.random_iter << ";loss=" << c.loss;
     return s.str();
 }
 inline void save_snapshot(const std::string& path, const Config& c, const Mlp& v6, const Mlp& v7) {
@@ -103,6 +103,10 @@ struct Agent {
     const Mlp* v7 = nullptr;
     Config cfg;
     mutable std::mt19937_64 rng;
+    // cfg.random_iter: each 5th / 6th-street solve plays (and passes beliefs with) one iteration drawn from a generator
+    // seeded by iter_seed and the public history, so a repeated or re-cached solve uses the same iteration. A
+    // Policy-LBR attacker querying this agent sees the drawn iteration's policy (it knows the seed).
+    uint64_t iter_seed = 0;
     struct Entry {
         std::string key;
         std::vector<double> r[2];   // root ranges (normalised)
@@ -127,7 +131,16 @@ struct Agent {
         if (root.street == 5) { e.r[0] = h4_range(root, 0); e.r[1] = h4_range(root, 1); normalise(e.r[0]); normalise(e.r[1]); }
         else { e.r[0] = r[0]; e.r[1] = r[1]; }
         const auto t0 = std::chrono::steady_clock::now();
-        if (root.street < 7) e.ps = std::make_shared<PairSolve>(solve_pairs(root, e.r, root.street == 5 ? *v6 : *v7, cfg.iters56));
+        if (root.street < 7) {
+            int tstar = 0;
+            if (cfg.random_iter) {
+                uint64_t h = 1469598103934665603ull;  // FNV-1a of the public history: same draw on every platform
+                for (unsigned char ch : k) { h ^= ch; h *= 1099511628211ull; }
+                std::mt19937_64 rr(iter_seed ^ h);
+                tstar = sample_iteration(cfg.iters56, rr);
+            }
+            e.ps = std::make_shared<PairSolve>(solve_pairs(root, e.r, root.street == 5 ? *v6 : *v7, cfg.iters56, tstar));
+        }
         else e.ss = std::make_shared<SeventhSolve>(solve_seventh(root, e.r, cfg.iters7, cfg.buckets));
         solve_seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         ++solves[root.street - 5];
@@ -173,7 +186,7 @@ struct Agent {
                     if (h.size() < 2) return uniform();
                     const int t = E.ps->T.of_pair[pair_of_cards(h[0], h[1])];
                     if (t < 0) return uniform();
-                    for (int a = 0; a < kActionCount; ++a) if (legal >> a & 1) out[a] = E.ps->prob(v, t, a);
+                    for (int a = 0; a < kActionCount; ++a) if (legal >> a & 1) out[a] = E.ps->play_prob(v, t, a);
                 } else {
                     std::vector<Card> cards = st.players[seat].hidden;
                     if (cards.size() < 3) return uniform();
@@ -193,7 +206,7 @@ struct Agent {
                 for (int p = 0; p < NP; ++p) {
                     if (r[nd.actor][p] <= 0) continue;
                     const int t = E.ps->T.of_pair[p];
-                    r[nd.actor][p] *= std::max(cfg.floor, t >= 0 ? E.ps->prob(v, t, a) : 0.0);
+                    r[nd.actor][p] *= std::max(cfg.floor, t >= 0 ? E.ps->play_prob(v, t, a) : 0.0);
                 }
                 v = nd.child[a];
             }
@@ -227,8 +240,10 @@ int train_rebel(int argc, char** argv) {
                                 {"--snapshot-every", "0"}, {"--curve-every", "100"}, {"--h4", "heuristic"}, {"--threads", "1"},
                                 {"--rebel-iters56", "32"}, {"--rebel-iters7", "64"}, {"--rebel-buckets", "64"},
                                 {"--rebel-hidden", "128"}, {"--rebel-lr", "3e-4"}, {"--rebel-batch", "32"},
-                                {"--rebel-train-steps", "4"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.1"},
-                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""}});
+                                {"--rebel-train-steps", "4"}, {"--rebel-capacity", "4096"}, {"--rebel-explore", "0.25"},
+                                {"--rebel-explore-seats", "1"}, {"--rebel-random-iter", "1"}, {"--rebel-loss", "huber"},
+                                {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
+                                {"--budget-cpu-seconds", "0"}});
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition rebel uses the heuristic H4 (--h4 heuristic)");
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -238,10 +253,15 @@ int train_rebel(int argc, char** argv) {
     c.iters56 = std::stoi(o["--rebel-iters56"]); c.iters7 = std::stoi(o["--rebel-iters7"]); c.buckets = std::stoi(o["--rebel-buckets"]);
     c.hidden = std::stoi(o["--rebel-hidden"]); c.lr = std::stof(o["--rebel-lr"]); c.batch = std::stoi(o["--rebel-batch"]);
     c.train_steps = std::stoi(o["--rebel-train-steps"]); c.capacity = std::stoi(o["--rebel-capacity"]);
-    c.explore = std::stod(o["--rebel-explore"]);
+    c.explore = std::stod(o["--rebel-explore"]); c.explore_seats = std::stoi(o["--rebel-explore-seats"]);
+    c.random_iter = o["--rebel-random-iter"] == "1"; c.loss = o["--rebel-loss"];
+    if (c.explore_seats != 1 && c.explore_seats != 2) throw std::runtime_error("--rebel-explore-seats must be 1 or 2");
+    if (c.loss != "huber" && c.loss != "mse") throw std::runtime_error("--rebel-loss must be huber or mse");
     const long long T = std::stoll(o["--roots"]), epoch0 = std::stoll(o["--epoch0"]);
     const long long checkpoint_every = std::stoll(o["--checkpoint-every"]), snapshot_every = std::stoll(o["--snapshot-every"]);
     const long long curve_every = std::stoll(o["--curve-every"]);
+    const double budget = std::stod(o["--budget-cpu-seconds"]);  // as in train_net: not a setting of the run
+    if (budget < 0) throw std::runtime_error("--budget-cpu-seconds must be >= 0");
     OnlineLbr online;  // ReBeL: its search policy, as "current"
     online.setup(o, c.seed, false, true);
     const std::string config = "rebel;seed=" + std::to_string(c.seed) + ";epoch0=" + std::to_string(epoch0) + ";" + rebel::config_string(c) +
@@ -266,12 +286,20 @@ int train_rebel(int argc, char** argv) {
         if (std::filesystem::exists(log_path)) throw std::runtime_error(out + " already has log.csv but no usable checkpoint; use a new --out");
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after,examples6,examples7,loss6,loss7,solves5,solves6,solves7,"
                                    "solve5_s,solve6_s,solve7_s,train_s,gap7_mean,seconds\n";
-        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
+        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds,train_cpu_seconds\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader
+                                  << ",train_cpu_seconds\n";
         std::ofstream(out + "/net_kind.txt") << "rebel\n";
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     online.open(out, resumed, online_bytes);
+    if (budget > 0 && L.train_cpu >= budget) {
+        std::cerr << "CPU budget " << budget << " s already reached (training CPU " << L.train_cpu << " s at hand " << tr.episodes
+                  << "); rerun with --budget-cpu-seconds 0 or a larger budget to continue towards --roots\n";
+        return 0;
+    }
+    TrainCpuClock clock;
+    clock.begin(L.train_cpu);
     const double base = L.seconds, online0 = online.seconds;
     const auto t0 = std::chrono::steady_clock::now();
     // training seconds: the online LBR's own time is excluded (it is in online_lbr.csv)
@@ -279,6 +307,7 @@ int train_rebel(int argc, char** argv) {
     auto checkpoint = [&] {
         log.flush(); index.flush(); curve.flush();
         L.seconds = elapsed();
+        L.train_cpu = clock.now();
         L.log_bytes = static_cast<std::streamoff>(std::filesystem::file_size(log_path));
         L.index_bytes = static_cast<std::streamoff>(std::filesystem::file_size(index_path));
         L.curve_bytes = static_cast<std::streamoff>(std::filesystem::file_size(curve_path));
@@ -305,7 +334,10 @@ int train_rebel(int argc, char** argv) {
             rebel::Agent agent;
             agent.v6 = &tr.v6; agent.v7 = &tr.v7; agent.cfg = c;
             agent.rng.seed(online.target_seed(t, "current"));
+            agent.iter_seed = online.target_seed(t, "current") ^ 0x3c6ef372fe94f82bull;
+            const double cpu0 = cpu_seconds();
             online.evaluate(t, online.deck_at(t), agent, "current", elapsed());
+            clock.online += cpu_seconds() - cpu0;
         }
         tr.episode();
         tr.train();
@@ -313,14 +345,15 @@ int train_rebel(int argc, char** argv) {
         const long long done = tr.episodes;
         const double secs = elapsed();
         while (done >= L.next_curve) {
-            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << '\n';
+            curve << done << ',' << secs << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << ','
+                  << clock.now() << '\n';
             L.curve_roots0 = done; L.next_curve += curve_every;
         }
         bool saved = false;
         if (done >= L.next_epoch_roots || done >= T) {
             const std::string file = "snapshot_" + std::to_string(L.k) + ".net";
             rebel::save_snapshot(out + "/" + file, c, tr.v6, tr.v7);
-            index << file << ',' << done << ",epoch," << L.k << ',' << params << ',' << secs << '\n';
+            index << file << ',' << done << ",epoch," << L.k << ',' << params << ',' << secs << ',' << clock.now() << '\n';
             log << L.k << ',' << done << ',' << params << ',' << params << ',' << stats() << ',' << secs << '\n';
             std::cerr << "epoch " << L.k << " hands=" << done << " " << stats() << " (" << secs << "s)\n";
             ++L.k;
@@ -330,12 +363,28 @@ int train_rebel(int argc, char** argv) {
         if (done >= L.next_snapshot && done < T) {
             const std::string file = "snapshot_r" + std::to_string(done) + ".net";
             rebel::save_snapshot(out + "/" + file, c, tr.v6, tr.v7);
-            index << file << ',' << done << ",periodic," << L.k << ',' << params << ',' << secs << '\n';
+            index << file << ',' << done << ",periodic," << L.k << ',' << params << ',' << secs << ',' << clock.now() << '\n';
             while (L.next_snapshot <= done) L.next_snapshot += snapshot_every;
         }
         if (done >= L.next_checkpoint || saved || done >= T) {
             while (L.next_checkpoint <= done) L.next_checkpoint += checkpoint_every;
             checkpoint();
+        }
+        if (budget > 0 && done < T && clock.now() >= budget) {  // CPU budget: snapshot, curve row, checkpoint, stop
+            const std::string file = "snapshot_b" + std::to_string(done) + ".net";
+            rebel::save_snapshot(out + "/" + file, c, tr.v6, tr.v7);
+            const double s2 = elapsed();
+            index << file << ',' << done << ",budget," << L.k << ',' << params << ',' << s2 << ',' << clock.now() << '\n';
+            if (done > L.curve_roots0) {
+                curve << done << ',' << s2 << ',' << done - L.curve_roots0 << ",nan,nan," << params << ',' << memory_columns() << ','
+                      << clock.now() << '\n';
+                L.curve_roots0 = done;
+            }
+            L.budget_mark = budget;
+            checkpoint();
+            std::cerr << "CPU budget " << budget << " s reached at hand " << done << " (training CPU " << L.train_cpu
+                      << " s); snapshot " << file << " and checkpoint saved. Rerun with --budget-cpu-seconds 0 (or larger) to continue\n";
+            return 0;
         }
     }
     return 0;
@@ -351,6 +400,9 @@ int eval_rebel(std::map<std::string, std::string>& o) {
     if (!o["--rebel-iters56"].empty()) c.iters56 = std::stoi(o["--rebel-iters56"]);
     if (!o["--rebel-iters7"].empty()) c.iters7 = std::stoi(o["--rebel-iters7"]);
     if (!o["--rebel-buckets"].empty()) c.buckets = std::stoi(o["--rebel-buckets"]);
+    // --rebel-play iterate (default: ReBeL's random-iteration play) | average (the average strategy: unsafe search)
+    c.random_iter = o["--rebel-play"].empty() || o["--rebel-play"] == "iterate";
+    if (!c.random_iter && o["--rebel-play"] != "average") throw std::runtime_error("--rebel-play must be iterate or average");
     const uint64_t seed = std::stoull(o["--seed"]);
     const int pairs = std::stoi(o["--pairs"]), particles = std::stoi(o["--particles"]);
     const int threads = std::max(1, std::stoi(o.count("--threads") && !o["--threads"].empty() ? o["--threads"] : "1"));
@@ -368,6 +420,7 @@ int eval_rebel(std::map<std::string, std::string>& o) {
             rebel::Agent agent;
             agent.v6 = &v6; agent.v7 = &v7; agent.cfg = c;
             agent.rng.seed(seed ^ 0x5851f42d4c957f2dull ^ (0x9e3779b97f4a7c15ull * static_cast<uint64_t>(i + 1)));
+            agent.iter_seed = seed ^ 0x3c6ef372fe94f82bull ^ (0xbf58476d1ce4e5b9ull * static_cast<uint64_t>(i + 1));
             PolicyLBR<rebel::Agent> lbr(agent, particles, seed ^ 0x94d049bb133111ebull ^ (0xbf58476d1ce4e5b9ull * static_cast<uint64_t>(i + 1)));
             std::array<double, 2> value{};
             for (int lbr_seat = 0; lbr_seat < 2; ++lbr_seat)

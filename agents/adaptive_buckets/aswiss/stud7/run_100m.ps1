@@ -39,13 +39,19 @@ param(
     [switch]$AverageOnly,        # eval/final: average policies only (MMD and ReBeL keep their one output policy)
     [int]$PresplitParticles = 256,
     [int]$PresplitPairs = 2000,
+    # mmd / escher / rebel arms: stop when the arm's training CPU time reaches this many seconds (budget snapshot and
+    # checkpoint; equal-CPU-time comparison). Run again without it (or with a larger value) to continue towards -Roots.
+    [double]$BudgetCpuSeconds = 0,
+    # executable to build and use (relative to this folder): a second name lets new arms start with new code while
+    # arms started earlier keep running with (and locking) aswiss_stud.exe
+    [string]$ExeName = "aswiss_stud.exe",
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
 # powershell -File passes "-Arms aswiss,k256" as the single string "aswiss,k256", so split on commas here
 $Arms = @($Arms | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Exe = Join-Path $Here "aswiss_stud.exe"
+$Exe = Join-Path $Here $ExeName
 $Atlas = Join-Path $Here "atlas"
 $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     aswiss    = @("aswiss_k1024_z2", "aswiss", 1024, "ASWISS (context start, K=1024 atoms, z=2)", "")
@@ -67,7 +73,7 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     escher    = @("net_escher", "net", 1024, "ESCHER (neural CFR)", "--algo escher")
     # scaled-down ReBeL (sota/rebel.hpp): roots = self-play hands, each solving up to three street subgames (~1 s);
     # its own budget and cadences override the 100M ones (60k hands ~ the wall-clock of a 100M tabular arm)
-    rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 60000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
+    rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }
@@ -125,6 +131,7 @@ if ($Action -eq "run") {
             $argv += @("--log-regret", "1")
         }
         if ($LogSplits -and $Arm[$a][1] -eq "history") { $argv += @("--log-splits", "1") }
+        if ($BudgetCpuSeconds -gt 0 -and $Arm[$a][1] -in @("net", "rebel")) { $argv += @("--budget-cpu-seconds", $BudgetCpuSeconds) }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)
@@ -171,12 +178,17 @@ elseif ($Action -eq "plot") {
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
     & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
+    # equal-CPU-time view: LBR against training CPU seconds (train_clock.py)
+    & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_cputime.png") --runs @specs --clock cpu
     # pre-split evaluations (-Action presplit): the same figures from eval_presplit<P>.jsonl
     $pre = "eval_presplit$PresplitParticles.jsonl"
     if (@($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) $pre) }).Count -gt 0) {
         & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results${Suffix}_presplit$PresplitParticles") --runs @specs --baseline (RunName $base) --epoch-only --eval-file $pre
         & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_time.png") --runs @specs --eval-file $pre
+        & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_cputime.png") --runs @specs --eval-file $pre --clock cpu
     }
+    # bucket regret (regret.csv) and memory (curve.csv)
+    & $Python (Join-Path $Here "plot_regret_memory.py") $Out (Join-Path $Out "results${Suffix}_regret_memory.png") --runs @specs --baseline (RunName $base)
     # online LBR (runs trained with -OnlineLbrEvery): moving average of the last 100 and of the last 2000 deals
     $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
     if ($online.Count -gt 0) {
@@ -184,6 +196,7 @@ elseif ($Action -eq "plot") {
         $obase = if ($online -contains $base) { @("--baseline", (RunName $base)) } else { @() }
         foreach ($w in @(100, 2000)) {
             & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_w$w.png") --runs @ospecs --window $w @obase
+            & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_cpu_w$w.png") --runs @ospecs --window $w @obase --clock cpu
         }
     }
 }

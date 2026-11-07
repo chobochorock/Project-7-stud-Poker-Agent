@@ -1,6 +1,6 @@
 """Evaluate 7-stud ASWISS snapshots: paired Policy-LBR and the sampled BR-gap proxy, average and current policy.
 
-Usage: python evaluate.py BINARY RUNS_DIR --runs NAME:PARTITION:ATLAS ... [--kinds epoch periodic] [--min-roots 0]
+Usage: python evaluate.py BINARY RUNS_DIR --runs NAME:PARTITION:ATLAS ... [--kinds epoch periodic budget] [--min-roots 0]
        [--epochs K ...] [--latest] [--workers 4] [--pairs 2000] [--particles 64] [--gap-roots 4000]
        [--seed 2026102701] [--tag TAG] [--rho-roots 0] [--rho-only]
 Snapshots come from RUNS_DIR/NAME/snapshots.csv (written by `aswiss_stud train`); older runs without it fall back to
@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 ap = argparse.ArgumentParser()
 ap.add_argument("binary"); ap.add_argument("runs_dir")
 ap.add_argument("--runs", nargs="+", required=True, help="NAME:PARTITION:ATLAS (ATLAS may be empty)")
-ap.add_argument("--kinds", nargs="+", default=["epoch", "periodic"])
+ap.add_argument("--kinds", nargs="+", default=["epoch", "periodic", "budget"])  # budget: a --budget-cpu-seconds stop
 ap.add_argument("--min-roots", type=int, default=0)
 ap.add_argument("--epochs", nargs="+", type=int)
 ap.add_argument("--latest", action="store_true")

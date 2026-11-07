@@ -69,7 +69,9 @@ int main(int argc, char** argv) {
                           {"--hidden1", "128"}, {"--hidden2", "64"}, {"--reward-scale", "1"},
                           {"--magnet-every", "0"}, {"--normalize", "1"}, {"--iterations", "256"}, {"--value-hands", "1024"},
                           {"--value-steps", "200"}, {"--traversals", "1024"}, {"--regret-steps", "400"}, {"--avg-steps", "2000"},
-                          {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}, {"--value-explore", "0.25"}};
+                          {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}, {"--value-explore", "0.25"},
+                          {"--schedule", "const"}, {"--eta", "0.05"}, {"--horizon", "10000000"}, {"--clip", "0"}, {"--gamma", "1"},
+                          {"--value-reinit", "0"}, {"--fallback", "uniform"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
@@ -90,6 +92,7 @@ int main(int argc, char** argv) {
         e.avg_steps = stoi(o["--avg-steps"]); e.batch = stoi(o["--batch"]); e.regret_capacity = e.strategy_capacity = stoull(o["--capacity"]);
         e.lr = stof(o["--lr"]); e.value_lr = stof(o["--value-lr"]); e.reward_scale = stod(o["--reward-scale"]);
         e.reinit = o["--reinit"] == "1"; e.value_explore = stod(o["--value-explore"]); e.seed = stoull(o["--seed"]);
+        e.value_reinit = o["--value-reinit"] == "1"; e.fallback = o["--fallback"];
         sota::Escher<TreeGame> es(g, e);
         FILE* log = fopen((out + "/log.csv").c_str(), "w");
         if (!log) throw runtime_error("cannot write " + out + "/log.csv");
@@ -136,6 +139,8 @@ int main(int argc, char** argv) {
     c.lr = stof(o["--lr"]); c.value_lr = stof(o["--value-lr"]); c.alpha0 = stod(o["--alpha"]);
     c.alpha_halflife = stod(o["--alpha-halflife"]); c.beta = stod(o["--beta"]); c.hidden1 = stoi(o["--hidden1"]);
     c.hidden2 = stoi(o["--hidden2"]); c.magnet_every = stoi(o["--magnet-every"]); c.normalize = o["--normalize"] == "1"; c.reward_scale = stod(o["--reward-scale"]); c.seed = stoull(o["--seed"]);
+    c.schedule = o["--schedule"]; c.eta0 = stod(o["--eta"]); c.horizon = stod(o["--horizon"]); c.clip = stod(o["--clip"]);
+    c.gamma = stod(o["--gamma"]);
     sota::Mmd<TreeGame> mmd(g, c);
     const long long total = stoll(o["--episodes-total"]);
     FILE* log = fopen((out + "/log.csv").c_str(), "w");

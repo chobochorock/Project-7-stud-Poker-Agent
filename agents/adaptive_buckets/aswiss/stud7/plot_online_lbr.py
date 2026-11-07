@@ -10,8 +10,12 @@ the window spans are alike; rows are heavy-tailed (single pairs reach hundreds o
 --baseline NAME adds the paired difference to that run at the roots both evaluated (same seed = same deals there).
 Values are a lower bound of exploitability-like quantities only in expectation, and weaker than the offline
 64-particle evaluation when fewer particles are used (see the particles column); compare runs at equal particles.
+--clock cpu: the time panel uses training CPU seconds (train_clock.py; the equal-CPU-time comparison), interpolated in
+roots from curve.csv; runs without CPU columns keep wall seconds and are marked "(wall)".
 """
-import argparse, csv, math, os
+import argparse, csv, math, os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from train_clock import cpu_clock
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -24,6 +28,7 @@ ap.add_argument("--window", type=int, default=100)
 ap.add_argument("--level", type=float, default=0.90)
 ap.add_argument("--baseline", default="")
 ap.add_argument("--note", default="")
+ap.add_argument("--clock", choices=["wall", "cpu"], default="wall")
 a = ap.parse_args()
 
 
@@ -54,11 +59,24 @@ def erfinv(y):
 def load(name):
     path = os.path.join(a.runs_dir, name, "online_lbr.csv")
     if not os.path.exists(path): return None
+    d = os.path.join(a.runs_dir, name)
+    to_cpu = None
+    if a.clock == "cpu" and os.path.exists(os.path.join(d, "curve.csv")):
+        cv = list(csv.DictReader(open(os.path.join(d, "curve.csv"))))
+        c = cpu_clock(d, cv, list(csv.DictReader(open(os.path.join(d, "snapshots.csv")))))
+        if c is not None:
+            rr = np.array([0.0] + [float(r["roots"]) for r in cv])
+            to_cpu = lambda x: float(np.interp(x, rr, c[0]))
+    if a.clock == "cpu" and to_cpu is None: wall_only.add(name)
     out = {}
     for r in csv.DictReader(open(path)):
-        out.setdefault(r["policy"], []).append((int(r["roots"]), float(r["seconds"]), float(r["lbr_pair"]), int(r["particles"]),
+        t = to_cpu(float(r["roots"])) if to_cpu else float(r["seconds"])
+        out.setdefault(r["policy"], []).append((int(r["roots"]), t, float(r["lbr_pair"]), int(r["particles"]),
                                                 float(r["online_seconds"])))
     return out
+
+
+wall_only = set()
 
 
 def moving(rows, w):
@@ -112,11 +130,11 @@ for i, spec in enumerate(a.runs):
             else:
                 summary.append(f"  minus {a.baseline}: fewer than {a.window} common roots (different cadence or seed), not drawn")
 titles = (f"Online LBR, mean of the last {a.window} deals ({a.level:.0%} interval) vs training roots",
-          f"... vs training wall-clock seconds (online LBR time excluded)")
+          f"... vs training {'CPU' if a.clock == 'cpu' else 'wall-clock'} seconds (online LBR time excluded)")
 for j in range(2):
     ax[j].set_xscale("log"); ax[j].axhline(0, color="black", lw=0.6); ax[j].grid(True, which="both", alpha=0.3)
     ax[j].set_title(titles[j], fontsize=10); ax[j].set_ylabel("LBR winnings, ante/hand (pair mean)")
-ax[0].set_xlabel("training roots (each arm's own unit: hands for ReBeL)"); ax[1].set_xlabel("training seconds")
+ax[0].set_xlabel("training roots (each arm's own unit: hands for ReBeL)"); ax[1].set_xlabel(f"training {'CPU' if a.clock == 'cpu' else 'wall-clock'} seconds" + (f" (wall for: {', '.join(sorted(wall_only))})" if wall_only else ""))
 if a.baseline:
     ax[2].set_xscale("log"); ax[2].axhline(0, color="black", lw=0.6); ax[2].grid(True, which="both", alpha=0.3)
     ax[2].set_title(f"Paired difference to {a.baseline} (same deals at the same roots)", fontsize=10)

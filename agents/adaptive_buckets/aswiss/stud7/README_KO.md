@@ -940,6 +940,20 @@ python plot_gate.py runs3 runs_100m results_stud_gate_5m_seed1 --ungated "ASWISS
   - 64파티클 대비 256은 +0.57 ± 1.64, 512는 +0.29 ± 1.86(95%)으로 유의하지 않다.
 - mini-stud에서는 16파티클이 64파티클보다 일찍 바닥에 닿았다(`../README_KO.md`). 그래서 온라인은 64, 분할 직전은 256을 쓴다.
 
+## 같은 CPU 시간 비교 (`--budget-cpu-seconds`, 2026-11-06 추가)
+
+ASWISS·k-means는 1억 roots로 돌리고, 신경망 비교군(MMD, ESCHER, ReBeL)은 ASWISS가 쓴 **학습 CPU 시간**을 예산으로 돌린다. root, 반복, 판의 뜻이 알고리즘마다 달라서 신경망 비교군은 시간 축으로만 비교한다. ASWISS와 k-means는 roots 축과 시간 축 둘 다로 비교한다.
+
+- **학습 CPU 시간:** 프로세스 CPU 시간에서 온라인 LBR 평가(ESCHER는 감시용 평균망 학습 포함)의 CPU 시간을 뺀 것이다. 재개를 넘어 누적한다. 학습기가 한 스레드라 다른 프로세스를 기다린 시간은 들어가지 않는다. 클럭 저하나 느린 코어 배치는 잡지 못하므로 동시 실행 수는 비슷하게 맞춘다.
+  - 신경망·ReBeL: `curve.csv`와 `snapshots.csv`의 `train_cpu_seconds`.
+  - 표 기반: 같은 열이 없다(돌고 있는 실행과 형식을 맞추려고 바꾸지 않았다). `plot_stud_time.py --clock cpu`가 `curve.csv`의 `cpu_seconds`(재개마다 0부터)와 `online_lbr.csv`의 `online_seconds`로 다시 만든다. 재개 직후 행은 학습 벽시계 초를 더한다(멈추기 직전 구간의 CPU 시간은 어느 행에도 없기 때문). 70k roots 시험에서 벽시계 학습 초와 1% 안에서 맞았다.
+- **예산 정지:** `--budget-cpu-seconds S`면 학습 CPU 시간이 S에 닿는 첫 갱신·반복·판 뒤에 스냅숏(`snapshot_b<roots>.net`, `snapshots.csv`의 kind `budget`), `curve.csv` 행, checkpoint를 남기고 멈춘다.
+  - S는 실행 설정이 아니다. 같은 S로 다시 실행하면 "이미 닿았다"고 알리고 끝난다. `--budget-cpu-seconds 0`(또는 더 큰 S)으로 다시 실행하면 `--roots`까지 이어서 학습한다.
+  - 이어서 학습한 결과는 멈추지 않은 실행과 같다. MMD·ESCHER·ReBeL 모두 확인했다: epoch 스냅숏 바이트 동일, `log.csv`·`online_lbr.csv`(시간 열 제외) 동일, `curve.csv`는 예산 행 하나만 더 있다. ESCHER의 평균망 학습은 자기 난수를 쓰므로 예산 스냅숏이 학습을 바꾸지 않는다.
+- **러너:** `-BudgetCpuSeconds S`(sh: `BUDGET_CPU_SECONDS=S`)는 mmd·escher·rebel 비교군에만 넘긴다. ReBeL의 판 수 상한은 20만 판으로 올렸다(예산이 먼저 닿도록).
+- **실행 파일 이름:** `-ExeName aswiss_stud_sota.exe`(sh: `EXE=...`)로 다른 이름의 실행 파일을 빌드해 쓴다. 이미 돌고 있는 비교군이 `aswiss_stud.exe`를 잠그고 있어도 새 비교군을 새 코드로 시작할 수 있다.
+- **표 기반 호환성:** 이번 변경 뒤의 실행 파일로, 이전 실행 파일이 쓴 `hist_bbf` checkpoint(31k에서 STOP)를 이어 70k까지 돌렸다. 이전 실행 파일로 끊지 않고 돌린 것과 스냅숏 바이트 동일, `curve.csv`·`regret.csv`·`splits.csv`·`online_lbr.csv`(시간·메모리 열 제외) 동일이었다. `log.csv`는 시간, 메모리, 캐시 적중 열만 달랐다(재개하면 원래 달라지는 열).
+
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 
 **조건**

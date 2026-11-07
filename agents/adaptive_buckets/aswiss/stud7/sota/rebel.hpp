@@ -219,27 +219,50 @@ struct Config {
     int hidden = 128;
     float lr = 3e-4f;
     int batch = 32, train_steps = 4, capacity = 4096;
-    double explore = 0.1, floor = 1e-6;
+    // exploration (paper p.15, 18): with probability explore one seat per hand (explore_seats 1, chosen at random) takes a
+    // uniform random action at its decisions; explore_seats 2: both seats
+    double explore = 0.25, floor = 1e-6;
+    int explore_seats = 1;
+    // random_iter: at 5th / 6th street the hand is played, and the beliefs passed on, with the policy of one CFR iteration
+    // t drawn with probability proportional to its averaging weight t^2 (ReBeL's Algorithm 1 and Theorem 3; the
+    // average strategy is the paper's "unsafe search"); 7th street (no leaf values) plays its average strategy
+    bool random_iter = true;
+    std::string loss = "huber";  // value-network loss: huber (paper p.8, pointwise, delta 1) | mse
     uint64_t seed = 1;
 };
+
+// t in 1..iters with probability t^2 / sum (the DCFR averaging weight of solve_pairs)
+inline int sample_iteration(int iters, std::mt19937_64& r) {
+    double z = 0;
+    for (int t = 1; t <= iters; ++t) z += static_cast<double>(t) * t;
+    double u = std::uniform_real_distribution<double>(0, z)(r);
+    for (int t = 1; t <= iters; ++t) { u -= static_cast<double>(t) * t; if (u <= 0) return t; }
+    return iters;
+}
 
 // ---------------------------------------------------------------- 5th / 6th street solver (exact pair types)
 struct PairSolve {
     Tree tree; Types T;
     std::vector<float> avg[2];     // rows x n, normalised average strategy
+    std::vector<float> iter[2];    // rows x n, the policy of iteration `sampled` (when sampled > 0)
     std::vector<float> value[2];   // conditional root value of each type (ante units)
+    int sampled = 0;
     double seconds = 0; long long net_calls = 0;
-    // probability of action a at a decision node for one type
-    double prob(int node, int type, int a) const {
+    // probability of action a at a decision node for one type: average strategy
+    double prob(int node, int type, int a) const { return at(avg, node, type, a); }
+    // the policy the hand is played with: the sampled iteration's when there is one, else the average
+    double play_prob(int node, int type, int a) const { return at(sampled > 0 ? iter : avg, node, type, a); }
+    double at(const std::vector<float> (&P)[2], int node, int type, int a) const {
         const Node& nd = tree.nodes[node];
         int k = 0;
         for (int b = 0; b < a; ++b) k += nd.mask >> b & 1;
-        return avg[nd.actor][static_cast<size_t>(nd.row + k) * T.n + type];
+        return P[nd.actor][static_cast<size_t>(nd.row + k) * T.n + type];
     }
 };
 
 // r[seat]: root reach of each pair (any scale; blocked pairs ignored). net: value network of this street's leaves.
-inline PairSolve solve_pairs(const State& root, const std::vector<double> r[2], const Mlp& net, int iters) {
+// sample_iter > 0: also keep the current strategy of that iteration (PairSolve::iter, play_prob).
+inline PairSolve solve_pairs(const State& root, const std::vector<double> r[2], const Mlp& net, int iters, int sample_iter = 0) {
     const auto t0 = std::chrono::steady_clock::now();
     PairSolve S;
     S.tree.build(root);
@@ -276,6 +299,7 @@ inline PairSolve solve_pairs(const State& root, const std::vector<double> r[2], 
                 for (int j = 0; j < k; ++j) Cr[static_cast<size_t>(j) * n + t] = z > 0 ? std::max(0.0f, Rr[static_cast<size_t>(j) * n + t]) / z : 1.0f / k;
             }
         }
+        if (it == sample_iter) { S.iter[0] = cur[0]; S.iter[1] = cur[1]; S.sampled = it; }
         // reach (preorder)
         for (int v = 0; v < N; ++v) {
             const Node& nd = G.nodes[v];
@@ -731,6 +755,7 @@ struct Trainer {
     long long episodes = 0, examples6 = 0, examples7 = 0, steps = 0;
     double loss6 = 0, loss7 = 0, solve_s[3] = {0, 0, 0}, train_s = 0, gap7 = 0;
     long long solves[3] = {0, 0, 0};
+    int explorer = -1;  // the exploring seat of the current hand (-1: both)
 
     explicit Trainer(const Config& c) : cfg(c), rng(c.seed) {
         v6 = Mlp(IN, c.hidden, c.hidden, OUT, c.seed * 11 + 1);
@@ -775,6 +800,7 @@ struct Trainer {
         std::vector<double> r[2] = {h4_range(s, 0), h4_range(s, 1)};
         normalise(r[0]); normalise(r[1]);
         Sparse pending_x; bool pending = false;
+        explorer = cfg.explore_seats == 2 ? -1 : std::uniform_int_distribution<int>(0, 1)(rng);
         for (int street = 5; street <= 7; ++street) {
             const auto& P = PT();
             std::array<int, 2> world = sample_world(r);
@@ -782,7 +808,8 @@ struct Trainer {
             State leaf;
             const auto ts = std::chrono::steady_clock::now();
             if (street < 7) {
-                const PairSolve S = solve_pairs(s, r, street == 5 ? v6 : v7, cfg.iters56);
+                const int tstar = cfg.random_iter ? sample_iteration(cfg.iters56, rng) : 0;
+                const PairSolve S = solve_pairs(s, r, street == 5 ? v6 : v7, cfg.iters56, tstar);
                 solve_s[street - 5] += std::chrono::duration<double>(std::chrono::steady_clock::now() - ts).count(); ++solves[street - 5];
                 if (pending) {  // the previous street's leaf PBS -> this street's root values
                     Example e; e.x = pending_x;
@@ -793,12 +820,12 @@ struct Trainer {
                 }
                 leaf_node = play_street(S.tree, [&](int v, int a) {
                     const int t = S.T.of_pair[world[S.tree.nodes[v].actor]];
-                    return S.prob(v, t, a);
+                    return S.play_prob(v, t, a);
                 }, [&](int v, int a, int seat) {
                     for (int p = 0; p < NP; ++p) {
                         if (r[seat][p] <= 0) continue;
                         const int t = S.T.of_pair[p];
-                        r[seat][p] *= std::max(cfg.floor, t >= 0 ? S.prob(v, t, a) : 0.0);
+                        r[seat][p] *= std::max(cfg.floor, t >= 0 ? S.play_prob(v, t, a) : 0.0);
                     }
                 });
                 if (leaf_node < 0) return;  // fold
@@ -849,7 +876,7 @@ struct Trainer {
             const Node& nd = G.nodes[v];
             std::array<double, kActionCount> p{};
             for (int a = 0; a < kActionCount; ++a) if (nd.mask >> a & 1) p[a] = prob(v, a);
-            const int a = pick_action(nd.mask, cfg.explore, p);
+            const int a = pick_action(nd.mask, explorer < 0 || nd.actor == explorer ? cfg.explore : 0.0, p);
             update(v, a, nd.actor);
             v = nd.child[a];
         }
@@ -872,7 +899,12 @@ struct Trainer {
             Mlp::Cache c; net.forward(e.x, c);
             std::fill(dy.begin(), dy.end(), 0.0f);
             const float scale = 1.0f / std::max<size_t>(1, e.y.size());
-            for (const auto& [o, t] : e.y) { const float d = c.y[o] - t; dy[o] = 2.0f * d * scale; loss += d * d; ++cnt; }
+            for (const auto& [o, t] : e.y) {
+                const float d = c.y[o] - t;
+                // Huber (delta 1): gradient d inside [-1, 1], sign(d) outside; the logged loss stays the squared error
+                dy[o] = (cfg.loss == "huber" ? std::max(-1.0f, std::min(1.0f, d)) : 2.0f * d) * scale;
+                loss += d * d; ++cnt;
+            }
             net.backward(e.x, c, dy.data(), g);
         }
         opt.step(net, g, 1.0f / cfg.batch);

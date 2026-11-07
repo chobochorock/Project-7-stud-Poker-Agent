@@ -1797,7 +1797,7 @@ int train(int argc, char** argv) {
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--log-regret", "0"}, {"--log-splits", "0"}});
+                                {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -1913,8 +1913,9 @@ int train(int argc, char** argv) {
         std::ofstream(log_path) << "epoch,roots,contexts,buckets_after,buckets5,buckets6,buckets7,splits,atoms,L_per_root,"
                                    "C_per_root,H_per_root,seconds,power_cache_hits,power_cache_misses,bucket_records,"
                                    "bucket_mb,atom_window_mb,partition_mb,peak_rss_mb,h4_buckets_after,h4_splits\n";
-        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds\n";
-        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader << "\n";
+        std::ofstream(index_path) << "file,roots,kind,epoch,buckets,seconds,train_cpu_seconds\n";
+        std::ofstream(curve_path) << "roots,seconds,roots_in_chunk,train_gap_mean,train_gap_se,buckets," << kResourceHeader
+                                  << ",train_cpu_seconds\n";
         if (log_regret) std::ofstream(regret_path) << "roots,seconds,epoch,kind,window_roots,buckets,bucket_records,regret_sum_per_root\n";
         if (log_splits) std::ofstream(splits_path) << "epoch,roots,kind,street,legal_mask,parent,child,label_window,label_average,"
                                                      "label_bits,keys,visits,regret,regret_sq,z\n";
@@ -1922,6 +1923,35 @@ int train(int argc, char** argv) {
         if (avg_fill) std::ofstream(fill_path) << "epoch,roots,buckets,traverser_nodes,filled_nodes\n";
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
+    }
+    // Training CPU time (--budget-cpu-seconds, column train_cpu_seconds): process CPU time since this process started
+    // training, minus the online LBR's time, plus that of earlier processes of the run (OUT/train_cpu.txt, written
+    // after every checkpoint; not part of the checkpoint, so runs started by older executables resume unchanged: they
+    // start from their training wall seconds and keep their CSV columns). Reading clocks does not change the training.
+    // --budget-cpu-seconds S (0 = none; not a setting of the run): when it reaches S (checked every 1,000 roots), a
+    // budget snapshot snapshot_b<roots>.bin (kind "budget"), a checkpoint, and a stop; rerun with 0 to continue to --roots.
+    const double budget = std::stod(o["--budget-cpu-seconds"]);
+    if (budget < 0) throw std::runtime_error("--budget-cpu-seconds must be >= 0");
+    const std::string cpu_path = out + "/train_cpu.txt";
+    double cpu_base = 0;
+    if (resumed) {
+        std::ifstream in(cpu_path);
+        if (!(in >> cpu_base)) {
+            cpu_base = s.seconds;
+            std::cerr << "no " << cpu_path << ": training CPU time starts from the training wall seconds " << s.seconds << "\n";
+        }
+    }
+    auto header_has = [](const std::string& path, const std::string& col) {
+        std::ifstream in(path); std::string h; std::getline(in, h);
+        return h.find(col) != std::string::npos;
+    };
+    const bool cpu_curve = header_has(curve_path, "train_cpu_seconds"), cpu_index = header_has(index_path, "train_cpu_seconds");
+    const double cpu_start = cpu_seconds(), online_cpu0 = online.seconds;
+    auto train_cpu = [&] { return cpu_base + (cpu_seconds() - cpu_start) - (online.seconds - online_cpu0); };
+    if (budget > 0 && cpu_base >= budget) {
+        std::cerr << "CPU budget " << budget << " s already reached (training CPU " << cpu_base << " s at root " << s.t
+                  << "); rerun with --budget-cpu-seconds 0 or a larger budget to continue towards --roots\n";
+        return 0;
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     std::ofstream regret, splits_log;
@@ -1952,6 +1982,8 @@ int train(int argc, char** argv) {
         if (log_regret) { regret.flush(); regret_bytes = file_size_or_zero(regret_path); }
         if (log_splits) splits_log.flush();
         write_checkpoint(out, config, s, model, &online, regret_slot);
+        { std::ofstream(cpu_path + ".tmp") << std::setprecision(17) << train_cpu() << ' ' << s.t << '\n'; }
+        std::filesystem::rename(cpu_path + ".tmp", cpu_path);
     };
     const bool track = partition == Partition::Aswiss || partition == Partition::History;
     uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
@@ -1980,7 +2012,9 @@ int train(int argc, char** argv) {
             const double n = s.curve_roots, mean = s.curve_sum / n;
             const double se = n > 1 ? std::sqrt(std::max(0.0, (s.curve_sq - n * mean * mean) / (n - 1) / n)) : 0.0;
             curve << s.t << ',' << elapsed() << ',' << s.curve_roots << ',' << mean << ',' << se << ',' << live_total() << ','
-                  << memory_columns() << '\n';
+                  << memory_columns();
+            if (cpu_curve) curve << ',' << train_cpu();
+            curve << '\n';
             s.curve_sum = s.curve_sq = 0; s.curve_roots = 0;
             if (log_regret) regret_row("running");
         }
@@ -1988,12 +2022,16 @@ int train(int argc, char** argv) {
         if (snapshot_every && s.t % snapshot_every == 0 && !epoch_done) {
             const std::string file = "snapshot_r" + std::to_string(s.t) + ".bin";
             model.save(out + "/" + file);
-            index << file << ',' << s.t << ",periodic," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
+            index << file << ',' << s.t << ",periodic," << s.k << ',' << live_total() << ',' << elapsed();
+            if (cpu_index) index << ',' << train_cpu();
+            index << '\n';
         }
         if (epoch_done) {
             const std::string file = "snapshot_" + std::to_string(s.k) + ".bin";
             model.save(out + "/" + file);
-            index << file << ',' << s.t << ",epoch," << s.k << ',' << live_total() << ',' << elapsed() << '\n';
+            index << file << ',' << s.t << ",epoch," << s.k << ',' << live_total() << ',' << elapsed();
+            if (cpu_index) index << ',' << train_cpu();
+            index << '\n';
             if (log_regret) regret_row("epoch");  // the epoch's whole window, before its split
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
@@ -2165,6 +2203,17 @@ int train(int argc, char** argv) {
         }
         if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();
         if (s.t % 1000 == 0 && std::filesystem::exists(stop_file)) g_stop = 1;
+        if (budget > 0 && s.t % 1000 == 0 && s.t < T && train_cpu() >= budget) {  // CPU budget: snapshot, checkpoint, stop
+            const std::string file = "snapshot_b" + std::to_string(s.t) + ".bin";
+            model.save(out + "/" + file);
+            index << file << ',' << s.t << ",budget," << s.k << ',' << live_total() << ',' << elapsed();
+            if (cpu_index) index << ',' << train_cpu();
+            index << '\n';
+            checkpoint();
+            std::cerr << "CPU budget " << budget << " s reached at root " << s.t << " (training CPU " << train_cpu() << " s); snapshot "
+                      << file << " and checkpoint saved. Rerun with --budget-cpu-seconds 0 (or larger) to continue\n";
+            return 0;
+        }
         if (g_stop) {
             checkpoint();
             std::cerr << "stopped at root " << s.t << "; checkpoint saved, rerun the same command to resume\n";

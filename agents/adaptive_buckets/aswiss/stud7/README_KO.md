@@ -946,13 +946,31 @@ ASWISS·k-means는 1억 roots로 돌리고, 신경망 비교군(MMD, ESCHER, ReB
 
 - **학습 CPU 시간:** 프로세스 CPU 시간에서 온라인 LBR 평가(ESCHER는 감시용 평균망 학습 포함)의 CPU 시간을 뺀 것이다. 재개를 넘어 누적한다. 학습기가 한 스레드라 다른 프로세스를 기다린 시간은 들어가지 않는다. 클럭 저하나 느린 코어 배치는 잡지 못하므로 동시 실행 수는 비슷하게 맞춘다.
   - 신경망·ReBeL: `curve.csv`와 `snapshots.csv`의 `train_cpu_seconds`.
-  - 표 기반: 같은 열이 없다(돌고 있는 실행과 형식을 맞추려고 바꾸지 않았다). `plot_stud_time.py --clock cpu`가 `curve.csv`의 `cpu_seconds`(재개마다 0부터)와 `online_lbr.csv`의 `online_seconds`로 다시 만든다. 재개 직후 행은 학습 벽시계 초를 더한다(멈추기 직전 구간의 CPU 시간은 어느 행에도 없기 때문). 70k roots 시험에서 벽시계 학습 초와 1% 안에서 맞았다.
+  - 표 기반(2026-11-07부터): 새로 시작한 실행은 같은 열을 쓴다. 누적값은 checkpoint와 함께 `OUT/train_cpu.txt`에 남긴다(checkpoint 형식은 그대로라 이전 실행 파일로 시작한 실행도 이어서 돌릴 수 있고, 그때는 열을 더하지 않는다).
+  - 그 열이 없는 표 기반 실행: `train_clock.py`(`plot_stud_time.py --clock cpu`)가 `curve.csv`의 `cpu_seconds`(재개마다 0부터)와 `online_lbr.csv`의 `online_seconds`로 다시 만든다. 재개 직후 행은 학습 벽시계 초를 더한다(멈추기 직전 구간의 CPU 시간은 어느 행에도 없기 때문). 70k roots 시험에서 벽시계 학습 초와 1% 안에서 맞았다.
 - **예산 정지:** `--budget-cpu-seconds S`면 학습 CPU 시간이 S에 닿는 첫 갱신·반복·판 뒤에 스냅숏(`snapshot_b<roots>.net`, `snapshots.csv`의 kind `budget`), `curve.csv` 행, checkpoint를 남기고 멈춘다.
   - S는 실행 설정이 아니다. 같은 S로 다시 실행하면 "이미 닿았다"고 알리고 끝난다. `--budget-cpu-seconds 0`(또는 더 큰 S)으로 다시 실행하면 `--roots`까지 이어서 학습한다.
   - 이어서 학습한 결과는 멈추지 않은 실행과 같다. MMD·ESCHER·ReBeL 모두 확인했다: epoch 스냅숏 바이트 동일, `log.csv`·`online_lbr.csv`(시간 열 제외) 동일, `curve.csv`는 예산 행 하나만 더 있다. ESCHER의 평균망 학습은 자기 난수를 쓰므로 예산 스냅숏이 학습을 바꾸지 않는다.
-- **러너:** `-BudgetCpuSeconds S`(sh: `BUDGET_CPU_SECONDS=S`)는 mmd·escher·rebel 비교군에만 넘긴다. ReBeL의 판 수 상한은 20만 판으로 올렸다(예산이 먼저 닿도록).
+- **표 기반도 같다(2026-11-07):** `--budget-cpu-seconds`가 1,000 roots마다 확인해 `snapshot_b<roots>.bin`과 checkpoint를 남기고 멈춘다. 확인(70k roots `hist_bbf`): 새 실행 파일이 이전 기준과 스냅숏 바이트 동일, 20초 예산(36k roots)에서 멈췄다 이은 실행이 끊지 않은 실행과 스냅숏·`regret.csv`·`splits.csv`·`online_lbr.csv`·`curve.csv`(시간 열 제외) 동일, 이전 실행 파일의 checkpoint를 새 실행 파일로 이어도 동일.
+- **러너:** `-BudgetCpuSeconds S`(sh: `BUDGET_CPU_SECONDS=S`)는 `-Arms`의 모든 비교군에 넘긴다. ReBeL의 판 수 상한은 20만 판으로 올렸다(예산이 먼저 닿도록).
+- **`-Action pack`:** 묶음 이름을 출력 폴더 이름으로 짓는다(`-Out ...\runs_fair` → `results_data\runs_fair_s1_summaries.tar.gz`). 이전에는 어느 폴더든 `runs_100m_s1_summaries.tar.gz`에 덮어썼다. `data\`는 git이 무시하므로, 결과를 저장소에 올리려면 이 묶음 파일을 `git add`한다.
 - **실행 파일 이름:** `-ExeName aswiss_stud_sota.exe`(sh: `EXE=...`)로 다른 이름의 실행 파일을 빌드해 쓴다. 이미 돌고 있는 비교군이 `aswiss_stud.exe`를 잠그고 있어도 새 비교군을 새 코드로 시작할 수 있다.
 - **표 기반 호환성:** 이번 변경 뒤의 실행 파일로, 이전 실행 파일이 쓴 `hist_bbf` checkpoint(31k에서 STOP)를 이어 70k까지 돌렸다. 이전 실행 파일로 끊지 않고 돌린 것과 스냅숏 바이트 동일, `curve.csv`·`regret.csv`·`splits.csv`·`online_lbr.csv`(시간·메모리 열 제외) 동일이었다. `log.csv`는 시간, 메모리, 캐시 적중 열만 달랐다(재개하면 원래 달라지는 열).
+
+## 같은 조건의 SOTA 비교 실행 (2026-11-07 계획)
+
+| 조건 | 값 |
+|---|---|
+| 비교군 | `hist_bbf`(ASWISS), `k256`(k-means 256), `mmd`, `escher`, `rebel`. 모두 원문 설정(신경망은 sota README의 "원문·공식 코드 대조") |
+| 예산 | 비교군마다 **학습 CPU 86,400초(24시간)**, `-BudgetCpuSeconds 86400`. roots 상한은 예산이 먼저 닿도록 크게(`-Roots 1000000000`, ReBeL 20만 판) |
+| 동시 실행 | 다섯 비교군을 한 번에, 같은 노트북에서(물리 P코어 5개 이상). 학습 중 평가는 하지 않거나 `-Workers 1` |
+| 기록 | 온라인 LBR 1,000 roots마다(ReBeL 10판마다) 64파티클, `-LogRegret -LogRegretKmeans -LogSplits`, 메모리·CPU 시간·시각 |
+| 평가 | 평균 정책만(`-AverageOnly`; MMD·ReBeL은 하나뿐인 정책). epoch 스냅숏 64파티클 2,000 pair, 분할 직전 256파티클, 예산 스냅숏 20,000 pair |
+| seed | 1부터. 논문에는 seed 3개 이상(seed마다 하루 남짓) |
+
+- 표 기반 둘은 같은 학습 roots 축으로도 비교한다. 신경망 셋은 CPU 시간 축으로만 비교한다.
+- ASWISS는 epoch가 두 배씩 길어져, 24시간 안의 마지막 분할은 81.91M roots다. 그 뒤는 다음 epoch(163.83M에서 끝남) 중간에서 예산 스냅숏을 찍는다. 같은 seed·설정이면 81.91M까지는 이전 1억 roots 실행과 학습이 같아야 한다(같은 epoch 스냅숏의 해시로 확인할 수 있다).
+- 같은 roots까지 더 학습하려면 같은 명령에서 `-BudgetCpuSeconds`만 빼고 다시 실행한다(표 기반은 roots 상한을 원하는 값으로).
 
 ## 100M 결과 (노트북 실행, seed 1, 완료 2026-10-29)
 

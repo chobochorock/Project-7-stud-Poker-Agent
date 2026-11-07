@@ -108,6 +108,18 @@ def line(ax, x, y, colour, marker, ls, label=None, err=None):
                 capsize=1.5, elinewidth=0.6 * LW, capthick=0.6 * LW, label=label)
 
 
+def guard_log(axs):
+    """A log-y panel without positive data (e.g. the current-policy column after -AverageOnly evaluations, or an early
+    run whose values are all <= 0) cannot be drawn on a log axis: switch it to linear and say so in the panel."""
+    for ax in np.ravel(axs):
+        if ax.get_yscale() != "log": continue
+        ys = [y for ln in ax.lines for y in np.ravel(np.asarray(ln.get_ydata(), dtype=float)) if np.isfinite(y) and y > 0]
+        if not ys:
+            ax.set_yscale("linear")
+            ax.text(0.5, 0.5, "no positive values to draw on a log axis\n(no evaluations of this policy, or all <= 0)",
+                    transform=ax.transAxes, ha="center", va="center", fontsize=8, color=MUTED)
+
+
 HOLLOW = dict(marker="o", ms=4 + 3 * LW, mfc=SURFACE, mew=1.2 * LW, capsize=3, ls="none")
 fig, axes = plt.subplots(3, 3, figsize=(17, 14))
 for col, policy in enumerate(("average", "current")):
@@ -201,6 +213,7 @@ fig.text(0.01, 0.005, "\n".join(textwrap.fill(n, 200, subsequent_indent="  ") fo
 handles, labels = axes[0, 0].get_legend_handles_labels()
 handles.append(plt.Line2D([], [], color=MUTED, **{k: v for k, v in HOLLOW.items() if k != "capsize"})); labels.append("re-evaluated with more pairs")
 fig.legend(handles, labels, frameon=False, fontsize=9, loc="upper center", ncol=3)
+guard_log(axes)
 fig.tight_layout(rect=(0, 0.07, 1, 0.95)); fig.savefig(f"{OUT}_curves.png", dpi=140)
 
 fig, axes = plt.subplots(1, 2, figsize=(14, 5.6))
@@ -225,5 +238,6 @@ for ax, key, title, logy in ((axes[0], "lbr_ante", "Newest average policy: Polic
     for side in ("top", "right"): ax.spines[side].set_visible(False)
 axes[0].axhline(0, color=MUTED, lw=1)
 axes[0].legend(frameon=False, fontsize=8, loc="best")
+guard_log(axes)
 fig.tight_layout(); fig.savefig(f"{OUT}_frontier.png", dpi=140)
 print("saved")

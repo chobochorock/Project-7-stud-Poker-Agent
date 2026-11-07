@@ -108,6 +108,7 @@ plot)
         "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_presplit${PRESPLIT_PARTICLES}_time.png" --runs "${specs[@]}" --eval-file "$pre"
         "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_presplit${PRESPLIT_PARTICLES}_cputime.png" --runs "${specs[@]}" --eval-file "$pre" --clock cpu
     fi
+    "$PYTHON" "$HERE/plot_regret_memory.py" "$OUT" "$OUT/results${SUFFIX}_regret_memory.png" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX"
     ospecs=(); for a in $ARMS; do [ -f "$OUT/${NAME[$a]}$SUFFIX/online_lbr.csv" ] && ospecs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     if [ ${#ospecs[@]} -gt 0 ]; then  # online LBR: moving average of the last 100 and of the last 2000 deals
         obase=(); [ -f "$OUT/${NAME[$base]}$SUFFIX/online_lbr.csv" ] && obase=(--baseline "${NAME[$base]}$SUFFIX")

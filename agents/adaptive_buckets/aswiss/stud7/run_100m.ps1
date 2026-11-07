@@ -187,6 +187,8 @@ elseif ($Action -eq "plot") {
         & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_time.png") --runs @specs --eval-file $pre
         & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_presplit${PresplitParticles}_cputime.png") --runs @specs --eval-file $pre --clock cpu
     }
+    # bucket regret (regret.csv) and memory (curve.csv)
+    & $Python (Join-Path $Here "plot_regret_memory.py") $Out (Join-Path $Out "results${Suffix}_regret_memory.png") --runs @specs --baseline (RunName $base)
     # online LBR (runs trained with -OnlineLbrEvery): moving average of the last 100 and of the last 2000 deals
     $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
     if ($online.Count -gt 0) {

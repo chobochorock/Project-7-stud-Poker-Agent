@@ -41,7 +41,7 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [hist_bb]="--history-cards street --label avg --label-cap 2560000 --backward 1"
                   [hist_bbf]="--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain"
                   [mmd]="--algo mmd" [escher]="--algo escher" [escher_m1m]="--algo escher --escher-capacity 1000000"
-                  [rebel]="--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
+                  [rebel]="--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
                   [aswiss_wb]="ASWISS, window + method B labels" [k256]="k-means 256"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly"

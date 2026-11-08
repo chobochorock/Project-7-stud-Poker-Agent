@@ -76,7 +76,7 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     escher_m1m = @("net_escher_m1m", "net", 1024, "ESCHER, reservoirs of 1e6", "--algo escher --escher-capacity 1000000")
     # scaled-down ReBeL (sota/rebel.hpp): roots = self-play hands, each solving up to three street subgames (~1 s);
     # its own budget and cadences override the 100M ones (60k hands ~ the wall-clock of a 100M tabular arm)
-    rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 200000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
+    rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }

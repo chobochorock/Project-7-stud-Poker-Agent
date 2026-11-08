@@ -60,6 +60,9 @@ class PokerWebHandler(BaseHTTPRequestHandler):
                 state = controller.submit_action(data["player"], data["action"])
                 self._send_json(state)
                 return
+            if parsed.path == "/api/analyze":
+                self._send_json(controller.analyze_decision(data["player"]))
+                return
             if parsed.path == "/api/hand_range":
                 result = controller.calculate_hand_range(
                     data["player"],

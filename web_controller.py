@@ -10,6 +10,7 @@ from typing import Any, Sequence
 
 from agent import BasePokerAgent, PokerAgent
 from agent.HA1 import HA1PokerAgent
+from agent.aswiss_agent import ASWISSAgent
 from agent.cpp_mccfr_agent import CppMCCFRAgent, CppPBSSeventhAgent
 from agent.hand_range import estimate_uniform_hand_range
 from agent.heuristic_agent import HeuristicPokerAgent
@@ -26,6 +27,7 @@ PLAYER_TYPES = (
     "learning",
     "cpp-mccfr",
     "pbs-7th-resolver",
+    "aswiss",
     "empty",
 )
 STREETS = (("4th", True), ("5th", True), ("6th", True), ("7th_hidden", False))
@@ -81,6 +83,9 @@ class WebPokerController:
         self.replay_file: str | None = None
         self.episode_started_at: str | None = None
         self.episode_finished_at: str | None = None
+        self.analysis: list[dict[str, Any]] = []  # ASWISS's view of this round's decisions (strategy analysis)
+        self._analyst_agent: ASWISSAgent | None = None
+        self._analyst_error: str | None = None
 
     def start(
         self,
@@ -103,7 +108,7 @@ class WebPokerController:
         game_mode = game_mode.lower()
         if game_mode not in GAME_MODES:
             raise ValueError(f"Unknown game mode: {game_mode}")
-        cpp_types = {"cpp-mccfr", "pbs-7th-resolver"}
+        cpp_types = {"cpp-mccfr", "pbs-7th-resolver", "aswiss"}
         if cpp_types.intersection(normalized_types) and game_mode != "ev":
             raise ValueError("C++ MCCFR agents require EV mode.")
         if (
@@ -111,8 +116,13 @@ class WebPokerController:
             and sum(player_type != "empty" for player_type in normalized_types) != 2
         ):
             raise ValueError("PBS 7th Resolver currently requires heads-up play.")
+        if (
+            "aswiss" in normalized_types
+            and sum(player_type != "empty" for player_type in normalized_types) != 2
+        ):
+            raise ValueError("ASWISS plays heads-up only (the game it was trained on).")
 
-        for agent in self.agents.values():
+        for agent in [*self.agents.values(), self._analyst_agent]:
             close = getattr(agent, "close", None)
             if close is not None:
                 close()
@@ -202,6 +212,10 @@ class WebPokerController:
             raise ValueError(f"{action} is not valid now.")
 
         player = self._player_by_name(player_name)
+        analyst = self._analyst()
+        if analyst is not None:
+            record = analyst.analyze(game.get_ai_state(player, valid_actions), valid_actions)
+            self._record_analysis(player.name, "human", record, action)
         game.log_global_state(f"{player.name} chooses {action}")
         is_raise = game.apply_action(player, action)
         self._event(f"{player.name} chose {action}.")
@@ -209,6 +223,51 @@ class WebPokerController:
         self.waiting = None
         self._advance_until_wait()
         return self.public_state()
+
+    def analyze_decision(self, player_name: str) -> dict[str, Any]:
+        """ASWISS's policy at the decision `player_name` faces now (strategy analysis; nothing is recorded)."""
+        game = self._require_game()
+        if not self.waiting or self.waiting.get("type") != "bet" or self.waiting.get("player") != player_name:
+            raise ValueError("That player has no betting decision to analyze now.")
+        analyst = self._analyst()
+        if analyst is None:
+            raise ValueError("Strategy analysis needs a heads-up EV game (the game ASWISS was trained on).")
+        player = self._player_by_name(player_name)
+        valid_actions = self.waiting.get("valid_actions", [])
+        return analyst.analyze(game.get_ai_state(player, valid_actions), valid_actions)
+
+    def _visible_analysis(self) -> list[dict[str, Any]]:
+        """This round's analysis records. An agent's records depend on its hidden cards (its policy and the card
+        cluster in its key), so while a human is seated they are shown only after the round is over."""
+        humans = any(agent_type == "human" for agent_type in self.agent_types.values())
+        if not humans or self.phase in {"complete", "game_over"}:
+            return self.analysis
+        return [entry for entry in self.analysis if entry["by"] == "human"]
+
+    def _analysis_possible(self) -> bool:
+        return self.game is not None and self.game_mode == "ev" and len(self.game.players) == 2
+
+    def _analyst(self) -> ASWISSAgent | None:
+        """The seated ASWISS agent, or a separate one started on first use (None outside heads-up EV games or when
+        no ASWISS snapshot is available)."""
+        if not self._analysis_possible():
+            return None
+        for agent in self.agents.values():
+            if isinstance(agent, ASWISSAgent):
+                return agent
+        if self._analyst_agent is None and self._analyst_error is None:
+            try:
+                self._analyst_agent = ASWISSAgent("ASWISS_analyst")
+            except (OSError, RuntimeError) as error:
+                self._analyst_error = str(error)
+        return self._analyst_agent
+
+    def _record_analysis(self, player_name: str, by: str, record: dict[str, Any], action: str) -> None:
+        game = self._require_game()
+        entry = {"player": player_name, "by": by, "street": game.street, "action_taken": action, **record}
+        probabilities = record.get("probabilities") or {}
+        entry["probability_of_action_taken"] = probabilities.get(action)
+        self.analysis.append(entry)
 
     def calculate_hand_range(
         self,
@@ -305,6 +364,8 @@ class WebPokerController:
             "episode": self._episode_state(),
             "session": self._episode_state(),
             "replay_file": self.replay_file,
+            "analysis": self._visible_analysis(),
+            "analysis_available": self._analysis_possible(),
         }
 
     def _advance_until_wait(self) -> None:
@@ -339,6 +400,7 @@ class WebPokerController:
         self.betting = None
         self.result = None
         self.round_frames = []
+        self.analysis = []
 
         game.start_game()
         self.round_number += 1
@@ -486,6 +548,9 @@ class WebPokerController:
 
             state = game.get_ai_state(player, valid_actions)
             action = self.agents[player.name].choose_action(state, valid_actions)
+            explanation = getattr(self.agents[player.name], "last_explanation", None)
+            if isinstance(self.agents[player.name], ASWISSAgent) and explanation:
+                self._record_analysis(player.name, "aswiss", explanation, action)
             if action not in valid_actions:
                 action = (
                     "CHECK"
@@ -899,6 +964,8 @@ class WebPokerController:
             return CppMCCFRAgent(name)
         if agent_type == "pbs-7th-resolver":
             return CppPBSSeventhAgent(name)
+        if agent_type == "aswiss":
+            return ASWISSAgent(name)
         if agent_type == "empty":
             return None
         raise ValueError(f"Unknown player type: {agent_type}")

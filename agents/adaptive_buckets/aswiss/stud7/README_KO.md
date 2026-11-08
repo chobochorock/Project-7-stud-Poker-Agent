@@ -1045,6 +1045,63 @@ ASWISS·k-means는 1억 roots로 돌리고, 신경망 비교군(MMD, ESCHER, ReB
 - ReBeL은 재개 뒤 학습 CPU 0.33초/판으로 돌고 있다(다른 비교군이 끝나 부하가 줄었다). 남은 23,526초면 약 23만 판에 닿으므로, 20만 판 상한에 학습 CPU 약 75,500초에서 먼저 멈춘다.
 - 그래서 러너의 상한을 100만 판으로 올렸다. 판 수 상한은 체크포인트 설정에 들어가지 않아, 멈춘 뒤(또는 `-Action stop` 뒤) 같은 명령으로 이어 가면 86,400초까지 돈다.
 
+## 웹 서비스와 전략 분석 (2026-11-08)
+
+학습한 ASWISS 스냅숏을 웹 게임(`web_app.py`)의 플레이어로 쓰고, 결정마다 그 정책을 보여 준다.
+
+**구성**
+- **`aswiss_stud serve`:** 스냅숏을 올려 두고 한 줄 요청에 답한다.
+  - 요청 형식은 기존 `stud_mccfr --agent-stdio`와 같다(`DISCARD`, `ACT`, `QUIT`).
+  - 추가 1, 좌석 위치: 17번째 필드로 테이블 순서상 위치를 받는다. 공개 패 우선권이 같을 때의 순서를 웹 규칙(낮은 좌석 먼저)과 맞춘다.
+  - 추가 2, `EXPLAIN`: 행동별 확률(평균 정책), 뽑은 행동, 현재 정책, key, bucket과 조회 방식, bucket 계보(분할 부모 사슬)를 JSON 한 줄로 준다.
+  - 추가 3, `INFO`: 올린 스냅숏 정보를 준다.
+  - 히스토리 key는 평가 때처럼 5구 시작 상태에서 손을 다시 재생해 만든다. 재생한 상태(거리, 팟, 베팅, 차례)가 웹 상태와 다르면 답하지 않고 오류를 낸다.
+- **`aswiss_agent.py`** (`agent/aswiss_agent.py`는 연결):
+  - 헤즈업 EV 모드 전용이다(학습한 게임과 같다). 결정마다 `EXPLAIN`을 쓴다.
+  - C++이 상태를 재현하지 못하면 휴리스틱 에이전트가 대신 두고, 그 사실을 분석 기록에 남긴다.
+  - 경로는 환경 변수로 바꿀 수 있다: `ASWISS_EXE`, `ASWISS_SNAPSHOT`, `ASWISS_RUN_DIR`, `ASWISS_ATLAS`.
+  - 기본 스냅숏은 `data/runs_fair/history_bbf_street_s1/snapshots.csv`에서 roots가 가장 많은 것이다.
+- **웹 화면:**
+  - 플레이어 선택에 "ASWISS (7-stud)"가 생겼다.
+  - "Strategy Analysis" 영역의 "ASWISS 추천 보기"는 사람 차례의 결정에서 ASWISS 정책을 보여 준다. 사람이 둔 수는 ASWISS가 그 행동에 준 확률과 함께 기록된다.
+  - ASWISS 자신의 결정 분석에는 숨은 카드 정보(정책, 카드 군집)가 들어 있다. 그래서 사람이 앉아 있으면 그 판이 끝난 뒤에만 보인다.
+- **확인:**
+  - 시험용 스냅숏(31만 roots)으로 헤즈업 EV 300판씩 다섯 좌석 구성(ASWISS·사람·휴리스틱, 두 좌석 순서)을 돌렸다. 결정 약 4,500개에서 재생 불일치, 대체 행동, 스택 불일치가 모두 0개였다.
+  - `test_aswiss_agent.py`(exe와 스냅숏이 없으면 건너뜀)와 기존 `test_web_controller.py`가 통과한다.
+  - 학습·평가 코드는 그대로다. 같은 스냅숏의 `eval` 출력이 수정 전 바이너리와 시간 기록을 빼고 같다.
+- **메모리:** 서비스는 스냅숏만 올린다(라벨 계산용 통계 없음). 시험용 스냅숏 1 MB에 프로세스 7.5 MB였다. 대략 스냅숏 파일 크기의 3–4배로 보면 된다. 8.5 GB는 학습 중 epoch 끝의 순간 최대값이다.
+
+**노트북에서 쓰는 법**
+```powershell
+git pull origin claude/magical-einstein-6k0apw
+# 1. 웹용 exe만 빌드 (학습 중인 exe와 이름이 달라야 함)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action build -ExeName aswiss_web.exe
+# 2. (선택) 특정 스냅숏 고정. 없으면 runs_fair ASWISS의 가장 최근 스냅숏
+$env:ASWISS_SNAPSHOT = "agents\adaptive_buckets\aswiss\stud7\data\runs_fair\history_bbf_street_s1\snapshot_b128470000.bin"
+# 3. 웹 실행 후 브라우저에서 http://127.0.0.1:8765
+python web_app.py --port 8765
+```
+화면에서 Mode = ev, Ante = 1000, Player 1 = human, Player 2 = ASWISS (7-stud), 나머지 = empty로 두고 Start를 누른다.
+
+**ASWISS를 계속 학습시키기** (`runs_fair`의 `hist_bbf`, 예산 없이 이어 감)
+```powershell
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms hist_bbf -Roots 1000000000 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -LogRegret -LogSplits -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+```
+- 원래 명령에서 `-BudgetCpuSeconds`만 뺐다. 체크포인트(128.47M roots)에서 이어진다.
+- 다음 epoch 스냅숏은 아래 시점에 생긴다.
+
+  | 스냅숏 | 추가 학습 CPU | 최대 메모리 |
+  |---|---|---|
+  | 163.83M roots | 약 6.6시간 | 약 10 GB |
+  | 327.67M roots | 거기서 약 1.3일 더 | 약 12 GB |
+
+  최대 메모리는 epoch 끝의 순간값을 추정한 것이다. RAM이 모자라면 Windows 페이지 파일로도 돌지만 라벨 계산이 크게 느려진다.
+- 새 스냅숏이 생기면 `-Action eval -AverageOnly -Arms hist_bbf`와 `-Action final -AverageOnly -Arms hist_bbf`로 LBR을 재서 가장 낮은 것을 웹에 고정한다(`ASWISS_SNAPSHOT`).
+
+**아직 없는 것**
+- 분할 이유(라벨과 z 값)를 bucket 계보에 붙이는 것. 학습의 `splits.csv`(`-LogSplits`)를 읽어야 한다.
+- bucket 탐색기와 손 전체 설명. 계획은 `../INTERPRETABILITY_PLAN_KO.md`에 있다.
+
 ## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, ReBeL 진행 중, 2026-11-08)
 
 **조건**

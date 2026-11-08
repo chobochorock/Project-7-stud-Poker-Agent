@@ -24,6 +24,10 @@ const rangeSummary = document.querySelector("#rangeSummary");
 const rangeWorkspace = document.querySelector("#rangeWorkspace");
 const rangeGrid = document.querySelector("#rangeGrid");
 const rangeDetail = document.querySelector("#rangeDetail");
+const analyzeButton = document.querySelector("#analyzeDecision");
+const analysisStatus = document.querySelector("#analysisStatus");
+const analysisCurrent = document.querySelector("#analysisCurrent");
+const analysisList = document.querySelector("#analysisList");
 
 const RANGE_RANKS = ["A", "K", "Q", "J", "10", "9", "8", "7", "6", "5", "4", "3", "2"];
 const RANGE_SUITS = ["s", "h", "d", "c"];
@@ -96,6 +100,7 @@ rangeObserver.addEventListener("change", () => {
 });
 
 calculateRangeButton.addEventListener("click", loadHandRange);
+analyzeButton.addEventListener("click", analyzeCurrentDecision);
 
 async function postJson(url, payload) {
   const response = await fetch(url, {
@@ -135,7 +140,125 @@ function render(state) {
   renderActionPanel(state);
   renderLogs(state);
   renderRangeControls(state);
+  renderAnalysis(state);
   scheduleAutoNextRound(state);
+}
+
+// ---- ASWISS strategy analysis -----------------------------------------------------------------------------------
+let analysisDecisionKey = null;
+
+function humanDecisionKey(state) {
+  const waiting = state?.waiting;
+  if (!waiting || waiting.type !== "bet") return null;
+  return `${state.round_number}:${state.street}:${(state.betting_history || []).length}:${waiting.player}`;
+}
+
+function renderAnalysis(state) {
+  const available = Boolean(state.analysis_available);
+  const key = humanDecisionKey(state);
+  analyzeButton.disabled = !(available && key);
+  if (key !== analysisDecisionKey) {
+    analysisDecisionKey = key;
+    analysisCurrent.classList.add("is-hidden");
+    analysisCurrent.innerHTML = "";
+  }
+  const records = state.analysis || [];
+  if (!available) {
+    analysisStatus.textContent = "ASWISS 분석은 헤즈업 EV 게임(ante 1000)에서 쓸 수 있습니다.";
+  } else if (key) {
+    analysisStatus.textContent = `${state.waiting.player}의 차례입니다. "ASWISS 추천 보기"로 이 결정에서의 ASWISS 정책을 볼 수 있습니다.`;
+  } else {
+    analysisStatus.textContent = records.length ? `이번 판의 결정 ${records.length}개` : "이번 판에 분석할 결정이 아직 없습니다.";
+  }
+  analysisList.innerHTML = "";
+  for (const record of records.slice().reverse()) analysisList.appendChild(analysisCard(record, false));
+}
+
+async function analyzeCurrentDecision() {
+  const waiting = currentState?.waiting;
+  if (!waiting || waiting.type !== "bet") return;
+  analyzeButton.disabled = true;
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player: waiting.player }),
+    });
+    const data = await response.json();
+    analysisCurrent.innerHTML = "";
+    analysisCurrent.classList.remove("is-hidden");
+    if (!response.ok) {
+      analysisCurrent.appendChild(textBlock(data.error || "분석 실패"));
+    } else {
+      analysisCurrent.appendChild(analysisCard({ ...data, player: waiting.player, by: "now" }, true));
+    }
+  } finally {
+    analyzeButton.disabled = !(currentState?.analysis_available && humanDecisionKey(currentState));
+  }
+}
+
+function analysisCard(record, isCurrent) {
+  const card = document.createElement("article");
+  card.className = "analysis-card";
+  const who = record.by === "aswiss" ? "ASWISS" : record.by === "human" ? "사람" : "지금 결정";
+  const head = document.createElement("header");
+  const taken = record.action_taken
+    ? ` · 선택 <strong>${escapeHtml(record.action_taken)}</strong>` +
+      (record.probability_of_action_taken != null
+        ? ` (ASWISS 확률 ${formatPercent(record.probability_of_action_taken)})`
+        : "")
+    : "";
+  head.innerHTML = `<span class="analysis-tag tag-${escapeHtml(record.by)}">${who}</span> ${escapeHtml(record.player || "")} · ${escapeHtml(record.street || "")}${taken}`;
+  card.appendChild(head);
+  if (record.error) {
+    card.appendChild(textBlock(`분석 불가: ${record.error}`));
+    if (record.fallback) card.appendChild(textBlock(`이 결정은 ${record.fallback} 에이전트가 대신 두었습니다.`));
+    return card;
+  }
+  if (record.fallback) card.appendChild(textBlock(`이 결정은 ${record.fallback} 에이전트가 대신 두었습니다.`));
+  card.appendChild(probabilityBars(record.probabilities || {}, record.action_taken, isCurrent));
+  const meta = document.createElement("dl");
+  meta.className = "analysis-meta";
+  const key = record.key || {};
+  const rows = [
+    ["조회", `${record.resolved || "-"}${record.hops ? ` (조상 ${record.hops}단계)` : ""}`],
+    ["bucket", record.bucket ?? "-"],
+    ["계보", (record.genealogy || []).join(" ← ") || "-"],
+    ["직전 내 결정", key.prev_bucket == null ? "없음(이 판 첫 결정)" : `bucket ${key.prev_bucket} · ${key.prev_action || "-"}`],
+    ["그 뒤 상대 행동", (key.opponent_actions || []).join(", ") || "없음"],
+    ["카드 군집", key.cluster == null ? "새 카드 없음" : key.cluster],
+  ];
+  if (record.current) rows.push(["현재 정책", Object.entries(record.current).map(([a, p]) => `${a} ${formatPercent(p, 0)}`).join(" · ")]);
+  if (record.stack_matches_training === false) rows.push(["주의", "스택이 학습(ante의 1000배)과 다릅니다."]);
+  for (const [label, value] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = String(value);
+    meta.append(dt, dd);
+  }
+  card.appendChild(meta);
+  return card;
+}
+
+function probabilityBars(probabilities, taken, isCurrent) {
+  const wrap = document.createElement("div");
+  wrap.className = "prob-bars";
+  const entries = Object.entries(probabilities).sort((a, b) => b[1] - a[1]);
+  for (const [action, p] of entries) {
+    const row = document.createElement("div");
+    row.className = "prob-row" + (action === taken ? " is-taken" : "");
+    row.innerHTML = `<span class="prob-label">${escapeHtml(action)}</span>
+      <span class="prob-track"><span class="prob-fill" style="width:${Math.max(0, Math.min(100, p * 100)).toFixed(1)}%"></span></span>
+      <span class="prob-value">${formatPercent(p)}</span>`;
+    wrap.appendChild(row);
+  }
+  if (isCurrent && entries.length) {
+    const best = entries[0];
+    const note = document.createElement("p");
+    note.className = "prob-note";
+    note.textContent = `가장 자주 고르는 행동: ${best[0]} (${formatPercent(best[1])}). 혼합 전략이므로 다른 행동도 위 확률로 섞어 씁니다.`;
+    wrap.appendChild(note);
+  }
+  return wrap;
 }
 
 function renderRangeControls(state) {

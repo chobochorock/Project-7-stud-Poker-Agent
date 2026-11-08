@@ -691,8 +691,9 @@ public:
         }
         return k;
     }
-    // the same key computed from the state alone, by replaying the hand from its 5th-street root (evaluation)
-    HFull hkey_replay(const State& state, int viewer) const {
+    // the same key computed from the state alone, by replaying the hand from its 5th-street root (evaluation);
+    // `replayed` (serve) receives the replayed state, to check that it reproduces `state`
+    HFull hkey_replay(const State& state, int viewer, State* replayed = nullptr) const {
         State r = root_of(state);
         Trail t;
         for (const Event& e : state.history) {
@@ -703,8 +704,38 @@ public:
             step(r, e.actor, e.action);
             sync_hidden(r, state);
         }
+        if (replayed) *replayed = r;
         return hkey(r, viewer, t);
     }
+    // serve EXPLAIN (history partition): the key of `state` and how it resolves (the same walk as hresolve): the key
+    // itself (member, hops 0), the key with its previous bucket replaced by an ancestor (member, hops > 0), or the
+    // context's rest bucket (member false); no bucket when the structural context never occurred in training
+    struct Resolution {
+        HFull key;
+        uint32_t bucket = kNone;
+        int hops = 0;
+        bool context = false, member = false;
+        State replayed;
+    };
+    Resolution resolve_history(const State& state, int viewer) const {
+        Resolution res;
+        res.key = hkey_replay(state, viewer, &res.replayed);
+        const auto it = hctx_.find(res.key.ctx);
+        if (it == hctx_.end()) return res;
+        res.context = true;
+        HKey m = res.key.m;
+        while (true) {
+            const auto f = it->second.member.find(m);
+            if (f != it->second.member.end()) { res.bucket = f->second; res.member = true; return res; }
+            if (m.prev == kNone || m.prev == kUnseen || parent_[m.prev] == kNone) { res.bucket = it->second.rest; return res; }
+            m.prev = parent_[m.prev]; ++res.hops;
+        }
+    }
+    Partition partition() const { return partition_; }
+    size_t bucket_count() const { return buckets_.size(); }
+    size_t history_context_count() const { return hctx_.size(); }
+    uint32_t parent_of(uint32_t b) const { return partition_ == Partition::History ? parent_[b] : kNone; }
+    const Bucket& bucket_at(uint32_t b) const { return buckets_[b]; }
     uint32_t hresolve(const HContext& c, HKey m) const {
         while (true) {
             const auto it = c.member.find(m);
@@ -2501,13 +2532,156 @@ int self_test(int argc, char** argv) {
 
 }  // namespace
 
+// ---- serve: a frozen snapshot as the web game's agent (agent/aswiss_agent.py) -------------------------------------
+// The line protocol of stud_mccfr --agent-stdio: READY, then per line DISCARD <4 cards> (heuristic H4), ACT <the same 15
+// tab-separated fields> or QUIT. Additions:
+//  - an optional 17th field: the viewer's position among the two players in table order (0 first, 1 second). The
+//    viewer then takes that seat, so a tie in the public-card priority goes to the same player as in the web game
+//    (poker_env: the lower seat; the trainer: seat 0).
+//  - EXPLAIN (same fields): one JSON line with the policy, the action sampled from it, and (history partition) the key,
+//    the bucket it resolves to and the bucket's split genealogy.
+//  - INFO: the loaded snapshot.
+// History keys are computed by replaying the hand from its 5th-street root (as eval does); a request whose replay does
+// not reproduce the given state (street, pot, bets, actor) is refused with ERROR rather than answered from the key of
+// a different hand.
+State seat_view(State s, int seat) {
+    if (seat == 0) return s;
+    std::swap(s.players[0], s.players[1]);
+    for (Event& e : s.history) e.actor = static_cast<uint8_t>(1 - e.actor);
+    s.actor = 1;
+    return s;
+}
+std::string street_name(int street) { return street == 5 ? "5th" : street == 6 ? "6th" : "7th_hidden"; }
+std::string policy_json(const std::array<double, A>& p, uint8_t mask) {
+    std::ostringstream o; o << '{';
+    bool first = true;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        o << (first ? "" : ",") << '"' << kActionNames[a] << "\":" << std::setprecision(6) << p[a];
+        first = false;
+    }
+    o << '}';
+    return o.str();
+}
+int serve(int argc, char** argv) {
+    auto o = parse(argc, argv, {{"--partition", "history"}, {"--atlas", ""}, {"--snapshot", ""}, {"--policy", "average"},
+                                {"--seed", "7"}, {"--power-cache", "1000000"}});
+    const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
+    Model model(parse_partition(o["--partition"]), atlas.get());
+    model.load(o.at("--snapshot"));
+    const bool average = o["--policy"] == "average";
+    if (!average && o["--policy"] != "current") throw std::runtime_error("--policy must be average or current");
+    const bool history = model.partition() == Partition::History;
+    std::mt19937_64 rng(std::stoull(o["--seed"]));
+    std::cout << "READY\n" << std::flush;
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        try {
+            if (line == "QUIT") return 0;
+            if (line == "INFO") {
+                std::cout << "INFO\t{\"snapshot\":\"" << o["--snapshot"] << "\",\"partition\":\"" << o["--partition"]
+                          << "\",\"policy\":\"" << o["--policy"] << "\",\"buckets\":" << model.bucket_count()
+                          << ",\"history_contexts\":" << model.history_context_count() << ",\"history_cards\":\""
+                          << (model.history_cards_every() ? "every" : "street") << "\",\"training_ante\":" << kAnte
+                          << ",\"training_stack_ante\":" << kEffectiveStackAnte << "}\n";
+            } else if (line.rfind("DISCARD\t", 0) == 0) {
+                const auto cards = parse_cards(line.substr(8));
+                if (cards.size() != 4) throw std::runtime_error("DISCARD requires four cards");
+                const auto [discard, reveal] = discard_reveal(cards);
+                std::cout << "DISCARD\t" << discard << "\t" << reveal << "\n";
+            } else {
+                auto fields = split(line, '\t');
+                if (fields.empty() || (fields[0] != "ACT" && fields[0] != "EXPLAIN"))
+                    throw std::runtime_error("unknown request: " + fields[0]);
+                const bool explain = fields[0] == "EXPLAIN";
+                int seat = 0;
+                if (fields.size() == 17) { seat = std::stoi(fields.back()); fields.pop_back(); }
+                if (seat != 0 && seat != 1) throw std::runtime_error("viewer position must be 0 or 1");
+                fields[0] = "ACT";
+                std::string request;
+                for (size_t i = 0; i < fields.size(); ++i) request += (i ? "\t" : "") + fields[i];
+                const AgentRequest parsed = parse_agent_request(request);  // checks the legal mask (viewer at seat 0)
+                const State state = seat_view(parsed.state, seat);
+                const uint8_t mask = valid_mask(state, seat);
+                if (mask != parsed.expected_mask) throw std::runtime_error("legal action mask mismatch after the seat swap");
+                Model::Resolution res;
+                std::array<double, A> policy;
+                if (history) {
+                    res = model.resolve_history(state, seat);
+                    const State& r = res.replayed;
+                    std::ostringstream diff;
+                    if (r.terminal) diff << " replay ended the hand;";
+                    if (r.street != state.street) diff << " street " << r.street << " vs " << state.street << ';';
+                    if (r.actor != seat) diff << " actor " << r.actor << " vs viewer " << seat << ';';
+                    if (r.pot != state.pot) diff << " pot " << r.pot << " vs " << state.pot << ';';
+                    if (r.highest_bet != state.highest_bet) diff << " highest bet " << r.highest_bet << " vs " << state.highest_bet << ';';
+                    for (int i = 0; i < 2; ++i)
+                        if (r.players[i].invested != state.players[i].invested || r.players[i].round_bet != state.players[i].round_bet)
+                            diff << " seat " << i << " invested/round " << r.players[i].invested << '/' << r.players[i].round_bet
+                                 << " vs " << state.players[i].invested << '/' << state.players[i].round_bet << ';';
+                    if (!diff.str().empty()) throw std::runtime_error("replay does not reproduce the state:" + diff.str());
+                    policy = model.bucket_policy(res.bucket, mask, average);
+                } else {
+                    policy = model.strategy(state, seat, average);
+                }
+                const Action action = sample_action(policy, mask, rng);
+                if (!explain) { std::cout << "ACTION\t" << kActionNames[action] << "\n"; std::cout << std::flush; continue; }
+                std::ostringstream js;
+                js << "{\"action\":\"" << kActionNames[action] << "\",\"street\":\"" << street_name(state.street)
+                   << "\",\"seat\":" << seat << ",\"policy\":\"" << o["--policy"] << "\",\"probabilities\":" << policy_json(policy, mask)
+                   << ",\"stack_matches_training\":" << (state.effective_stack == state.ante * kEffectiveStackAnte ? "true" : "false");
+                if (history) {
+                    const uint32_t b = res.bucket;
+                    js << ",\"resolved\":\"" << (!res.context ? "unseen_context" : !res.member ? "rest" : res.hops ? "ancestor" : "exact")
+                       << "\",\"hops\":" << res.hops << ",\"bucket\":";
+                    if (b == kNone) js << "null"; else js << b;
+                    const HKey& m = res.key.m;
+                    js << ",\"key\":{\"street\":" << (res.key.ctx >> 8) << ",\"legal_mask\":" << (res.key.ctx & 0xff) << ",\"prev_bucket\":";
+                    if (m.prev == kNone) js << "null"; else if (m.prev == kUnseen) js << "\"unseen\""; else js << m.prev;
+                    js << ",\"prev_action\":";
+                    if (m.action == 0xff) js << "null"; else js << '"' << kActionNames[m.action] << '"';
+                    js << ",\"cluster\":";
+                    if (m.cluster == kNoCards) js << "null"; else js << m.cluster;
+                    std::vector<std::string> opp;
+                    for (uint64_t x = m.opp; x; x >>= 5) {
+                        const int tok = static_cast<int>(x & 31) - 1;
+                        opp.insert(opp.begin(), street_name(5 + tok / 8) + ":" + kActionNames[tok % 8]);
+                    }
+                    js << ",\"opponent_actions\":[";
+                    for (size_t i = 0; i < opp.size(); ++i) js << (i ? "," : "") << '"' << opp[i] << '"';
+                    js << "]}";
+                    if (b != kNone) {
+                        const Bucket& bk = model.bucket_at(b);
+                        double weight = 0;
+                        for (int a = 0; a < A; ++a) weight += bk.s[a];
+                        js << ",\"average\":" << policy_json(model.bucket_policy(b, mask, true), mask)
+                           << ",\"current\":" << policy_json(model.bucket_policy(b, mask, false), mask)
+                           << ",\"average_weight\":" << std::setprecision(6) << weight << ",\"genealogy\":[";
+                        int depth = 0;
+                        for (uint32_t x = b; x != kNone; x = model.parent_of(x)) js << (depth++ ? "," : "") << x;
+                        js << "]";
+                    }
+                }
+                js << "}";
+                std::cout << "EXPLAIN\t" << js.str() << "\n";
+            }
+        } catch (const std::exception& error) {
+            std::cout << "ERROR\t" << error.what() << "\n";
+        }
+        std::cout << std::flush;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv) {
     try {
         const std::string mode = argc > 1 ? argv[1] : "";
         if (mode == "train") return train(argc, argv);
         if (mode == "eval") return eval(argc, argv);
         if (mode == "self-test") return self_test(argc, argv);
-        throw std::runtime_error("usage: aswiss_stud train|eval|self-test [options]");
+        if (mode == "serve") return serve(argc, argv);
+        throw std::runtime_error("usage: aswiss_stud train|eval|self-test|serve [options]");
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";
         return 1;

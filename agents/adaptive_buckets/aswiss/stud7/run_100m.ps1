@@ -7,6 +7,7 @@
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action presplit # epoch snapshots (taken right before each split), -PresplitParticles
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot     # figures
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack     # results -> results_data
+#   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action build -ExeName aswiss_web.exe  # build only (web agent)
 # Each arm is one process (one core). "run" again after a stop, crash or reboot resumes every unfinished arm from its
 # checkpoint (bit-exact). -Threads K (K > 1) runs each arm's epoch-end average-policy label pass (--label avg arms:
 # aswiss_b, aswiss_wb, hist_b, hist_wb, hist_bb, hist_bbf) on K threads; training stays on one. Any K > 1 gives the
@@ -18,7 +19,7 @@
 # The first "run" builds aswiss_stud.exe with g++ found in this order: -Gxx PATH_TO_G++, g++ on PATH,
 # C:\ProgramData\mingw64\mingw64\bin, C:\msys64\ucrt64\bin, C:\msys64\mingw64\bin, C:\mingw64\bin.
 param(
-    [ValidateSet("run", "status", "stop", "eval", "final", "presplit", "plot", "pack")] [string]$Action = "run",
+    [ValidateSet("run", "build", "status", "stop", "eval", "final", "presplit", "plot", "pack")] [string]$Action = "run",
     [long]$Roots = 100000000,
     [int]$Seed = 1,
     [string[]]$Arms = @("aswiss", "k256", "k341", "k512", "k1024"),
@@ -98,8 +99,8 @@ function FindGxx {
            "mingw-w64-ucrt-x86_64-gcc) and rerun.")
 }
 
-if ($Action -eq "run") {
-    # rebuild when the executable is missing or older than its sources (for example after git pull)
+# build $Exe when it is missing or older than its sources (for example after git pull)
+function BuildIfStale {
     $sources = @((Join-Path $Here "aswiss_stud.cpp"), (Join-Path $Here "h4_lbr_generated.hpp"),
                  (Join-Path $Here "..\..\..\cpp_mccfr\stud_mccfr.cpp")) +
                @(Get-ChildItem (Join-Path $Here "sota\*.hpp") | ForEach-Object { $_.FullName })
@@ -119,6 +120,14 @@ if ($Action -eq "run") {
             throw "build failed. If training processes are still running they lock $Exe : -Action stop, wait until -Action status shows running=False, then run again (the arms resume exactly)."
         }
     }
+}
+
+if ($Action -eq "build") {
+    BuildIfStale
+    Write-Host "$Exe is up to date"
+}
+elseif ($Action -eq "run") {
+    BuildIfStale
     foreach ($a in $Arms) {
         $name = RunName $a; $dir = Join-Path $Out $name
         $pidFile = Join-Path $Out "$name.pid"

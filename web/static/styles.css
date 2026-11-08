@@ -1119,3 +1119,31 @@ button.playing-card:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* ASWISS strategy analysis */
+.analysis-band {
+  padding: 20px clamp(16px, 3vw, 34px) 28px;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+}
+.analysis-current { margin: 12px 0; }
+.analysis-list { display: grid; gap: 10px; margin-top: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.analysis-card { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--paper); }
+.analysis-card header { font-size: 0.9rem; margin-bottom: 8px; }
+.analysis-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; background: var(--blue-soft); color: var(--blue); }
+.analysis-tag.tag-aswiss { background: var(--gold-soft); color: #8a6420; }
+.analysis-tag.tag-now { background: var(--felt); color: #fff; }
+.prob-bars { display: grid; gap: 4px; }
+.prob-row { display: grid; grid-template-columns: 76px 1fr 56px; align-items: center; gap: 8px; font-size: 0.85rem; }
+.prob-row.is-taken .prob-label { font-weight: 700; }
+.prob-track { height: 10px; border-radius: 5px; background: var(--line); overflow: hidden; }
+.prob-fill { display: block; height: 100%; background: var(--felt); }
+.prob-row.is-taken .prob-fill { background: var(--accent); }
+.prob-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.prob-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--muted); }
+.analysis-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 8px 0 0; font-size: 0.78rem; }
+.analysis-meta dt { color: var(--muted); }
+.analysis-meta dd { margin: 0; overflow-wrap: anywhere; }
+.analysis-help { margin-top: 12px; font-size: 0.82rem; color: var(--muted); }
+.analysis-help ul { margin: 6px 0 0 18px; padding: 0; }
+@media (max-width: 640px) { .analysis-list { grid-template-columns: 1fr; } }

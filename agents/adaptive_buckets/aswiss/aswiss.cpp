@@ -63,6 +63,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -135,6 +136,142 @@ inline void strategy(int b, int n, double* s) {
     double total = 0;
     for (int a = 0; a < n; ++a) total += max(Q[b * W + a], 0.0);
     for (int a = 0; a < n; ++a) s[a] = total > 0 ? max(Q[b * W + a], 0.0) / total : 1.0 / n;
+}
+
+// ---- --route original: the original assignment rule ----------------------------------------------------------------
+// The split decision is the window rule's (a bucket splits when the information sets visited in the epoch carry two
+// or more z-tested labels, "none" included; the children are those labels). Every information set, visited or not,
+// then goes to the child whose label is its update direction under the strategy at the split (the current strategy at
+// the epoch end): the child label with the largest exact counterfactual regret per unit of counterfactual reach, the
+// label "none" scoring --tol. An information set's bucket is thus a function of the starting partition P0, the split
+// genealogy and the stored split-time strategies; no per-information-set state is needed to find it.
+//   --route-impl table: at each split, one exact pass computes every information set's direction; the buckets are
+//                       stored per information set (possible only when the information sets can be enumerated).
+//   --route-impl lazy:  nothing is stored per information set; a bucket is found when needed by walking the genealogy
+//                       from P0 and computing the direction at each split. A direction at split e needs the split-time
+//                       strategy at the opponent's earlier decisions (counterfactual reach) and at every later
+//                       decision (values), i.e. those decisions' buckets at split e, found the same way. --memo C keeps
+//                       at most C computed (information set, split) results (-1 unlimited, 0 none; when full the memo is
+//                       emptied).
+// Both implementations give the same partition (same arithmetic in the same order), so the same run; only the time
+// differs. route.csv logs the routing work per epoch.
+bool route_original = false, route_lazy = false;
+long long memo_cap = -1;
+double route_tol = 1e-3;
+vector<int32_t> p0_bucket, bucket_n;        // starting partition; number of actions of each bucket
+vector<int32_t> parent_node, parent_slot;   // tree parent of every node and the edge index leading to the node
+vector<vector<int32_t>> nodes_of;           // information set -> its nodes (ascending = preorder)
+struct SplitEvent {
+    vector<int> unsplit;          // bucket before the split -> its id after, -1 when it split
+    vector<map<int, int>> kids;   // split bucket -> (label: -1 "none" or action) -> child id
+    vector<double> sigma;         // split-time strategy of every bucket before the split (B * W)
+};
+vector<SplitEvent> events;
+int level_now = 0;                          // splits so far: the current partition is P_level_now
+using Memo = unordered_map<uint64_t, int>;
+Memo memo_main;
+struct RouteCount { long long routes = 0, hits = 0, assigns = 0, nodes = 0; } route_count;
+bool route_counting = true;
+
+int choose_label(const double* r, double M, const map<int, int>& kids) {
+    int best = 0; double bv = 0; bool first = true;
+    for (const auto& [lab, id] : kids) {
+        const double v = lab < 0 ? route_tol : (M > 0 ? r[lab] / M : 0.0);
+        if (first || v > bv) { bv = v; best = lab; first = false; }
+    }
+    return best;
+}
+int route(int I, int level, Memo& m, long long cap);
+// player-0 value of the subtree of node h under the split-time strategy of split e
+double sub_value(int h, int e, Memo& m, long long cap) {
+    if (route_counting) ++route_count.nodes;
+    const int pl = players[h];
+    if (pl == TERMINAL) return util[h];
+    const int64_t s0 = start[h]; const int d = degree[h];
+    double v = 0;
+    if (pl == CHANCE) { for (int k = 0; k < d; ++k) v += prob[s0 + k] * sub_value(edges[s0 + k], e, m, cap); return v; }
+    const double* s = &events[e].sigma[(size_t)route(info[h], e, m, cap) * W];
+    for (int a = 0; a < d; ++a) v += s[a] * sub_value(edges[s0 + a], e, m, cap);
+    return v;
+}
+// child label of information set I in bucket b at split e (b = its bucket just before the split)
+int assign_label(int I, int b, int e, Memo& m, long long cap) {
+    if (route_counting) ++route_count.assigns;
+    const int n = counts[I], pl = players[nodes_of[I][0]];
+    const double* s = &events[e].sigma[(size_t)b * W];
+    double r[W] = {0}, M = 0;
+    vector<int> path;
+    for (int h : nodes_of[I]) {
+        // counterfactual reach: opponent and chance products from the root down (the order of the exact pass)
+        path.clear();
+        for (int x = h; parent_node[x] >= 0; x = parent_node[x]) path.push_back(x);
+        double popp = 1, pc = 1;
+        for (size_t i = path.size(); i-- > 0;) {
+            const int x = path[i], p = parent_node[x], slot = parent_slot[x];
+            if (route_counting) ++route_count.nodes;
+            if (players[p] == CHANCE) pc *= prob[start[p] + slot];
+            else if (players[p] != pl) popp *= events[e].sigma[(size_t)route(info[p], e, m, cap) * W + slot];
+        }
+        const double cf = popp * pc;
+        double v[W], node = 0;
+        for (int a = 0; a < n; ++a) { v[a] = sub_value(edges[start[h] + a], e, m, cap); node += s[a] * v[a]; }
+        const double sign = pl == 0 ? 1.0 : -1.0;
+        for (int a = 0; a < n; ++a) r[a] += sign * (v[a] - node) * cf;
+        M += cf;
+    }
+    return choose_label(r, M, events[e].kids[b]);
+}
+// bucket of I in partition P_level (after `level` splits)
+int route(int I, int level, Memo& m, long long cap) {
+    if (route_counting) ++route_count.routes;
+    if (level == 0) return p0_bucket[I];
+    const uint64_t key = (uint64_t)I << 6 | (uint64_t)level;
+    if (cap != 0) {
+        const auto it = m.find(key);
+        if (it != m.end()) { if (route_counting) ++route_count.hits; return it->second; }
+    }
+    const int b = route(I, level - 1, m, cap);
+    const SplitEvent& ev = events[level - 1];
+    const int nb = ev.unsplit[b] >= 0 ? ev.unsplit[b] : ev.kids[b].at(assign_label(I, b, level - 1, m, cap));
+    if (cap != 0) {
+        if (cap > 0 && (long long)m.size() >= cap) m.clear();
+        m.emplace(key, nb);
+    }
+    return nb;
+}
+inline int bucket_of(int I) { return route_lazy ? route(I, level_now, memo_main, memo_cap) : bucket[I]; }
+// every information set's bucket in the current partition (checkpoints and diagnostics; its own unlimited memo, seeded
+// from the training memo, so it neither costs nor helps the training clock)
+vector<int32_t> route_all() {
+    route_counting = false;
+    Memo tmp = memo_main;
+    vector<int32_t> out(nI);
+    for (int I = 0; I < nI; ++I) out[I] = route(I, level_now, tmp, -1);
+    route_counting = true;
+    return out;
+}
+// table implementation: exact counterfactual regrets and counterfactual reach of every information set under the
+// current strategy (the split-time strategy), in the order assign_label uses
+double exact_reach(int h, double p0, double p1, double pc, vector<double>& R, vector<double>& M) {
+    int pl = players[h];
+    if (pl == TERMINAL) return util[h];
+    int64_t e = start[h]; int d = degree[h];
+    if (pl == CHANCE) {
+        double v = 0;
+        for (int k = 0; k < d; ++k) v += prob[e + k] * exact_reach(edges[e + k], p0, p1, pc * prob[e + k], R, M);
+        return v;
+    }
+    int I = info[h];
+    double s[W], v[W], node = 0;
+    strategy(bucket[I], d, s);
+    for (int a = 0; a < d; ++a) {
+        v[a] = pl == 0 ? exact_reach(edges[e + a], p0 * s[a], p1, pc, R, M) : exact_reach(edges[e + a], p0, p1 * s[a], pc, R, M);
+        node += s[a] * v[a];
+    }
+    double sign = pl == 0 ? 1.0 : -1.0, cf = (pl == 0 ? p1 : p0) * pc;
+    for (int a = 0; a < d; ++a) R[(size_t)I * W + a] += sign * (v[a] - node) * cf;
+    M[I] += cf;
+    return node;
 }
 inline void touch(int b) { if (!dirty[b]) { dirty[b] = 1; touched.push_back(b); } }
 
@@ -238,7 +375,7 @@ double es(int h, int p, double weight) {
         for (; k < d - 1; ++k) { acc += prob[e + k]; if (x < acc) break; }
         return es(edges[e + k], p, weight);
     }
-    int I = info[h], b = bucket[I];
+    int I = info[h], b = bucket_of(I);
     double s[W];
     strategy(b, d, s);
     if (pl == p) {
@@ -484,7 +621,8 @@ int main(int argc, char** argv) {
     map<string, string> opt{{"--mode", "es"}, {"--iters", "100000"}, {"--epoch0", "1000"}, {"--split", "cum"},
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
                             {"--test", "normal"}, {"--delta", "0.05"}, {"--label", "window"},
-                            {"--replay-p", "0.01"}, {"--replay-seed", "777"}, {"--plain", "0"}, {"--seconds", "0"}};
+                            {"--replay-p", "0.01"}, {"--replay-seed", "777"}, {"--plain", "0"}, {"--seconds", "0"},
+                            {"--route", "window"}, {"--route-impl", "table"}, {"--memo", "-1"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -540,6 +678,29 @@ int main(int argc, char** argv) {
         stable_sort(history_order.begin(), history_order.end(), [&](int a, int b) { return depth[a] < depth[b]; });
     }
     if (test != "normal") delta_range = load<double>(dir + "/delta.bin");
+    route_original = opt["--route"] == "original";
+    if (!route_original && opt["--route"] != "window") throw runtime_error("--route must be window or original");
+    route_lazy = route_original && opt["--route-impl"] == "lazy";
+    if (route_original && opt["--route-impl"] != "lazy" && opt["--route-impl"] != "table") throw runtime_error("--route-impl must be table or lazy");
+    memo_cap = stoll(opt["--memo"]); route_tol = tol;
+    if (route_original && (mode != "es" || !split || label_rule != "window" || test != "normal" || history_unit || closure ||
+                           gated || avg_fill))
+        throw runtime_error("--route original needs --mode es --split cum --label window --test normal (no history/closure/gate/fill)");
+    FILE* route_log = nullptr;
+    if (route_original) {
+        p0_bucket = bucket;
+        bucket_n.assign(B, 0);
+        for (int I = 0; I < nI; ++I) bucket_n[bucket[I]] = counts[I];
+        const int N = (int)players.size();
+        parent_node.assign(N, -1); parent_slot.assign(N, -1); nodes_of.assign(nI, {});
+        for (int h = 0; h < N; ++h) {
+            if (players[h] == TERMINAL) continue;
+            for (int k = 0; k < degree[h]; ++k) { parent_node[edges[start[h] + k]] = h; parent_slot[edges[start[h] + k]] = k; }
+            if (players[h] != CHANCE) nodes_of[info[h]].push_back(h);
+        }
+        route_log = fopen((out + "/route.csv").c_str(), "w");
+        fprintf(route_log, "epoch,iters,level,buckets,memo_entries,routes,memo_hits,assigns,nodes,train_seconds\n");
+    }
     Q.assign((size_t)B * W, 0); S.assign((size_t)B * W, 0); Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     if (avg_fill) { Splain.assign((size_t)B * W, 0); plain_last.assign(B, 0); }
     FILE* closure_log = nullptr;
@@ -594,6 +755,7 @@ int main(int argc, char** argv) {
         if (budget > 0 && t < T && train_secs() >= budget) T = t;  // time budget: this iteration is the last
         const bool sched = t == epoch_end || t == T;
         if (sched) {
+            if (route_lazy) excluded([&] { bucket = route_all(); });
             // window diagnostics from the per-infoset window sums (sampled in es mode)
             vector<double> bsum((size_t)B * W, 0.0);
             double Lw = 0, Cw = 0;
@@ -651,6 +813,52 @@ int main(int argc, char** argv) {
                     splits = splits_since; splits_since = 0;
                     if (history_unit) { vector<int> key; units = history_keys(key); }
                 }
+            } else if (split && route_original) {
+                // z-tested labels of the information sets visited in this epoch (-2: not visited)
+                vector<int> label(nI, -2);
+                for (int I = 0; I < nI; ++I) {
+                    if (mass[I] <= 0) continue;
+                    const double* r = &Rw[(size_t)I * W]; int n = counts[I], best = 0;
+                    for (int a = 1; a < n; ++a) if (r[a] > r[best]) best = a;
+                    label[I] = r[best] - z * sqrt(Sq[(size_t)I * W + best]) > 0 ? best : -1;
+                }
+                vector<uint32_t> seen(B, 0);
+                for (int I = 0; I < nI; ++I) if (label[I] >= -1) seen[bucket_of(I)] |= 1u << (label[I] + 1);
+                SplitEvent ev;
+                ev.unsplit.assign(B, -1); ev.kids.assign(B, {}); ev.sigma.assign((size_t)B * W, 0.0);
+                for (int b = 0; b < B; ++b) strategy(b, bucket_n[b], &ev.sigma[(size_t)b * W]);
+                int B2 = 0;
+                vector<int> keep, n2;
+                for (int b = 0; b < B; ++b) {
+                    if (__builtin_popcount(seen[b]) >= 2) {
+                        ++splits;
+                        for (int l = 0; l <= W; ++l)
+                            if ((seen[b] >> l) & 1) { ev.kids[b][l - 1] = B2++; keep.push_back(-1); n2.push_back(bucket_n[b]); }
+                    } else { ev.unsplit[b] = B2++; keep.push_back(b); n2.push_back(bucket_n[b]); }
+                }
+                // checkpoint policies BEFORE applying the split (they describe the epoch just finished)
+                excluded([&] {
+                    save(out + "/policy_bucket_" + to_string(k) + ".bin", policy(S, true));
+                    save(out + "/policy_current_" + to_string(k) + ".bin", current_policy());
+                });
+                if (!route_lazy) {  // table: every information set's direction now, in one exact pass
+                    vector<double> R((size_t)nI * W, 0.0), M(nI, 0.0);
+                    exact_reach(0, 1, 1, 1, R, M);
+                    for (int I = 0; I < nI; ++I) {
+                        const int b = bucket[I];
+                        bucket[I] = ev.unsplit[b] >= 0 ? ev.unsplit[b] : ev.kids[b].at(choose_label(&R[(size_t)I * W], M[I], ev.kids[b]));
+                    }
+                }
+                events.push_back(move(ev));
+                ++level_now;
+                vector<double> Q2((size_t)B2 * W, 0), S2((size_t)B2 * W, 0);
+                for (int nb = 0; nb < B2; ++nb)
+                    if (keep[nb] >= 0)
+                        for (int a = 0; a < W; ++a) { Q2[nb * W + a] = Q[keep[nb] * W + a]; S2[nb * W + a] = S[keep[nb] * W + a]; }
+                B = B2; Q = Q2; S = S2; bucket_n = n2; Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
+                fprintf(route_log, "%d,%lld,%d,%d,%zu,%lld,%lld,%lld,%lld,%.3f\n", k, t, level_now, B, memo_main.size(), route_count.routes,
+                        route_count.hits, route_count.assigns, route_count.nodes, train_secs());
+                fflush(route_log);
             } else if (split) {
                 if (history_unit) {  // pool every label input over the bucket-history key
                     vector<int> key;
@@ -794,7 +1002,9 @@ int main(int argc, char** argv) {
             }
         }
     }
+    if (route_lazy) bucket = route_all();
     save(out + "/final_bucket_map.bin", bucket);
+    if (route_log) fclose(route_log);
     fclose(log);
     if (judgment_log) fclose(judgment_log);
     if (gate_log) fclose(gate_log);

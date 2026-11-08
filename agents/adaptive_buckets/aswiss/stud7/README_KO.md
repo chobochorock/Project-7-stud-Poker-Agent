@@ -1100,7 +1100,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - 분할 이유(라벨과 z 값)를 bucket 계보에 붙이는 것. 학습의 `splits.csv`(`-LogSplits`)를 읽어야 한다.
 - bucket 탐색기와 손 전체 설명. 계획은 `../INTERPRETABILITY_PLAN_KO.md`에 있다.
 
-## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, ReBeL 진행 중, 2026-11-08)
+## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, 2026-11-08)
 
 **조건**
 - 위 "같은 조건의 SOTA 비교 실행" 표 그대로다. 비교군마다 학습 CPU 86,400초이고, 모두 스레드 하나로 돌았다.
@@ -1125,7 +1125,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 | k-means 256 | 255.79M roots, bucket 37,277 | 1.543 ± 0.121 | 0 |
 | MMD (원문 설정) | 2.395M 판 | 27.10 ± 1.77 (하나뿐인 정책) | +25.55 ± 1.77 |
 | ESCHER (원문 설정) | 531,000 판(177반복) | 32.28 ± 1.80 | +30.73 ± 1.81 |
-| ReBeL | 진행 중(170,500판, 학습 CPU 65,727초 시점) | 평가 전 | |
+| ReBeL | 239,391 판 | 2.439 ± 0.246 (하나뿐인 정책) | +0.896 ± 0.270 (ASWISS와는 +1.444 ± 0.275) |
 
 - ASWISS / k-means 비율은 0.645다. 같은 CPU에서 k-means는 roots를 두 배 처리했다.
 - 같은 roots의 epoch 스냅숏(2,000 pair)에서 ASWISS / k-means 비율은 다음과 같다. k-means는 31만 roots 이후 1.3–1.7에서 머문다. 외삽은 하지 않았다.
@@ -1146,9 +1146,9 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
   | k-means 256 | 1.66 ± 0.55 | |
   | MMD | 29.2 ± 10.7 | |
   | ESCHER | 27.4 ± 10.5 | |
-  | ReBeL | 2.26 ± 2.00 | 진행 중 |
+  | ReBeL | 2.35 ± 1.01 | 예산 끝까지 |
 
-  ReBeL은 신경망 비교군 중 유일하게 표 기반과 같은 자릿수다.
+  ReBeL은 신경망 비교군 중 유일하게 표 기반과 같은 자릿수다. epoch 스냅숏의 LBR이 6.43(64판) → 4.56(8,128판) → 3.17(65,472판) → 2.48(131,008판) → 2.44(예산, 20,000 pair)로 예산 끝까지 내려가는 중이었다. 더 학습했을 때의 값은 외삽하지 않는다.
 
 **원문 설정의 MMD·ESCHER는 24 CPU시간 안에 거의 배우지 못했다.**
 - **MMD:**

@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -753,6 +754,7 @@ struct Trainer {
     std::deque<Example> buf6, buf7;
     std::mt19937_64 rng;
     long long episodes = 0, examples6 = 0, examples7 = 0, steps = 0;
+    long long exact_worlds = 0;  // worlds sample_world drew exactly (diagnostic, not checkpointed)
     double loss6 = 0, loss7 = 0, solve_s[3] = {0, 0, 0}, train_s = 0, gap7 = 0;
     long long solves[3] = {0, 0, 0};
     int explorer = -1;  // the exploring seat of the current hand (-1: both)
@@ -770,7 +772,12 @@ struct Trainer {
         for (size_t i = w.size(); i-- > 0;) if (w[i] > 0) return static_cast<int>(i);
         return -1;
     }
-    // a world (one pair per seat, no shared card) from the joint PBS
+    // a world (one pair per seat, no shared card) from the joint PBS: the product of the two ranges restricted to pairs
+    // without a shared card. Rejection sampling first. When the compatible part of the product is too small for it
+    // (both ranges concentrated on pairs that share a card; a 7-stud run met this once, at hand ~109,100), the world is
+    // drawn exactly from the same distribution: seat 0's pair from r0(a) * sum over compatible b of r1(b), then seat 1's
+    // pair from r1 restricted to the pairs compatible with it. The RNG stream is unchanged for every world the rejection
+    // loop finds, so earlier runs, checkpoints and resumptions stay reproducible.
     std::array<int, 2> sample_world(const std::vector<double> r[2]) {
         const auto& P = PT();
         for (int tries = 0; tries < 100000; ++tries) {
@@ -778,7 +785,28 @@ struct Trainer {
             if (a < 0 || b < 0) break;
             if (!(P.mask[a] & P.mask[b])) return {a, b};
         }
-        throw std::runtime_error("rebel: cannot sample a compatible world");
+        std::vector<double> m(NP, 0.0), w(NP, 0.0);
+        double total = 0, z0 = 0, z1 = 0;
+        for (int b = 0; b < NP; ++b) z1 += std::max(r[1][b], 0.0);
+        for (int a = 0; a < NP; ++a) {
+            z0 += std::max(r[0][a], 0.0);
+            if (r[0][a] <= 0) continue;
+            double c = 0;
+            for (int b = 0; b < NP; ++b) if (r[1][b] > 0 && !(P.mask[a] & P.mask[b])) c += r[1][b];
+            m[a] = r[0][a] * c; total += m[a];
+        }
+        if (total > 0) {
+            const int a = sample_index(m);
+            for (int b = 0; b < NP; ++b) if (r[1][b] > 0 && !(P.mask[a] & P.mask[b])) w[b] = r[1][b];
+            const int b = sample_index(w);
+            if (a >= 0 && b >= 0) {
+                ++exact_worlds;
+                std::cerr << "rebel: world sampled exactly at hand " << episodes + 1 << " (compatible share of the product "
+                          << total / (z0 * z1) << ")\n";
+                return {a, b};
+            }
+        }
+        throw std::runtime_error("rebel: no compatible world (the two ranges have no pair without a shared card)");
     }
     int pick_action(uint8_t mask, double explore_u, const std::array<double, kActionCount>& p) {
         if (std::uniform_real_distribution<double>(0, 1)(rng) < explore_u) {

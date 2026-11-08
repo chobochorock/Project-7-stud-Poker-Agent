@@ -1083,20 +1083,18 @@ python web_app.py --port 8765
 ```
 화면에서 Mode = ev, Ante = 1000, Player 1 = human, Player 2 = ASWISS (7-stud), 나머지 = empty로 두고 Start를 누른다.
 
-**ASWISS를 계속 학습시키기** (`runs_fair`의 `hist_bbf`, 예산 없이 이어 감)
+**ASWISS를 계속 학습시키기: 분할은 멈추고 정책만 수렴** (`runs_fair`의 `hist_bbf`)
 ```powershell
-powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms hist_bbf -Roots 1000000000 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -LogRegret -LogSplits -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms hist_bbf -Roots 1000000000 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -LogRegret -LogSplits -SnapshotEvery 50000000 -FreezeSplitsAt 1 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
 ```
-- 원래 명령에서 `-BudgetCpuSeconds`만 뺐다. 체크포인트(128.47M roots)에서 이어진다.
-- 다음 epoch 스냅숏은 아래 시점에 생긴다.
-
-  | 스냅숏 | 추가 학습 CPU | 최대 메모리 |
-  |---|---|---|
-  | 163.83M roots | 약 6.6시간 | 약 10 GB |
-  | 327.67M roots | 거기서 약 1.3일 더 | 약 12 GB |
-
-  최대 메모리는 epoch 끝의 순간값을 추정한 것이다. RAM이 모자라면 Windows 페이지 파일로도 돌지만 라벨 계산이 크게 느려진다.
-- 새 스냅숏이 생기면 `-Action eval -AverageOnly -Arms hist_bbf`와 `-Action final -AverageOnly -Arms hist_bbf`로 LBR을 재서 가장 낮은 것을 웹에 고정한다(`ASWISS_SNAPSHOT`).
+- 원래 명령에서 `-BudgetCpuSeconds`를 빼고 `-FreezeSplitsAt 1`을 더했다. 체크포인트(128.47M roots, bucket 1,199,549개)에서 이어진다.
+- 이후 epoch 끝에서는 라벨 계산도 분할도 하지 않는다. 지금 분할 위에서 MCCFR+만 돌아 평균 정책이 수렴한다.
+- epoch 끝의 순간 메모리(8.5 GB 이상)가 없어지고, 라벨 계산 시간(학습 CPU의 약 30%)도 들지 않는다.
+- `--freeze-splits-at`(러너의 `-FreezeSplitsAt`)은 체크포인트 설정에 들어가지 않는다. 그래서 진행 중인 런에 나중에 걸 수 있다.
+- **확인:** 옵션이 없으면 학습이 수정 전 바이너리와 바이트 단위로 같다. 7만 roots 체크포인트에서 걸면 bucket이 442개로 유지된다(시험용 미니 런).
+- **스냅숏:** `-SnapshotEvery 50000000`은 5천만 roots(분할 없이 약 9시간)마다 스냅숏을 남긴다. epoch 스냅숏(163.83M, 327.67M roots)과 별개다. 스냅숏 주기는 체크포인트 설정에 없어서 이어 갈 때 바꿀 수 있다. 스냅숏 하나는 수백 MB다.
+- **고르기:** 새 스냅숏이 생기면 `-Action eval -AverageOnly -Arms hist_bbf`와 `-Action final -AverageOnly -Arms hist_bbf`로 LBR을 잰다. 가장 낮은 것을 웹에 고정한다(`ASWISS_SNAPSHOT`).
+- **분할을 다시 하려면:** `-FreezeSplitsAt` 없이 같은 명령으로 실행한다.
 
 **아직 없는 것**
 - 분할 이유(라벨과 z 값)를 bucket 계보에 붙이는 것. 학습의 `splits.csv`(`-LogSplits`)를 읽어야 한다.

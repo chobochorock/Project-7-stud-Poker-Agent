@@ -46,6 +46,7 @@ param(
     # executable to build and use (relative to this folder): a second name lets new arms start with new code while
     # arms started earlier keep running with (and locking) aswiss_stud.exe
     [string]$ExeName = "aswiss_stud.exe",
+    [long]$FreezeSplitsAt = 0,     # > 0: epochs ending at or after this root are not judged (no label pass, no split); tabular arms
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
@@ -144,6 +145,7 @@ elseif ($Action -eq "run") {
         }
         if ($LogSplits -and $Arm[$a][1] -eq "history") { $argv += @("--log-splits", "1") }
         if ($BudgetCpuSeconds -gt 0) { $argv += @("--budget-cpu-seconds", $BudgetCpuSeconds) }
+        if ($FreezeSplitsAt -gt 0 -and $Arm[$a][1] -in @("history", "aswiss")) { $argv += @("--freeze-splits-at", $FreezeSplitsAt) }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)

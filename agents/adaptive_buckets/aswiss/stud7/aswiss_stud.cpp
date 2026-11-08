@@ -1828,7 +1828,7 @@ int train(int argc, char** argv) {
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}});
+                                {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}, {"--freeze-splits-at", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -2017,6 +2017,11 @@ int train(int argc, char** argv) {
         std::filesystem::rename(cpu_path + ".tmp", cpu_path);
     };
     const bool track = partition == Partition::Aswiss || partition == Partition::History;
+    // --freeze-splits-at R (R > 0): an epoch ending at root R or later is not judged (no label pass, no split, no
+    // window): training goes on over the partition reached, with snapshots and epochs as before. It is not part of the
+    // checkpoint configuration, so a run can be frozen when it is resumed (the run is the same up to the freeze).
+    const uint64_t freeze_at = std::stoull(o["--freeze-splits-at"]);
+    auto judging = [&](uint64_t end) { return track && (freeze_at == 0 || end < freeze_at); };
     uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
     while (s.t < T) {
         ++s.t;
@@ -2029,7 +2034,7 @@ int train(int argc, char** argv) {
             }
         // --label-cap: window sums only over the epoch's last label_cap roots (bounds the window's memory)
         // history keys with --label avg: no window at all (it would only feed the L/C diagnostic and doubles the memory)
-        const bool in_window = track && (!label_cap || epoch_end - s.t < label_cap) &&
+        const bool in_window = judging(epoch_end) && (!label_cap || epoch_end - s.t < label_cap) &&
                                !(partition == Partition::History && label_rule == "avg");
         for (int p = 0; p < 2; ++p) {
             model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window);
@@ -2067,8 +2072,8 @@ int train(int argc, char** argv) {
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
             int splits = 0;
-            if (track && label_rule == "window") splits = model.split(z, inherit);
-            else if (track && partition == Partition::History) {  // method B with bucket-history keys
+            if (judging(s.t) && label_rule == "window") splits = model.split(z, inherit);
+            else if (judging(s.t) && partition == Partition::History) {  // method B with bucket-history keys
                 HMap avg;
                 BucketHalves halves;
                 const uint64_t eval_seed = std::stoull(o["--seed"]) * 1000003ull + s.k;
@@ -2184,7 +2189,7 @@ int train(int argc, char** argv) {
                               << br.splits << " buckets split\n";
                 }
             }
-            else if (partition == Partition::Aswiss) {
+            else if (judging(s.t) && partition == Partition::Aswiss) {
                 // method B: regrets of the frozen average policy from a separate sampled pass (deterministic per epoch)
                 AtomMap avg;
                 const uint64_t eval_seed = std::stoull(o["--seed"]) * 1000003ull + s.k;
@@ -2228,7 +2233,7 @@ int train(int argc, char** argv) {
                 << model.bucket_records() << ',' << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << peak_rss_mb() << ','
                 << model.h4_live() << ',' << model.last_h4_splits() << '\n';
             std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
-                      << " splits=" << splits << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
+                      << " splits=" << splits << (track && !judging(s.t) ? " (splits frozen)" : "") << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
             if (log_regret && !gated) model.iterate_regret_half(true);  // the next epoch's window (gated: reset at judgments)
             s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = std::min(T, s.t + s.L);
         }

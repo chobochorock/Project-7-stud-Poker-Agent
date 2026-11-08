@@ -22,6 +22,7 @@ ONLINE_LBR_EVERY=${ONLINE_LBR_EVERY:-0}; ONLINE_LBR_REBEL_EVERY=${ONLINE_LBR_REB
 LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; LOG_SPLITS=${LOG_SPLITS:-0}; AVERAGE_ONLY=${AVERAGE_ONLY:-0}
 PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-2000}
 # BUDGET_CPU_SECONDS=S: the ARMS stop when their training CPU time reaches S (rerun without it to continue)
+# FREEZE_SPLITS_AT=R: tabular split arms stop judging (no label pass, no split) at epochs ending at root R or later
 # EXE=PATH: executable to build and use (a second name lets new arms use new code while older arms keep running)
 BUDGET_CPU_SECONDS=${BUDGET_CPU_SECONDS:-0}
 EXE=${EXE:-$HERE/aswiss_stud}
@@ -73,6 +74,7 @@ run)
         fi
         [ "${PART[$a]}" = history ] && [ "$LOG_SPLITS" = 1 ] && online="$online --log-splits 1"
         [ "$BUDGET_CPU_SECONDS" != 0 ] && online="$online --budget-cpu-seconds $BUDGET_CPU_SECONDS"
+        [ "${FREEZE_SPLITS_AT:-0}" != 0 ] && { [ "${PART[$a]}" = history ] || [ "${PART[$a]}" = aswiss ]; } && online="$online --freeze-splits-at $FREEZE_SPLITS_AT"
         case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
                             atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \

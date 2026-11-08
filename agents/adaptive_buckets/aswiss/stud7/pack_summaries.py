@@ -26,12 +26,16 @@ for run in runs:
     final = {}
     if os.path.exists(os.path.join(d, "eval_final.jsonl")):
         for r in map(json.loads, open(os.path.join(d, "eval_final.jsonl"))):
-            r.setdefault("roots", int(log[r["epoch"]]["roots"]))  # rows of the older evaluator carry only the epoch
+            # rows of the older evaluator carry only the epoch; a budget snapshot's epoch (taken inside an epoch) is not
+            # in log.csv yet, so only look it up when the row has no roots of its own
+            if "roots" not in r:
+                r["roots"] = int(log[r["epoch"]]["roots"]) if 0 <= r["epoch"] < len(log) else -1
             if r["policy"] not in final or r["roots"] >= final[r["policy"]]["roots"]: final[r["policy"]] = r
     text = " / ".join(f"{final[p]['lbr_ante']:.3f} +- {1.96 * final[p]['lbr_se']:.3f}" for p in ("average", "current")
                       if p in final) or "not evaluated (run final first)"
     buckets = final.get("average", {}).get("buckets")  # of the evaluated partition; older evaluator rows lack it
-    print(f"{run:<24} {int(log[-1]['roots']):>12,} {f'{buckets:,}' if buckets else '-':>8}  {text}")
+    roots = max([int(log[-1]["roots"])] + [r["roots"] for r in final.values()])  # a budget snapshot lies past log.csv
+    print(f"{run:<24} {roots:>12,} {f'{buckets:,}' if buckets else '-':>8}  {text}")
 os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 with tarfile.open(out, "w:gz") as tar:
     for f in sorted(files):

@@ -17,7 +17,7 @@ Backends: numpy (float32 reference, CPU) and torch (any device; the first layer 
 inputs). --self-test runs both backends on the same random data, initial weights and batch indices and compares the
 trained weights.
 """
-import argparse, io, os, struct, subprocess, sys, time, zlib
+import argparse, io, itertools, os, struct, subprocess, sys, time, zlib
 
 import numpy as np
 
@@ -69,8 +69,10 @@ class Pipe:
 # ---- sample stores ---------------------------------------------------------------------------------------------------
 class Store:
     """Samples with padded sparse inputs: idx (n, K) int32 (pad = input dim), val (n, K) float32, and targets."""
+    _ids = itertools.count()
 
     def __init__(self, capacity, in_dim, A, value=False, K=64):
+        self.uid = next(Store._ids)  # device copies are cached by this (an id() can be reused by a later object)
         self.cap, self.pad, self.A, self.value, self.K = capacity, in_dim, A, value, K
         self.idx = np.full((capacity, K), in_dim, np.int32); self.val = np.zeros((capacity, K), np.float32)
         if value:
@@ -179,11 +181,11 @@ class TorchBackend:
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available to PyTorch")
         self.opt = {}
-        self.dev = {}  # id(store) -> (version, tensors)
+        self.dev = {}  # store uid -> (version, tensors)
 
     def tensors(self, store):
         torch = self.torch
-        cached = self.dev.get(id(store))
+        cached = self.dev.get(store.uid)
         if cached and cached[0] == store.version and cached[1]["idx"].shape[1] == store.K:
             return cached[1]
         if cached and cached[1]["idx"].shape[1] == store.K and store.changed:
@@ -204,7 +206,9 @@ class TorchBackend:
                 T["mask"] = torch.from_numpy(store.mask).to(self.device)
                 T["v"] = torch.from_numpy(store.v).to(self.device); T["w"] = torch.from_numpy(store.w).to(self.device)
         store.changed = set()
-        self.dev[id(store)] = (store.version, T)
+        if store.value: self.dev = {k: v for k, v in self.dev.items() if k != getattr(self, "_last_value_uid", None)}
+        self.dev[store.uid] = (store.version, T)
+        if store.value: self._last_value_uid = store.uid  # one value store at a time on the device
         return T
 
     def train(self, kind, net, store, steps, batch, lr, t, key, reset, rows=None):

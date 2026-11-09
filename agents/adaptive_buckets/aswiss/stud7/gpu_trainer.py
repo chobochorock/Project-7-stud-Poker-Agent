@@ -109,18 +109,20 @@ def read_res_update(pipe, stores, A):
 class NumpyBackend:
     name = "numpy"
 
-    def __init__(self, seed):
+    def __init__(self, seed, dtype=np.float32):
         self.opt = {}  # key -> (adam state, step)
         self.seed = seed
+        self.dt = dtype  # float64: the rounding control of the self-test
 
     def rows(self, key, t, size, batch, steps):
         rng = np.random.default_rng([self.seed & 0xffffffff, zlib.crc32(key.encode()), t])
         return [rng.integers(0, size, batch) for _ in range(steps)]
 
     def train(self, kind, net, store, steps, batch, lr, t, key, reset, rows=None):
-        P = {k: v.copy() for k, v in net.items()}
+        dt = self.dt
+        P = {k: v.astype(dt) for k, v in net.items()}
         pad = P["W1"].shape[0]
-        W1p = np.vstack([P["W1"], np.zeros((1, P["W1"].shape[1]), np.float32)])
+        W1p = np.vstack([P["W1"], np.zeros((1, P["W1"].shape[1]), dt)])
         if reset or key not in self.opt or self.opt[key][0]["W1"].shape != W1p.shape:
             self.opt[key] = ({k: np.zeros_like(W1p if k == "W1" else P[k]) for k in NAMES},
                              {k: np.zeros_like(W1p if k == "W1" else P[k]) for k in NAMES}, [0])
@@ -139,15 +141,15 @@ class NumpyBackend:
                 dy = np.zeros_like(y); dy[:, 0] = 2 * d / B
                 loss = float(np.mean(d * d))
             elif kind == "regret":
-                m = store.mask[r]; wn = store.w[r] / np.float32(t)
-                d = np.where(m, y - store.v[r], 0).astype(np.float32)
-                dy = (2 * wn[:, None] * d / B).astype(np.float32)
+                m = store.mask[r]; wn = store.w[r] / dt(t)
+                d = np.where(m, y - store.v[r], 0).astype(dt)
+                dy = (2 * wn[:, None] * d / B).astype(dt)
                 loss = float(np.sum(wn[:, None] * d * d) / max(1e-12, np.sum(wn)))
             else:  # average policy: weighted cross-entropy against sigma over the legal actions
-                m = store.mask[r]; wn = store.w[r] / np.float32(t)
+                m = store.mask[r]; wn = store.w[r] / dt(t)
                 z = np.where(m, y, -np.inf); z = z - z.max(1, keepdims=True)
                 e = np.where(m, np.exp(z), 0); p = e / e.sum(1, keepdims=True)
-                dy = np.where(m, wn[:, None] * (p - store.v[r]) / B, 0).astype(np.float32)
+                dy = np.where(m, wn[:, None] * (p - store.v[r]) / B, 0).astype(dt)
                 logp = np.where(m, np.log(np.maximum(p, 1e-30)), 0)
                 loss = float(np.mean(wn * -(store.v[r] * logp).sum(1)))
             g = {"W3": a2.T @ dy, "b3": dy.sum(0)}
@@ -162,13 +164,13 @@ class NumpyBackend:
             c1, c2 = 1 - BETA1 ** step[0], 1 - BETA2 ** step[0]
             for k in ("b1", "W2", "b2", "W3", "b3"):
                 M[k] = BETA1 * M[k] + (1 - BETA1) * g[k]; V[k] = BETA2 * V[k] + (1 - BETA2) * g[k] * g[k]
-                P[k] = (P[k] - lr * (M[k] / c1) / (np.sqrt(V[k] / c2) + EPS)).astype(np.float32)
+                P[k] = (P[k] - lr * (M[k] / c1) / (np.sqrt(V[k] / c2) + EPS)).astype(dt)
             gr = G[touched]
             M["W1"][touched] = BETA1 * M["W1"][touched] + (1 - BETA1) * gr
             V["W1"][touched] = BETA2 * V["W1"][touched] + (1 - BETA2) * gr * gr
-            W1p[touched] -= (lr * (M["W1"][touched] / c1) / (np.sqrt(V["W1"][touched] / c2) + EPS)).astype(np.float32)
+            W1p[touched] -= (lr * (M["W1"][touched] / c1) / (np.sqrt(V["W1"][touched] / c2) + EPS)).astype(dt)
         P["W1"] = W1p[:-1].copy()
-        return P, loss
+        return {k: v.astype(np.float32) for k, v in P.items()}, loss
 
 
 # ---- torch backend ---------------------------------------------------------------------------------------------------
@@ -180,6 +182,13 @@ class TorchBackend:
         self.torch, self.device, self.seed = torch, torch.device(device), seed
         if self.device.type == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available to PyTorch")
+        # full float32 (no TF32 matrix products): the same arithmetic as the C++ and numpy versions. TF32 keeps ~3 decimal
+        # digits, enough to flip the sign of near-zero gradient coordinates, which Adam then moves by lr per step.
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        torch.set_float32_matmul_precision("highest")
+        self.precision = (f"matmul.allow_tf32={torch.backends.cuda.matmul.allow_tf32}, "
+                          f"float32_matmul_precision={torch.get_float32_matmul_precision()}")
         self.opt = {}
         self.dev = {}  # store uid -> (version, tensors)
 
@@ -259,7 +268,7 @@ class TorchBackend:
             opt_s.zero_grad(); opt_d.zero_grad()
             loss.backward()
             opt_s.step(); opt_d.step()
-            if s == steps - 1: loss_v = float(report)
+            if s == steps - 1: loss_v = float(report.detach())
         self.opt[key] = ({"W1": P["W1"]}, opt_s.state_dict(), opt_d.state_dict())
         out = {k: P[k].detach().cpu().numpy().astype(np.float32) for k in NAMES}
         out["W1"] = out["W1"][:-1].copy()
@@ -322,7 +331,22 @@ def serve(backend, cmd, log):
     return proc.wait()
 
 
+def forward_np(net, store):
+    """Outputs of a network (numpy, float64) on every sample of a store."""
+    W1p = np.vstack([net["W1"], np.zeros((1, net["W1"].shape[1]), np.float32)]).astype(np.float64)
+    idx = store.idx[:store.size]; val = store.val[:store.size].astype(np.float64)
+    a1 = np.maximum(np.einsum("bk,bkh->bh", val, W1p[idx]) + net["b1"], 0)
+    a2 = np.maximum(a1 @ net["W2"] + net["b2"], 0)
+    return a2 @ net["W3"] + net["b3"]
+
+
 def self_test(device):
+    """numpy float32, numpy float64 (the rounding control) and torch on `device`, on the same data, initial weights and
+    batch indices. Adam divides every coordinate's step by its gradient's running scale, so a coordinate whose gradient
+    is near zero moves by about lr per step in a direction rounding decides; individual weights then differ by up to
+    ~steps * lr between any two implementations (also between float32 and float64). The test therefore compares what
+    the networks compute (outputs on all samples) and the losses, and requires the torch difference to stay within
+    3 times the float32-vs-float64 difference (or below 1e-4)."""
     rng = np.random.default_rng(7)
     in_dim, h1, h2, A, n, B, steps = 300, 64, 32, 8, 4000, 256, 30
     def init():
@@ -341,20 +365,35 @@ def self_test(device):
         nnz = rng.integers(1, 20)
         vs.put_input(k, rng.choice(in_dim, nnz, replace=False).astype(np.int32), rng.normal(0, 1, nnz).astype(np.float32)); vs.ret[k] = rng.normal()
     rows = [rng.integers(0, n, B) for _ in range(steps)]
-    nb, tb = NumpyBackend(1), TorchBackend(1, device)
-    worst = 0.0
+    n32, n64 = NumpyBackend(1), NumpyBackend(1, np.float64)
+    tb = TorchBackend(1, device) if device != "none" else None
+    if tb: print(f"torch {tb.torch.__version__}, device {device}, {tb.precision}")
+    ok = True
     for kind, store in (("regret", st), ("average", st), ("value", vs)):
         net = init()
         if kind == "value": net["W3"] = net["W3"][:, :1].copy(); net["b3"] = net["b3"][:1].copy()
-        a, la = nb.train(kind, net, store, steps, B, 1e-3, 10, kind, True, rows)
-        b, lb = tb.train(kind, net, store, steps, B, 1e-3, 10, kind, True, rows)
-        diff = max(float(np.max(np.abs(a[k] - b[k])) / (np.max(np.abs(a[k])) + 1e-12)) for k in NAMES)
-        moved = max(float(np.max(np.abs(a[k] - net[k]))) for k in NAMES)
-        worst = max(worst, diff)
-        print(f"{kind:8s} max relative weight difference numpy vs torch({device}) after {steps} steps: {diff:.2e} "
-              f"(weights moved by up to {moved:.3g}); last loss {la:.6g} vs {lb:.6g}")
-    print("self-test", "PASSED" if worst < 1e-3 else "FAILED", f"(worst {worst:.2e}, threshold 1e-3)")
-    return 0 if worst < 1e-3 else 1
+        y0 = forward_np(net, store)
+        res = {"numpy32": n32.train(kind, net, store, steps, B, 1e-3, 10, kind, True, rows),
+               "numpy64": n64.train(kind, net, store, steps, B, 1e-3, 10, kind, True, rows)}
+        if tb: res[f"torch({device})"] = tb.train(kind, net, store, steps, B, 1e-3, 10, kind, True, rows)
+        ref, ref_loss = res["numpy64"]
+        y_ref = forward_np(ref, store); change = float(np.max(np.abs(y_ref - y0)))
+        scale = max(float(np.max(np.abs(ref[k]))) for k in NAMES)
+        diffs = {}
+        for name, (w, loss) in res.items():
+            if name == "numpy64": continue
+            dy = float(np.max(np.abs(forward_np(w, store) - y_ref)))
+            dw = max(float(np.max(np.abs(w[k] - ref[k]))) for k in NAMES)
+            diffs[name] = dy
+            print(f"{kind:8s} {name:12s} vs numpy64: outputs differ by {dy:.2e} (the training changed them by {change:.3g}), "
+                  f"weights by {dw:.2e} (largest weight {scale:.3g}), loss {loss:.7g} vs {ref_loss:.7g}")
+        if tb:
+            t = diffs[f"torch({device})"]
+            passed = t <= max(3 * diffs["numpy32"], 1e-4)
+            ok &= passed
+            print(f"{kind:8s} torch output difference {t:.2e} vs float32 rounding control {diffs['numpy32']:.2e}: {'ok' if passed else 'TOO LARGE'}")
+    if tb: print("self-test", "PASSED" if ok else "FAILED", "(torch within 3x the float32-vs-float64 difference of the outputs)")
+    return 0 if ok else 1
 
 
 def main():
@@ -364,7 +403,7 @@ def main():
         k = argv.index("--"); cmd = argv[k + 1:]; argv = argv[:k]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--backend", choices=("torch", "numpy"), default="torch")
-    ap.add_argument("--device", default="cuda")
+    ap.add_argument("--device", default="cuda", help="torch device; --self-test --device none runs the numpy part only")
     ap.add_argument("--log", default="")
     ap.add_argument("--self-test", action="store_true")
     a = ap.parse_args(argv)

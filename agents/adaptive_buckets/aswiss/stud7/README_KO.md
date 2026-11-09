@@ -1094,7 +1094,11 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - **확인:** 옵션이 없으면 학습이 수정 전 바이너리와 바이트 단위로 같다. 7만 roots 체크포인트에서 걸면 bucket이 442개로 유지된다(시험용 미니 런).
 - **스냅숏:** `-SnapshotEvery 50000000`은 5천만 roots(분할 없이 약 9시간)마다 스냅숏을 남긴다. epoch 스냅숏(163.83M, 327.67M roots)과 별개다. 스냅숏 주기는 체크포인트 설정에 없어서 이어 갈 때 바꿀 수 있다. 스냅숏 하나는 수백 MB다.
 - **고르기:** 새 스냅숏이 생기면 `-Action eval -AverageOnly -Arms hist_bbf`와 `-Action final -AverageOnly -Arms hist_bbf`로 LBR을 잰다. 가장 낮은 것을 웹에 고정한다(`ASWISS_SNAPSHOT`).
-- **분할을 다시 하려면:** `-FreezeSplitsAt` 없이 같은 명령으로 실행한다.
+- **분할을 다시 하려면:** `-Action stop`으로 멈추고, `-FreezeSplitsAt` 없이 같은 명령으로 실행한다.
+  - 분할은 다음 epoch 끝(163.83M, 327.67M, 655.35M roots 중 다음 것)에서 다시 일어난다.
+  - 이 런의 라벨(평균 정책)은 epoch 끝에 새로 계산하므로 멈췄던 동안 빠지는 입력이 없다.
+  - 확인: 7만 roots부터 멈춘 시험용 미니 런을 31만 roots에서 다시 켜니, 63만 roots에서 719개 bucket이 분할됐다(442 → 1,964).
+  - 창 라벨 런은 다시 켠 뒤부터의 구간만 창에 들어간다.
 
 **아직 없는 것**
 - 분할 이유(라벨과 z 값)를 bucket 계보에 붙이는 것. 학습의 `splits.csv`(`-LogSplits`)를 읽어야 한다.

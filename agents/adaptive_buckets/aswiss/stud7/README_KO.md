@@ -1066,6 +1066,43 @@ ASWISS·k-means는 1억 roots로 돌리고, 신경망 비교군(MMD, ESCHER, ReB
 - `runs_fair`에서 ESCHER는 반복당 학습 CPU 약 488초 대부분이 학습 스텝(반복당 1만 5천 번)이었다. ReBeL은 학습 시간의 73%가 부분게임 풀이, 17%가 망 학습이었다(131,008판 시점 로그).
 - 따라서 GPU 이득은 ESCHER > MMD ≫ ReBeL(10% 이내)로 예상한다. 이는 실측이 아닌 추정이며, ESCHER·MMD는 GPU 판을 구현해 직접 잰다.
 
+## GPU 판 ESCHER (2026-11-09)
+
+**구조** (`sota/remote_train.hpp`, `sota/escher.hpp`, `gpu_trainer.py`)
+- `gpu_trainer.py`가 C++ 학습기(`aswiss_stud train --partition net --algo escher ... --remote-train 1`)를 띄우고, 그 표준 입출력을 통로로 쓴다.
+- **C++ 쪽 (CPU 코어 1개):** 탐색과 그 안의 추론, 저수지, 체크포인트, 온라인 LBR, 예산을 지금처럼 맡는다. 추론을 CPU에 두는 이유는 batch 1 추론이 GPU에서 2–4배 느리기 때문이다.
+- **학습 요청:** 학습할 차례마다 새로 쓰인 저수지 슬롯과 망의 초기 가중치를 보내고, 학습된 가중치를 받는다. 초기 가중치는 CPU판과 같은 seed로 C++가 만든다.
+- **Python 쪽 학습:** escher.hpp와 한 스텝씩 같다.
+  - 같은 손실: 가치망 제곱오차, 후회망 t'/t 가중 제곱오차, 평균망 t'/t 가중 교차엔트로피.
+  - 배치 평균, 복원 균등추출.
+  - Adam(0.9, 0.999, 1e-8). 첫 층은 배치에 나온 행만 갱신한다(C++의 lazy Adam = `torch.optim.SparseAdam`).
+- **CPU판과 다른 것:** 배치 인덱스 난수와 부동소수 순서뿐이다.
+- **백엔드:** `numpy`(CPU 기준 구현)와 `torch`(GPU). 첫 층은 희소 입력이라 `embedding_bag`으로 계산한다.
+
+**예산 (공정 조건)**
+- 학습이 다른 프로세스와 GPU에서 돌므로 C++ 프로세스의 CPU 시간으로는 잴 수 없다. GPU 판은 실제 시간 예산 `--budget-seconds`를 쓴다.
+- 이 예산은 학습 경과 시간에서 온라인 LBR 시간을 뺀 값이다(`curve.csv`의 `seconds` 열).
+- 러너는 `escher_gpu` 비교군에만 `-BudgetCpuSeconds` 값을 `--budget-seconds`로 넘긴다.
+- 그래서 비교 조건은 이렇다. 표 기반은 CPU 코어 1개로 학습 CPU 86,400초, GPU 판 ESCHER는 CPU 코어 1개 + GPU로 실제 86,400초. 같은 노트북이다.
+- `gpu_log.csv`에 요청마다 실제 시간, Python 프로세스 CPU 시간, 손실을 남긴다.
+
+**검증 (이 환경, PyTorch 없이 numpy 백엔드)**
+- 원격 옵션을 끄면 ESCHER가 수정 전 바이너리와 정책 파일까지 같다(Kuhn, 9개).
+- Leduc에서 CPU판과 원격판(numpy)을 seed 2개씩, 32반복 돌렸다. exploitability가 각각 2.383/2.387 대 2.382/2.373이고, 손실도 같은 범위다.
+- 7-stud 작은 설정에서 원격 학습, 실제 시간 예산 정지, 재개를 확인했다. 재개 뒤 통계는 끊기지 않은 런과 같다.
+- torch 백엔드는 노트북에서 `--self-test`로 numpy 백엔드와 같은 배치, 같은 초기값의 결과를 비교한다(상대 오차 1e-3 미만이면 통과).
+
+**노트북에서**
+```powershell
+git pull origin claude/magical-einstein-6k0apw
+# 1. torch 백엔드 자가 검사 (numpy와 같은 결과인지)
+python agents\adaptive_buckets\aswiss\stud7\gpu_trainer.py --self-test --device cuda
+# 2. 짧은 시험 (10분, 새 폴더; 학습 중인 exe와 겹치지 않게 새 이름)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms escher_gpu -ExeName aswiss_gpu.exe -Roots 1000000000 -BudgetCpuSeconds 600 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\gpu_smoke
+# 3. 본 실험 (runs_fair와 같은 조건, 실제 24시간)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms escher_gpu -ExeName aswiss_gpu.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+```
+
 ## 웹 서비스와 전략 분석 (2026-11-08)
 
 학습한 ASWISS 스냅숏을 웹 게임(`web_app.py`)의 플레이어로 쓰고, 결정마다 그 정책을 보여 준다.

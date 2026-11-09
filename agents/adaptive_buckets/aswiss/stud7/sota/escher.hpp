@@ -28,6 +28,7 @@
 #include <array>
 #include <numeric>
 #include "nn.hpp"
+#include "remote_train.hpp"
 
 namespace sota {
 
@@ -47,11 +48,12 @@ struct Reservoir {  // uniform reservoir sampling (Vitter's algorithm R)
     std::vector<S> data;
     size_t capacity = 0;
     long long seen = 0;
-    void add(S s, std::mt19937_64& rng) {
+    long long add(S s, std::mt19937_64& rng) {  // the slot written, -1 when the sample was not kept
         ++seen;
-        if (data.size() < capacity) { data.push_back(std::move(s)); return; }
+        if (data.size() < capacity) { data.push_back(std::move(s)); return static_cast<long long>(data.size()) - 1; }
         const long long j = std::uniform_int_distribution<long long>(0, seen - 1)(rng);
-        if (j < static_cast<long long>(capacity)) data[static_cast<size_t>(j)] = std::move(s);
+        if (j < static_cast<long long>(capacity)) { data[static_cast<size_t>(j)] = std::move(s); return j; }
+        return -1;
     }
 };
 
@@ -70,6 +72,51 @@ struct Escher {
     struct ValueSample { Sparse h; float ret; };
     Reservoir<RegretSample> rmem[2];
     Reservoir<StratSample> smem;
+    // --remote-train (remote_train.hpp): networks trained in another process; the reservoir slots written since the
+    // last training request are sent before it (0, 1: regret reservoirs, 2: strategy reservoir)
+    RemoteTrainer* remote = nullptr;
+    mutable std::vector<uint32_t> dirty[3];
+    mutable std::vector<uint8_t> is_dirty[3];
+    void mark(int r, long long slot) const {
+        if (!remote || slot < 0) return;
+        auto& f = is_dirty[r];
+        if (f.size() <= static_cast<size_t>(slot)) f.resize(static_cast<size_t>(slot) + 1, 0);
+        if (!f[slot]) { f[slot] = 1; dirty[r].push_back(static_cast<uint32_t>(slot)); }
+    }
+    template <class Sample> void put_sample(const Sample& x) const {
+        remote->put_sparse(x.x); remote->put<uint8_t>(x.mask);
+        for (int a = 0; a < A; ++a) remote->put<float>(x.v[a]);
+        remote->put<float>(x.w);
+    }
+    void sync(int r) const {  // buffer a RES_UPDATE of reservoir r's written slots (sent with the next request)
+        if (dirty[r].empty()) return;
+        remote->put<uint32_t>(RemoteTrainer::RES_UPDATE); remote->put<uint8_t>(static_cast<uint8_t>(r));
+        remote->put<uint32_t>(static_cast<uint32_t>(dirty[r].size()));
+        for (uint32_t slot : dirty[r]) {
+            remote->put<uint32_t>(slot);
+            if (r < 2) put_sample(rmem[r].data[slot]); else put_sample(smem.data[slot]);
+            is_dirty[r][slot] = 0;
+        }
+        dirty[r].clear();
+    }
+    // connect a remote trainer (after a checkpoint, if any, is loaded): handshake, then every stored sample is dirty
+    void attach(RemoteTrainer* r) {
+        remote = r;
+        remote->put<uint32_t>(RemoteTrainer::HELLO);
+        for (int v : {game.input_dim(), game.history_dim(), cfg.hidden1, cfg.hidden2, A, cfg.batch})
+            remote->put<uint32_t>(static_cast<uint32_t>(v));
+        remote->put<uint32_t>(static_cast<uint32_t>(cfg.regret_capacity)); remote->put<uint32_t>(static_cast<uint32_t>(cfg.strategy_capacity));
+        remote->put<uint64_t>(cfg.seed);
+        remote->send();
+        remote->expect(RemoteTrainer::HELLO);
+        if (remote->get<uint32_t>() != RemoteTrainer::kVersion) throw std::runtime_error("remote trainer: protocol version mismatch");
+        for (int i = 0; i < 2; ++i) for (size_t k = 0; k < rmem[i].data.size(); ++k) mark(i, static_cast<long long>(k));
+        for (size_t k = 0; k < smem.data.size(); ++k) mark(2, static_cast<long long>(k));
+    }
+    void put_train_head(uint32_t steps, float lr) const {
+        remote->put<uint32_t>(static_cast<uint32_t>(t)); remote->put<uint32_t>(steps);
+        remote->put<uint32_t>(static_cast<uint32_t>(cfg.batch)); remote->put<float>(lr);
+    }
 
     Escher(const Game& g, const EscherConfig& c) : game(g), cfg(c), rng(c.seed) {
         value = Mlp(g.history_dim(), c.hidden1, c.hidden2, 1, c.seed * 7 + 1);
@@ -148,6 +195,14 @@ struct Escher {
             opt_v.init(value);
         }
         if (data.empty()) return;
+        if (remote) {
+            remote->put<uint32_t>(RemoteTrainer::VALUE_TRAIN); put_train_head(static_cast<uint32_t>(cfg.value_steps), cfg.value_lr);
+            remote->put<uint8_t>(cfg.value_reinit ? 1 : 0); remote->put_mlp(value);
+            remote->put<uint32_t>(static_cast<uint32_t>(data.size()));
+            for (const ValueSample& v : data) { remote->put_sparse(v.h); remote->put<float>(v.ret); }
+            value = remote->train(RemoteTrainer::VALUE_TRAIN, last_value_loss);
+            return;
+        }
         Mlp::Grad g; g.init(value);
         double loss = 0; long long n = 0;
         std::uniform_int_distribution<size_t> pick(0, data.size() - 1);
@@ -184,7 +239,7 @@ struct Escher {
                     RegretSample rs; rs.x = x; rs.mask = mask; rs.w = w;
                     // in units of reward_scale, like the value network (regret matching ignores the scale)
                     for (int a = 0; a < A; ++a) rs.v[a] = (mask >> a & 1) ? static_cast<float>((q[a] - node) / cfg.reward_scale) : 0.0f;
-                    rmem[i].add(std::move(rs), rng); ++regret_samples;
+                    mark(i, rmem[i].add(std::move(rs), rng)); ++regret_samples;
                     int n = 0;
                     for (int a = 0; a < A; ++a) n += mask >> a & 1;
                     const int pickn = std::uniform_int_distribution<int>(0, n - 1)(rng);  // uniform sampling policy
@@ -194,7 +249,7 @@ struct Escher {
                 } else {
                     StratSample ss; ss.x = x; ss.mask = mask; ss.w = w;
                     for (int a = 0; a < A; ++a) ss.v[a] = static_cast<float>(sigma[a]);
-                    smem.add(std::move(ss), rng);
+                    mark(2, smem.add(std::move(ss), rng));
                     game.step(s, sample(sigma, mask));
                 }
             }
@@ -206,6 +261,14 @@ struct Escher {
         if (cfg.reinit) { regret[i] = Mlp(game.input_dim(), cfg.hidden1, cfg.hidden2, A, cfg.seed * 7 + 2 + i + 100 * static_cast<uint64_t>(t)); opt_r[i].init(regret[i]); }
         auto& mem = rmem[i].data;
         if (mem.empty()) return;
+        if (remote) {
+            sync(i);
+            remote->put<uint32_t>(RemoteTrainer::REGRET_TRAIN); remote->put<uint8_t>(static_cast<uint8_t>(i));
+            put_train_head(static_cast<uint32_t>(cfg.regret_steps), cfg.lr); remote->put<uint8_t>(cfg.reinit ? 1 : 0);
+            remote->put_mlp(regret[i]);
+            regret[i] = remote->train(RemoteTrainer::REGRET_TRAIN, last_regret_loss[i]);
+            return;
+        }
         Mlp::Grad g; g.init(regret[i]);
         std::uniform_int_distribution<size_t> pick(0, mem.size() - 1);
         double loss = 0, wsum = 0;
@@ -242,6 +305,15 @@ struct Escher {
     void train_average_monitor(Mlp& net, Adam& opt, std::mt19937_64& r, int steps) const {
         const auto& mem = smem.data;
         if (mem.empty() || steps <= 0) return;
+        if (remote) {  // the remote side keeps this network's optimizer across calls (opt and r are not used)
+            sync(2);
+            remote->put<uint32_t>(RemoteTrainer::AVG_TRAIN); remote->put<uint8_t>(1);
+            put_train_head(static_cast<uint32_t>(steps), opt.lr); remote->put<uint64_t>(cfg.seed ^ 0x6a09e667f3bcc908ull);
+            remote->put_mlp(net);
+            double loss = 0;
+            net = remote->train(RemoteTrainer::AVG_TRAIN, loss);
+            return;
+        }
         Mlp::Grad g; g.init(net);
         std::uniform_int_distribution<size_t> pick(0, mem.size() - 1);
         for (int st = 0; st < steps; ++st) {
@@ -265,6 +337,16 @@ struct Escher {
         Adam opt; opt.lr = cfg.lr; opt.init(avg);
         auto& mem = smem.data;
         if (mem.empty()) return;
+        if (remote) {
+            sync(2);
+            remote->put<uint32_t>(RemoteTrainer::AVG_TRAIN); remote->put<uint8_t>(0);
+            put_train_head(static_cast<uint32_t>(cfg.avg_steps), cfg.lr);
+            remote->put<uint64_t>(cfg.seed ^ 0x2b7e151628aed2a6ull ^ (0x9e3779b97f4a7c15ull * static_cast<uint64_t>(t + 1)));
+            remote->put_mlp(avg);
+            double loss = 0;
+            avg = remote->train(RemoteTrainer::AVG_TRAIN, loss);
+            return;
+        }
         std::mt19937_64 r(cfg.seed ^ 0x2b7e151628aed2a6ull ^ (0x9e3779b97f4a7c15ull * static_cast<uint64_t>(t + 1)));
         Mlp::Grad g; g.init(avg);
         std::uniform_int_distribution<size_t> pick(0, mem.size() - 1);

@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
                           {"--value-steps", "200"}, {"--traversals", "1024"}, {"--regret-steps", "400"}, {"--avg-steps", "2000"},
                           {"--batch", "256"}, {"--capacity", "1000000"}, {"--reinit", "1"}, {"--value-explore", "0.25"},
                           {"--schedule", "const"}, {"--eta", "0.05"}, {"--horizon", "10000000"}, {"--clip", "0"}, {"--gamma", "1"},
-                          {"--value-reinit", "0"}, {"--fallback", "uniform"}, {"--seconds", "0"}};
+                          {"--value-reinit", "0"}, {"--fallback", "uniform"}, {"--seconds", "0"}, {"--remote-train", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         if (string(argv[i]) != "--tree" && string(argv[i]) != "--out" && !o.count(argv[i])) throw runtime_error(string("unknown option ") + argv[i]);
         o[argv[i]] = argv[i + 1];
@@ -98,6 +98,9 @@ int main(int argc, char** argv) {
         e.reinit = o["--reinit"] == "1"; e.value_explore = stod(o["--value-explore"]); e.seed = stoull(o["--seed"]);
         e.value_reinit = o["--value-reinit"] == "1"; e.fallback = o["--fallback"];
         sota::Escher<TreeGame> es(g, e);
+        // --remote-train 1: the networks are trained by gpu_trainer.py, which started this process (stdin/stdout are its pipes)
+        sota::RemoteTrainer remote;
+        if (o["--remote-train"] == "1") { remote.start(); es.attach(&remote); }
         FILE* log = fopen((out + "/log.csv").c_str(), "w");
         if (!log) throw runtime_error("cannot write " + out + "/log.csv");
         fprintf(log, "epoch,iters,buckets_after,iteration,regret_samples,value_loss,regret_loss0,regret_loss1,seconds,train_seconds\n");

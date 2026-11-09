@@ -36,7 +36,8 @@ int train_net(int argc, char** argv) {
                                 {"--escher-reinit", "1"}, {"--escher-value-explore", "0.01"}, {"--escher-value-reinit", "1"},
                                 {"--escher-fallback", "argmax"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--online-lbr-avg-steps", "500"}, {"--budget-cpu-seconds", "0"}});
+                                {"--online-lbr-avg-steps", "500"}, {"--budget-cpu-seconds", "0"},
+                                {"--budget-seconds", "0"}, {"--remote-train", "0"}});
     const std::string algo = o["--algo"];
     if (algo != "mmd" && algo != "escher") throw std::runtime_error("--partition net needs --algo mmd or escher");
     if (o["--h4"] != "heuristic") throw std::runtime_error("--partition net uses the heuristic H4 (--h4 heuristic)");
@@ -52,10 +53,17 @@ int train_net(int argc, char** argv) {
     // training towards --roots; the continuation is the run that never stopped (budget snapshots use their own RNG).
     const double budget = std::stod(o["--budget-cpu-seconds"]);
     if (budget < 0) throw std::runtime_error("--budget-cpu-seconds must be >= 0");
+    // --remote-train 1 (ESCHER): the networks are trained by gpu_trainer.py, which started this process (remote_train.hpp).
+    // Its training then runs in another process (and on the GPU), so the budget is wall-clock: --budget-seconds S stops
+    // when the training seconds (wall time minus the online LBR's time; column `seconds`) reach S, the same way.
+    const bool remote_train = o["--remote-train"] == "1";
+    if (remote_train && algo != "escher") throw std::runtime_error("--remote-train 1 is implemented for --algo escher");
+    const double budget_wall = std::stod(o["--budget-seconds"]);
+    if (budget_wall < 0) throw std::runtime_error("--budget-seconds must be >= 0");
     std::ostringstream cfg;  // settings that must match on resume (--roots may grow; output cadences may change)
     cfg << "net;algo=" << algo << ";seed=" << seed << ";epoch0=" << epoch0;
     for (const auto& [k, v] : o) if (k.rfind("--" + algo + "-", 0) == 0) cfg << ";" << k.substr(2) << "=" << v;
-    cfg << ";input=deep_cfr_tensor";
+    cfg << ";input=deep_cfr_tensor" << (remote_train ? ";remote_train=1" : "");
     // online LBR: MMD has only its last iterate; ESCHER's average network is trained only at snapshots, so its online
     // rows are the current policy (regret matching on the regret networks)
     // online LBR policies: MMD has only its last iterate (current). ESCHER: average (default) = a monitoring average
@@ -135,6 +143,13 @@ int train_net(int argc, char** argv) {
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
     online.open(out, resumed, online_bytes);
+    if (budget_wall > 0 && L.seconds >= budget_wall) {
+        std::cerr << "budget of " << budget_wall << " training seconds already reached (" << L.seconds << " s at root " << roots_done()
+                  << "); rerun with --budget-seconds 0 or a larger budget to continue towards --roots\n";
+        return 0;
+    }
+    RemoteTrainer remote;
+    if (remote_train) { remote.start(); esc->attach(&remote); }
     if (budget > 0 && L.train_cpu >= budget) {
         std::cerr << "CPU budget " << budget << " s already reached (training CPU " << L.train_cpu << " s at root " << roots_done()
                   << "); rerun with --budget-cpu-seconds 0 or a larger budget to continue towards --roots\n";
@@ -227,7 +242,8 @@ int train_net(int argc, char** argv) {
             while (L.next_checkpoint <= done) L.next_checkpoint += checkpoint_every;
             checkpoint();
         }
-        if (budget > 0 && done < T && clock.now() >= budget) {  // CPU budget: snapshot, curve row, checkpoint, stop
+        const bool wall_stop = budget_wall > 0 && done < T && elapsed() >= budget_wall;
+        if ((budget > 0 && done < T && clock.now() >= budget) || wall_stop) {  // budget: snapshot, curve row, checkpoint, stop
             const std::string file = "snapshot_b" + std::to_string(done) + ".net";
             snapshot(file);
             const double s2 = elapsed();
@@ -239,8 +255,11 @@ int train_net(int argc, char** argv) {
             }
             L.budget_mark = budget;
             checkpoint();
-            std::cerr << "CPU budget " << budget << " s reached at root " << done << " (training CPU " << L.train_cpu
-                      << " s); snapshot " << file << " and checkpoint saved. Rerun with --budget-cpu-seconds 0 (or larger) to continue\n";
+            if (wall_stop) std::cerr << "budget of " << budget_wall << " training seconds reached at root " << done << " (" << L.seconds
+                                     << " s; remote trainer " << remote.seconds << " s in this process, monitor and snapshot networks included); snapshot " << file
+                                     << " and checkpoint saved. Rerun with --budget-seconds 0 (or larger) to continue\n";
+            else std::cerr << "CPU budget " << budget << " s reached at root " << done << " (training CPU " << L.train_cpu
+                           << " s); snapshot " << file << " and checkpoint saved. Rerun with --budget-cpu-seconds 0 (or larger) to continue\n";
             return 0;
         }
     }

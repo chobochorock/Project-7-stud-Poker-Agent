@@ -76,6 +76,9 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # ESCHER reservoir sensitivity: 1e6 samples per reservoir (default 1e5, the official code's) keeps every sample a
     # 24-CPU-hour run generates at the paper's Table 3 rate (~3,500 regret samples per iteration); ~1.7 GB when full
     escher_m1m = @("net_escher_m1m", "net", 1024, "ESCHER, reservoirs of 1e6", "--algo escher --escher-capacity 1000000")
+    # ESCHER with its networks trained by gpu_trainer.py on the GPU (traversals and inference stay on this CPU core);
+    # its budget is wall-clock (-BudgetCpuSeconds is passed as --budget-seconds: the training runs in a second process)
+    escher_gpu = @("net_escher_gpu", "net", 1024, "ESCHER, networks trained on the GPU", "--algo escher")
     # scaled-down ReBeL (sota/rebel.hpp): roots = self-play hands, each solving up to three street subgames (~1 s);
     # its own budget and cadences override the 100M ones (60k hands ~ the wall-clock of a 100M tabular arm)
     rebel     = @("rebel", "rebel", 1024, "ReBeL (scaled: search + value networks)", "--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")
@@ -144,7 +147,8 @@ elseif ($Action -eq "run") {
             $argv += @("--log-regret", "1")
         }
         if ($LogSplits -and $Arm[$a][1] -eq "history") { $argv += @("--log-splits", "1") }
-        if ($BudgetCpuSeconds -gt 0) { $argv += @("--budget-cpu-seconds", $BudgetCpuSeconds) }
+        $gpu = $a -like "*_gpu"
+        if ($BudgetCpuSeconds -gt 0) { $argv += @($(if ($gpu) { "--budget-seconds" } else { "--budget-cpu-seconds" }), $BudgetCpuSeconds) }
         if ($FreezeSplitsAt -gt 0 -and $Arm[$a][1] -in @("history", "aswiss")) { $argv += @("--freeze-splits-at", $FreezeSplitsAt) }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
@@ -152,8 +156,13 @@ elseif ($Action -eq "run") {
         }
         $log = Join-Path $Out "$name.$(Get-Date -Format yyyyMMdd-HHmmss).stderr.log"
         # Start-Process joins the arguments with spaces, so quote the ones that contain spaces (paths)
+        $file = $Exe
+        if ($gpu) {  # python gpu_trainer.py starts the trainer with its stdin/stdout as pipes
+            $argv = @((Join-Path $Here "gpu_trainer.py"), "--backend", "torch", "--device", "cuda", "--log", (Join-Path $dir "gpu_log.csv"), "--", $Exe) + $argv
+            $file = $Python
+        }
         $quoted = $argv | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }
-        $p = Start-Process -FilePath $Exe -ArgumentList $quoted -RedirectStandardError $log -WindowStyle Hidden -PassThru
+        $p = Start-Process -FilePath $file -ArgumentList $quoted -RedirectStandardError $log -WindowStyle Hidden -PassThru
         Set-Content $pidFile $p.Id
         Write-Host "started $name (pid $($p.Id)) -> $dir"
     }

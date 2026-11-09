@@ -36,6 +36,7 @@
 | 정리 A (저장한 순간 전략 재생, §9) | 정리 1과 같은 꼴이다. 학습 중 멤버별 추적 없이 미방문 정보집합까지 라벨을 붙인다 | 증명 |
 | 정리 B1 (단일 프로필 인증, §9) | 모든 bucket이 일치하면 $\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)$. 출력할 전략 자체에 대한 인증이다 | 증명, 수치 확인 |
 | 정리 B3 (분할 시점 평균 전략, §9) | 경로 밖까지 순간 regret이 ε 이하인 프로필을 주는 학습기가 있으면 유한 라운드 안에 $\mathrm{NashConv}\le\varepsilon$, ε=0이면 정확한 균형 | 증명. 단 CFR 평균은 이 조건을 만족하지 않는다(명제 B4, 반례) |
+| 정리 E (평균 전략 방향 분해, §10) | 누적 후회(실제 업데이트 방향) = $T\times$평균 전략의 후회 + 도달확률 가중 항 $\Omega$ + 공분산 항 $K$ + 행동과 무관한 상수. 전선 정보집합에서는 행동 순위가 같다 | 증명, 수치 확인 |
 | 마지막 분할 시점 $t^\*$의 상계 | 없음 | 미해결 |
 | 교대 갱신, 선형 평균 (실제 구현) | 정리의 가정 밖 | 미해결 |
 | 학습 메모리 절감, 압축된 배포 정책 | 보장하지 않음 | 한계 |
@@ -676,6 +677,60 @@ $$\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)+\sum_BH_B^\sigma.$$
 - **2026-10-29 추가:** 같은 실행을 100M까지 이은 결과(기존 구간 라벨)에서는 ASWISS가 k-means 341을 이기고(−0.241 [−0.415, −0.068]) k-means 1024와 같은 LBR을 bucket 54%로 냈다. 10.23M의 "카드 해상도 포화"는 학습량 부족 탓이었던 것으로 보인다. 같은 날 베팅 요약 대신 bucket 이력을 쓴 변형도 1.27M에서 원자 ASWISS와 구별되지 않았다. 자세한 내용은 stud7 README의 해당 절에 있다.
 - **2026-10-30 추가:** bucket 이력(베팅 요약 대신 직전 bucket과 행동, 이후 상대 행동)는 100M에서 구간 라벨(1.023)과 방법 B(1.060) 모두 k-means 1024(1.282)와 원자 ASWISS(1.298)를 유의하게 이겼다. 방법 B는 구간 라벨과 구별되지 않으면서 bucket이 32% 적었다. 다만 bucket 수가 k-means 1024의 6–9배라 같은 크기의 고정 추상화 대조군이 필요하다.
 
+## 10. 평균 전략 방향과 실제 업데이트 방향 (2026-11-09)
+
+논문 초안 `졸업 논문 초안 (2차 정리).md` 5.1절의 정리다. 원안 ASWISS는 분할 $k$에서 epoch $W_k$의 순간 전략 전부에 대한 방향, 즉 누적 후회 $\sum_{t\in W_k}r^{\sigma_t}(I)$의 argmax로 정보집합을 전이한다(이 문서의 정리 1과 정리 A가 다루는 양). 평균 전략 가속은 이것을 평균 전략 하나의 방향 $r^{\bar\sigma}(I)$로 바꾼다. 두 방향의 차이를 정확히 나눈다.
+
+### 10.1 기호
+
+플레이어 $p$의 정보집합 $I$, 행동 $a$, 프로필 열 $\sigma_1,\dots,\sigma_T$(임의, bucket lifting 포함)를 고정한다. $\bar\sigma$는 sequence-form 평균이다.
+- $y_t(z)=\pi^{\sigma_t}_{-p}(z)$(상대와 우연의 실현 계획), $\bar y=\frac1T\sum_ty_t$.
+- $w_t^{Ia}(z)=\pi_p^{\sigma_t}(Ia\to z)$: $Ia$에서 $z$까지 $p$ 자신의 행동 확률의 곱. $\bar w^{Ia}=\frac1T\sum_tw_t^{Ia}$.
+- perfect recall이면 $v^\sigma(I,a)=\sum_{z\sqsupseteq Ia}\pi^\sigma_{-p}(z)\,\pi_p^\sigma(Ia\to z)\,u_p(z)$다.
+- $\bar\sigma^{\mid Ia}(J)=\sum_t\pi_p^{\sigma_t}(Ia\to J)\sigma_t(J)\big/\sum_t\pi_p^{\sigma_t}(Ia\to J)$($Ia$ 아래 $p$의 정보집합 $J$). $\hat\sigma_{Ia}$는 $Ia$ 아래 $p$의 결정만 $\bar\sigma^{\mid Ia}$로 바꾼 $\bar\sigma$다.
+- $\Omega_T(I,a)=v^{\hat\sigma_{Ia}}(I,a)-v^{\bar\sigma}(I,a)$ (도달확률 가중 항)
+- $K_T(I,a)=\frac1T\sum_t\sum_{z\sqsupseteq Ia}(y_t-\bar y)(z)\,(w_t^{Ia}-\bar w^{Ia})(z)\,u_p(z)$ (공분산 항)
+- $c_T(I)=T\langle\bar\sigma(I),v^{\bar\sigma}(I)\rangle-\sum_t\langle\sigma_t(I),v^{\sigma_t}(I)\rangle$ (행동과 무관한 상수)
+
+### 10.2 정리 E와 따름정리
+
+**Theorem E [증명, 수치 확인].** 모든 $a$에 대해 $\sum_tr^{\sigma_t}(I,a)=T\,r^{\bar\sigma}(I,a)+T\,\Omega_T(I,a)+T\,K_T(I,a)+c_T(I)$.
+
+*증명.*
+1. $\frac1T\sum_tv^{\sigma_t}(I,a)=\frac1T\sum_t\sum_zy_tw_tu=\sum_z\bar y\,\bar w\,u+K_T$ (곱의 평균 = 평균의 곱 + 공분산).
+2. $\pi^{\bar\sigma}_{-p}(z)=\bar y(z)$: 상대의 sequence-form 평균은 실현 계획의 평균이고(Kuhn 1953; von Stengel 1996), 우연은 고정이다.
+3. 같은 논증을 $Ia$ 아래 부분 트리에 쓰면 $\pi_p^{\bar\sigma^{\mid Ia}}(Ia\to z)=\bar w^{Ia}(z)$.
+4. 따라서 1의 첫 항은 $v^{\hat\sigma_{Ia}}(I,a)=v^{\bar\sigma}(I,a)+\Omega_T(I,a)$.
+5. $\sum_tr^{\sigma_t}(I,a)=\sum_tv^{\sigma_t}(I,a)-\sum_t\langle\sigma_t(I),v^{\sigma_t}(I)\rangle$에 4를 넣고 $T\,r^{\bar\sigma}(I,a)$를 빼면 된다. □
+
+평균을 반복마다 가중치 $\lambda_t$로 쌓으면(선형 평균은 $\lambda_t=t$), 같은 증명이 가중 누적 $\sum_t\lambda_tr^{\sigma_t}$와 그 평균 사이에 성립한다(공분산도 같은 가중치). CFR+의 후회 표는 가중치 없이 더하고 0에서 자르므로 그 방향과는 가중치 차이가 더 있다.
+
+**E1 [증명].** $w_t^{Ia}$가 $t$에 무관하면(자기 후속 전략 고정) $\Omega=K=0$. 상대와 우연이 어떻게 바뀌어도 행동 사이의 차이가 같다. 즉 평균 전략은 "epoch 동안의 상대"를 정확히 대신한다.
+
+**E2 [증명, 수치 확인].** $I$ 아래에 $p$의 결정이 없으면(전선 정보집합) $w\equiv1$이므로 $\Omega=K=0$이고, 행동 argmax가 같다. bucket 합에서도 같다.
+
+**E3 [증명].** $Ia$의 자기 도달확률 $\pi_p^{\sigma_t}(I)\sigma_t(I,a)$가 $t$에 무관하면 $\Omega=0$이다($\bar\sigma$의 가중치에서 그 인자가 약분된다). $\hat\sigma_{Ia}$로 라벨을 계산하면 $\Omega$는 정확히 사라진다. perfect recall이면 $J$의 조상은 자기 깊이마다 하나이므로 "조상 깊이별 평균 표"로 구현할 수 있다(메모리는 자기 결정 깊이배, 구현하지 않음). 혼합 평균(`--avg-fill plain`, `aswiss/AVG_FILL_KO.md`)은 $Ia$ 바로 다음 자기 결정에서 $\bar\sigma^{\mid Ia}$와 정확히 같고 더 깊은 곳에서는 근사다. 명제 B4(a)의 불일치는 전부 $\Omega$다.
+
+**E4 [증명].** $\beta_p$가 $\bar\sigma_{-p}$에 대한 최선 응답이면 $\sum_p\sum_I\pi_p^{\beta_p}(I)r^{\bar\sigma}(I,\beta_p(I))=\frac1T\sum_p\sum_I\pi_p^{\beta_p}(I)\sum_tr^{\sigma_t}(I,\beta_p(I))=\mathrm{NashConv}(\bar\sigma)$. Lemma 7의 두 판이다.
+
+**E5 [증명].** $|K_T(I,a)|\le U_{Ia}\max_t\sum_{z\sqsupseteq Ia}|y_t-\bar y|(z)\cdot\max_{t,z}|w_t^{Ia}-\bar w^{Ia}|(z)$. CFR 순간 전략은 진동할 수 있으므로 $K\to0$의 보장은 없다. [한계]
+
+### 10.3 수치 확인
+
+`test_avg_direction.py`:
+- 항등식, $K$의 단말별 계산, E2를 임의 프로필 열과 bucket 게임의 CFR 반복에서 $10^{-9}$까지 확인한다(unittest).
+- `python test_avg_direction.py`는 CFR 동역학에서 두 방향의 행동 argmax 일치율을 낸다. 게임 20개, $S=2,A=3,D=4$.
+  - 전선: 모두 일치(1440/1440).
+  - 내부, 추상화 없음: 89%($T=50$), 91%($T=200$), 94%($T=800$).
+  - 내부, bucket(플레이어, 깊이, 직전 행동): 71%, 79%, 71%.
+  - $\Omega$를 없앤 조건부 평균: 79%, 85%, 78%.
+  - 내부 $|K|$/후회 폭의 중앙값: 추상화 없음 0.14 → 0.08, bucket 0.35 → 0.26.
+
+### 10.4 위치
+
+- 정리 1·A(이상형, 저장 전략 표본)의 수렴 보장은 평균 전략 방향으로 옮겨지지 않는다. 평균 전략 방향에 대해 증명된 것은 이 절의 분해, 정리 B1(인증), 정리 B3(오라클 조건 아래 유한 종료)뿐이다.
+- 정리 E의 $\bar\sigma$는 정보집합별 sequence-form 평균이다. 구현의 bucket 평균 표는 멤버들의 자기 도달확률 궤적이 비례할 때만 이것과 같다(§7.1-4).
+
 ## 참고문헌
 
 - Zinkevich, Johanson, Bowling, Piccione. Regret Minimization in Games with Incomplete Information. NeurIPS 2007.
@@ -687,4 +742,6 @@ $$\mathrm{NashConv}(\sigma)\le\rho_{\mathcal P}(\sigma)+\sum_BH_B^\sigma.$$
 - Hoeffding. Probability Inequalities for Sums of Bounded Random Variables. JASA 1963.
 - Nash. Non-Cooperative Games. Annals of Mathematics 1951.
 - Howard, Ramdas, McAuliffe, Sekhon. Time-uniform, Nonparametric, Nonasymptotic Confidence Sequences. Annals of Statistics 2021.
+- Kuhn. Extensive Games and the Problem of Information. Contributions to the Theory of Games II, 1953.
+- von Stengel. Efficient Computation of Behavior Strategies. Games and Economic Behavior 1996.
 - Waugh, Schnizlein, Bowling, Szafron. Abstraction Pathologies in Extensive Games. AAMAS 2009.

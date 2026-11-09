@@ -155,6 +155,10 @@ inline void strategy(int b, int n, double* s) {
 //                       emptied).
 // Both implementations give the same partition (same arithmetic in the same order), so the same run; only the time
 // differs. route.csv logs the routing work per epoch.
+//   --route-sigma current (default) | avg: the split-time strategy the directions are computed under: the epoch-end
+//                       current strategy (one iterate), or the bucket average strategy at the split (the policy the run
+//                       outputs; the "average-strategy acceleration" of the thesis draft, which replaces the epoch's
+//                       iterates by their average). Table and lazy agree for either choice.
 bool route_original = false, route_lazy = false;
 long long memo_cap = -1;
 double route_tol = 1e-3;
@@ -251,21 +255,21 @@ vector<int32_t> route_all() {
     return out;
 }
 // table implementation: exact counterfactual regrets and counterfactual reach of every information set under the
-// current strategy (the split-time strategy), in the order assign_label uses
-double exact_reach(int h, double p0, double p1, double pc, vector<double>& R, vector<double>& M) {
+// split-time strategy `sig` (bucket table, B * W), in the order assign_label uses
+double exact_reach(int h, double p0, double p1, double pc, vector<double>& R, vector<double>& M, const double* sig) {
     int pl = players[h];
     if (pl == TERMINAL) return util[h];
     int64_t e = start[h]; int d = degree[h];
     if (pl == CHANCE) {
         double v = 0;
-        for (int k = 0; k < d; ++k) v += prob[e + k] * exact_reach(edges[e + k], p0, p1, pc * prob[e + k], R, M);
+        for (int k = 0; k < d; ++k) v += prob[e + k] * exact_reach(edges[e + k], p0, p1, pc * prob[e + k], R, M, sig);
         return v;
     }
     int I = info[h];
-    double s[W], v[W], node = 0;
-    strategy(bucket[I], d, s);
+    double v[W], node = 0;
+    const double* s = &sig[(size_t)bucket[I] * W];
     for (int a = 0; a < d; ++a) {
-        v[a] = pl == 0 ? exact_reach(edges[e + a], p0 * s[a], p1, pc, R, M) : exact_reach(edges[e + a], p0, p1 * s[a], pc, R, M);
+        v[a] = pl == 0 ? exact_reach(edges[e + a], p0 * s[a], p1, pc, R, M, sig) : exact_reach(edges[e + a], p0, p1 * s[a], pc, R, M, sig);
         node += s[a] * v[a];
     }
     double sign = pl == 0 ? 1.0 : -1.0, cf = (pl == 0 ? p1 : p0) * pc;
@@ -622,7 +626,7 @@ int main(int argc, char** argv) {
                             {"--tol", "1e-3"}, {"--z", "2"}, {"--seed", "1"}, {"--exact-every", "0"},
                             {"--test", "normal"}, {"--delta", "0.05"}, {"--label", "window"},
                             {"--replay-p", "0.01"}, {"--replay-seed", "777"}, {"--plain", "0"}, {"--seconds", "0"},
-                            {"--route", "window"}, {"--route-impl", "table"}, {"--memo", "-1"}};
+                            {"--route", "window"}, {"--route-impl", "table"}, {"--memo", "-1"}, {"--route-sigma", "current"}};
     for (int i = 1; i + 1 < argc; i += 2) opt[argv[i]] = argv[i + 1];
     string dir = opt.at("--tree"), out = opt.at("--out"), mode = opt["--mode"];
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
@@ -683,6 +687,11 @@ int main(int argc, char** argv) {
     route_lazy = route_original && opt["--route-impl"] == "lazy";
     if (route_original && opt["--route-impl"] != "lazy" && opt["--route-impl"] != "table") throw runtime_error("--route-impl must be table or lazy");
     memo_cap = stoll(opt["--memo"]); route_tol = tol;
+    // --route-sigma: the split-time strategy the directions are computed under: current (the epoch-end current
+    // strategy, one iterate) or avg (the bucket average strategy at the split, i.e. the policy the run outputs)
+    const bool route_sigma_avg = opt["--route-sigma"] == "avg";
+    if (opt["--route-sigma"] != "current" && opt["--route-sigma"] != "avg") throw runtime_error("--route-sigma must be current or avg");
+    if (route_sigma_avg && !route_original) throw runtime_error("--route-sigma avg needs --route original");
     if (route_original && (mode != "es" || !split || label_rule != "window" || test != "normal" || history_unit || closure ||
                            gated || avg_fill))
         throw runtime_error("--route original needs --mode es --split cum --label window --test normal (no history/closure/gate/fill)");
@@ -826,7 +835,13 @@ int main(int argc, char** argv) {
                 for (int I = 0; I < nI; ++I) if (label[I] >= -1) seen[bucket_of(I)] |= 1u << (label[I] + 1);
                 SplitEvent ev;
                 ev.unsplit.assign(B, -1); ev.kids.assign(B, {}); ev.sigma.assign((size_t)B * W, 0.0);
-                for (int b = 0; b < B; ++b) strategy(b, bucket_n[b], &ev.sigma[(size_t)b * W]);
+                for (int b = 0; b < B; ++b) {
+                    double* sb = &ev.sigma[(size_t)b * W];
+                    if (!route_sigma_avg) { strategy(b, bucket_n[b], sb); continue; }
+                    double total = 0;
+                    for (int a = 0; a < bucket_n[b]; ++a) total += S[(size_t)b * W + a];
+                    for (int a = 0; a < bucket_n[b]; ++a) sb[a] = total > 0 ? S[(size_t)b * W + a] / total : 1.0 / bucket_n[b];
+                }
                 int B2 = 0;
                 vector<int> keep, n2;
                 for (int b = 0; b < B; ++b) {
@@ -843,7 +858,7 @@ int main(int argc, char** argv) {
                 });
                 if (!route_lazy) {  // table: every information set's direction now, in one exact pass
                     vector<double> R((size_t)nI * W, 0.0), M(nI, 0.0);
-                    exact_reach(0, 1, 1, 1, R, M);
+                    exact_reach(0, 1, 1, 1, R, M, ev.sigma.data());
                     for (int I = 0; I < nI; ++I) {
                         const int b = bucket[I];
                         bucket[I] = ev.unsplit[b] >= 0 ? ev.unsplit[b] : ev.kids[b].at(choose_label(&R[(size_t)I * W], M[I], ev.kids[b]));

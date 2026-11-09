@@ -11,8 +11,9 @@ snapshot and the online-LBR monitor network. The trainer's stderr passes through
 The training is that of sota/escher.hpp, step for step: the same initial weights (sent by the trainer), minibatches
 drawn uniformly with replacement, the same losses (value: squared error; regret: sum over legal actions of
 t'/t * squared error; average policy: t'/t * cross-entropy against sigma), the mean over the batch, and Adam with
-beta = (0.9, 0.999), eps = 1e-8 whose first-layer rows are updated only when a batch touches them (the C++ "lazy Adam";
-torch.optim.SparseAdam). Only the random batch indices and the floating-point order differ from the C++ version.
+beta = (0.9, 0.999), eps = 1e-8 whose first-layer rows are updated only when a batch touches them (the C++ "lazy Adam",
+written out in both backends with nn.hpp's formula). Only the random batch indices and the floating-point order differ
+from the C++ version (the torch backend runs in full float32: no TF32).
 Backends: numpy (float32 reference, CPU) and torch (any device; the first layer is an embedding bag over the sparse
 inputs). --self-test runs both backends on the same random data, initial weights and batch indices and compares the
 trained weights.
@@ -228,15 +229,13 @@ class TorchBackend:
         W1p = np.vstack([net["W1"], np.zeros((1, net["W1"].shape[1]), np.float32)])
         P = {"W1": torch.nn.Parameter(torch.from_numpy(W1p).to(dev))}
         for k in NAMES[1:]: P[k] = torch.nn.Parameter(torch.from_numpy(net[k].copy()).to(dev))
-        dense = [P[k] for k in NAMES[1:]]
-        if reset or key not in self.opt or self.opt[key][0]["W1"].shape != P["W1"].shape:
-            state = None
+        # Adam written out as in nn.hpp: w -= lr (m / c1) / (sqrt(v / c2) + eps), c = 1 - beta^step with the network's
+        # step count; the first layer's rows only when the batch touches them (torch's SparseAdam adds eps to sqrt(v)
+        # instead). The state is kept per network for warm starts.
+        if reset or key not in self.opt or self.opt[key]["m"]["W1"].shape != P["W1"].shape:
+            st = {"m": {k: torch.zeros_like(P[k]) for k in NAMES}, "v": {k: torch.zeros_like(P[k]) for k in NAMES}, "step": 0}
         else:
-            state = self.opt[key]
-        opt_s = torch.optim.SparseAdam([P["W1"]], lr=lr, betas=(BETA1, BETA2), eps=EPS)
-        opt_d = torch.optim.Adam(dense, lr=lr, betas=(BETA1, BETA2), eps=EPS)
-        if state is not None:  # carry the optimizer state of this network over (warm start)
-            opt_s.load_state_dict(state[1]); opt_d.load_state_dict(state[2])
+            st = self.opt[key]
         T = self.tensors(store)
         if rows is None:
             gen = torch.Generator(device=dev); gen.manual_seed((self.seed * 1000003 + zlib.crc32(key.encode()) * 1009 + t) & 0x7fffffffffffffff)
@@ -265,11 +264,25 @@ class TorchBackend:
                 per = wn * -(T["v"][r] * logp).sum(1)
                 loss = per.mean()
                 report = loss
-            opt_s.zero_grad(); opt_d.zero_grad()
+            for k in NAMES: P[k].grad = None
             loss.backward()
-            opt_s.step(); opt_d.step()
+            st["step"] += 1
+            c1, c2 = 1 - BETA1 ** st["step"], 1 - BETA2 ** st["step"]
+            with torch.no_grad():
+                for k in NAMES[1:]:
+                    g = P[k].grad
+                    st["m"][k].mul_(BETA1).add_(g, alpha=1 - BETA1)
+                    st["v"][k].mul_(BETA2).addcmul_(g, g, value=1 - BETA2)
+                    P[k].sub_(lr * (st["m"][k] / c1) / (torch.sqrt(st["v"][k] / c2) + EPS))
+                g = P["W1"].grad.coalesce()
+                rr, gv = g.indices()[0], g.values()
+                keep = rr != pad; rr, gv = rr[keep], gv[keep]
+                m1, v1 = st["m"]["W1"], st["v"]["W1"]
+                m1[rr] = BETA1 * m1[rr] + (1 - BETA1) * gv
+                v1[rr] = BETA2 * v1[rr] + (1 - BETA2) * gv * gv
+                P["W1"][rr] -= lr * (m1[rr] / c1) / (torch.sqrt(v1[rr] / c2) + EPS)
             if s == steps - 1: loss_v = float(report.detach())
-        self.opt[key] = ({"W1": P["W1"]}, opt_s.state_dict(), opt_d.state_dict())
+        self.opt[key] = st
         out = {k: P[k].detach().cpu().numpy().astype(np.float32) for k in NAMES}
         out["W1"] = out["W1"][:-1].copy()
         return out, loss_v

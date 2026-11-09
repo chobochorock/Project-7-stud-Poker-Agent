@@ -1,0 +1,169 @@
+{
+ "info": {
+  "python": "3.12.10",
+  "torch": "2.11.0+cu128",
+  "cuda_build": "12.8",
+  "cuda_available": true,
+  "cpu": "AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD",
+  "cpu_threads": 32,
+  "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU"
+ },
+ "results": [
+  {
+   "network": "MMD policy 512x512",
+   "device": "cpu, 1 thread",
+   "train_step_ms": 7.4641000013798475,
+   "forward_batch1_ms": 0.06833339994773269,
+   "inputs": 1832,
+   "hidden": [
+    512,
+    512
+   ],
+   "outputs": 8,
+   "batch": 128
+  },
+  {
+   "network": "MMD policy 512x512",
+   "device": "cpu, all threads",
+   "train_step_ms": 2.4069639993831515,
+   "forward_batch1_ms": 0.09422760014422238,
+   "inputs": 1832,
+   "hidden": [
+    512,
+    512
+   ],
+   "outputs": 8,
+   "batch": 128
+  },
+  {
+   "network": "MMD policy 512x512",
+   "device": "cuda",
+   "train_step_ms": 0.824840001296252,
+   "forward_batch1_ms": 0.1658316000830382,
+   "inputs": 1832,
+   "hidden": [
+    512,
+    512
+   ],
+   "outputs": 8,
+   "batch": 128
+  },
+  {
+   "network": "ESCHER regret 256x128",
+   "device": "cpu, 1 thread",
+   "train_step_ms": 36.1973200016655,
+   "forward_batch1_ms": 0.036806799937039614,
+   "inputs": 1832,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 8,
+   "batch": 2048
+  },
+  {
+   "network": "ESCHER regret 256x128",
+   "device": "cpu, all threads",
+   "train_step_ms": 6.949442001059651,
+   "forward_batch1_ms": 0.06407320010475814,
+   "inputs": 1832,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 8,
+   "batch": 2048
+  },
+  {
+   "network": "ESCHER regret 256x128",
+   "device": "cuda",
+   "train_step_ms": 1.0239019989967346,
+   "forward_batch1_ms": 0.13384140003472567,
+   "inputs": 1832,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 8,
+   "batch": 2048
+  },
+  {
+   "network": "ESCHER value 256x128",
+   "device": "cpu, 1 thread",
+   "train_step_ms": 64.18345999903977,
+   "forward_batch1_ms": 0.05898760003037751,
+   "inputs": 3664,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 1,
+   "batch": 2048
+  },
+  {
+   "network": "ESCHER value 256x128",
+   "device": "cpu, all threads",
+   "train_step_ms": 12.898417999967933,
+   "forward_batch1_ms": 0.09976939996704459,
+   "inputs": 3664,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 1,
+   "batch": 2048
+  },
+  {
+   "network": "ESCHER value 256x128",
+   "device": "cuda",
+   "train_step_ms": 1.5528000006452203,
+   "forward_batch1_ms": 0.14441279997117817,
+   "inputs": 3664,
+   "hidden": [
+    256,
+    128
+   ],
+   "outputs": 1,
+   "batch": 2048
+  },
+  {
+   "network": "ReBeL value 128x128",
+   "device": "cpu, 1 thread",
+   "train_step_ms": 1.8943560007028282,
+   "forward_batch1_ms": 0.0491484000813216,
+   "inputs": 2762,
+   "hidden": [
+    128,
+    128
+   ],
+   "outputs": 2652,
+   "batch": 32
+  },
+  {
+   "network": "ReBeL value 128x128",
+   "device": "cpu, all threads",
+   "train_step_ms": 1.8315259995870292,
+   "forward_batch1_ms": 0.0894915999379009,
+   "inputs": 2762,
+   "hidden": [
+    128,
+    128
+   ],
+   "outputs": 2652,
+   "batch": 32
+  },
+  {
+   "network": "ReBeL value 128x128",
+   "device": "cuda",
+   "train_step_ms": 0.9860619995743036,
+   "forward_batch1_ms": 0.13760160002857447,
+   "inputs": 2762,
+   "hidden": [
+    128,
+    128
+   ],
+   "outputs": 2652,
+   "batch": 32
+  }
+ ]
+}

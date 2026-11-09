@@ -13,6 +13,7 @@
 // Eval:  ./aswiss_stud eval [--atlas ATLAS] --snapshot FILE --policy average|current [--pairs 2000] [--rho-roots 0]
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
+// League: ./aswiss_stud league --agents FILE [--deals 20000] [--seed 2026110901] --out DIR  (duplicate head-to-head; see league())
 //
 // Reuses the engine in ../../../cpp_mccfr/stud_mccfr.cpp (rules, power atlas, PolicyLBR) unchanged.
 // Atom: the hard power InfoKey of a frozen atlas (power cluster x betting summary x legal mask), i.e.
@@ -2363,6 +2364,220 @@ int eval(int argc, char** argv) {
     return 0;
 }
 
+// ---- league: duplicate head-to-head matches between saved policies and the engine's heuristics ----------------------
+// ./aswiss_stud league --agents FILE [--deals 20000] [--seed 2026110901] [--power-cache 1000000] --out DIR
+// FILE is a CSV with the header name,kind,partition,atlas,snapshot,policy; one agent per row:
+//   snapshot rows: kind snapshot, partition context|atom|aswiss|history, the run's atlas (empty for context), the
+//                  snapshot file, policy average|current (what the run plays: average)
+//   heuristic rows: kind heuristic, partition = the engine's variant (baseline, bluff-defense, over-bluff,
+//                  hidden-bluff, slow-play); the other fields empty
+// Every pair plays the same deals, each deal twice with the seats swapped (duplicate poker), so the cards cancel within
+// a deal and every pair sees the same cards. Discard/reveal is the game's heuristic H4 for both seats (snapshots with a
+// learned H4 are refused). Mixed policies sample their actions from a generator seeded by (seed, deal, pair, seat
+// order), so a pair's result does not depend on which other agents are in the league. Values are ante per hand for
+// the row agent: league_pairs.csv (every pair, mean and 95% interval), league_agents.csv (each agent's mean over all
+// opponents, interval over deals), league_matrix.md (both tables), league_deals.csv (per-deal values, --deals-csv 1).
+struct LeagueAgent {
+    std::string name, kind, partition, atlas_path, snapshot, policy;
+    HeuristicVariant variant = HeuristicVariant::Baseline;
+    std::unique_ptr<Model> model;
+    const PowerAtlas* atlas = nullptr;
+    bool average = true;
+    Action choose(const State& state, int seat, std::mt19937_64& rng) const {
+        if (!model) return heuristic_variant_action(state, seat, variant);
+        return sample_action(model->strategy(state, seat, average), valid_mask(state, seat), rng);
+    }
+};
+std::vector<std::string> split_csv_line(const std::string& line) {
+    std::vector<std::string> out(1);
+    for (char c : line) {
+        if (c == ',') out.emplace_back();
+        else if (c != '\r') out.back() += c;
+    }
+    for (auto& f : out) {  // trim spaces
+        const auto a = f.find_first_not_of(' '), b = f.find_last_not_of(' ');
+        f = a == std::string::npos ? "" : f.substr(a, b - a + 1);
+    }
+    return out;
+}
+// seat 0 is agents[0]; returns seat 0's result in ante (heuristic H4 for both seats)
+double play_league_hand(const std::vector<Card>& deck, const std::array<const LeagueAgent*, 2>& agents,
+                        std::array<std::mt19937_64, 2>& rng) {
+    State state;
+    state.ante = kAnte;
+    state.effective_stack = kAnte * kEffectiveStackAnte;
+    state.pot = kAnte * 2;
+    for (Player& player : state.players) player.invested = kAnte;
+    size_t cursor = 0;
+    prepare_initial_cards(state, deck, cursor, -1, nullptr, nullptr, -1);
+    for (int seat = 0; seat < 2; ++seat) state.players[seat].shown.push_back(deck[cursor++]);
+    for (int street : {5, 6, 7}) {
+        for (int seat = 0; seat < 2; ++seat) {
+            if (street == 7) state.players[seat].hidden.push_back(deck[cursor++]);
+            else state.players[seat].shown.push_back(deck[cursor++]);
+        }
+        reset_round(state, street);
+        if (!state.players[0].all_in && !state.players[1].all_in) {
+            int actor = state.actor;
+            while (!state.terminal) {
+                const Action action = agents[actor]->choose(state, actor, rng[actor]);
+                const ActionResult result = apply_action(state, actor, action);
+                if (result == ActionResult::RoundEnd || result == ActionResult::FoldEnd) break;
+                actor = 1 - actor;
+                state.actor = actor;
+            }
+        }
+        if (state.terminal) break;
+    }
+    return settle(state, 0);
+}
+int league(int argc, char** argv) {
+    auto o = parse(argc, argv, {{"--agents", ""}, {"--deals", "20000"}, {"--seed", "2026110901"}, {"--power-cache", "1000000"},
+                                {"--out", ""}, {"--deals-csv", "0"}});
+    std::ifstream in(o.at("--agents"));
+    if (!in) throw std::runtime_error("league: cannot read --agents " + o["--agents"]);
+    std::string line;
+    std::getline(in, line);
+    const auto header = split_csv_line(line);
+    const std::vector<std::string> want{"name", "kind", "partition", "atlas", "snapshot", "policy"};
+    if (header != want) throw std::runtime_error("league: the agents file header must be name,kind,partition,atlas,snapshot,policy");
+    std::vector<LeagueAgent> agents;
+    std::map<std::string, std::unique_ptr<PowerAtlas>> atlases;
+    const size_t cache = std::stoull(o["--power-cache"]);
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#' || line.find_first_not_of(" ,\r") == std::string::npos) continue;
+        auto f = split_csv_line(line);
+        f.resize(6);
+        LeagueAgent a;
+        a.name = f[0]; a.kind = f[1]; a.partition = f[2]; a.atlas_path = f[3]; a.snapshot = f[4]; a.policy = f[5].empty() ? "average" : f[5];
+        if (a.name.empty()) throw std::runtime_error("league: an agent without a name");
+        for (const auto& b : agents) if (b.name == a.name) throw std::runtime_error("league: duplicate agent name " + a.name);
+        if (a.kind == "heuristic") {
+            const std::string v = a.partition.empty() ? "baseline" : a.partition;
+            a.variant = heuristic_variant_from_name(v);
+            if (v != "baseline" && a.variant == HeuristicVariant::Baseline) throw std::runtime_error("league: unknown heuristic variant " + v);
+        } else if (a.kind == "snapshot") {
+            if (a.policy != "average" && a.policy != "current") throw std::runtime_error("league: policy must be average or current (" + a.name + ")");
+            a.average = a.policy == "average";
+            if (!a.atlas_path.empty()) {
+                auto& slot = atlases[a.atlas_path];
+                if (!slot) slot = load_atlas(a.atlas_path, cache);
+                a.atlas = slot.get();
+            }
+            a.model = std::make_unique<Model>(parse_partition(a.partition), a.atlas);
+            a.model->load(a.snapshot);
+            if (a.model->has_h4()) throw std::runtime_error("league: " + a.name + " has a learned H4; the league plays the heuristic H4");
+            std::cerr << "loaded " << a.name << " (" << a.partition << ", " << a.snapshot << ", " << a.policy << ")\n";
+        } else {
+            throw std::runtime_error("league: kind must be snapshot or heuristic (" + a.name + ")");
+        }
+        agents.push_back(std::move(a));
+    }
+    const int n = static_cast<int>(agents.size());
+    if (n < 2) throw std::runtime_error("league: at least two agents");
+    const int deals = std::stoi(o["--deals"]);
+    const uint64_t seed = std::stoull(o["--seed"]);
+    const std::string out = o.at("--out");
+    std::filesystem::create_directories(out);
+    std::vector<std::pair<int, int>> pairs;
+    for (int i = 0; i < n; ++i) for (int j = i + 1; j < n; ++j) pairs.emplace_back(i, j);
+    // value[p][d]: agent pairs[p].first's result on deal d, averaged over the two seatings
+    std::vector<std::vector<double>> value(pairs.size(), std::vector<double>(deals));
+    auto mix = [](uint64_t x) { x += 0x9e3779b97f4a7c15ull; x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+                                x = (x ^ (x >> 27)) * 0x94d049bb133111ebull; return x ^ (x >> 31); };
+    std::hash<std::string> hs;
+    std::mt19937_64 deal_rng(seed);
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int d = 0; d < deals; ++d) {
+        auto deck = fresh_deck();
+        std::shuffle(deck.begin(), deck.end(), deal_rng);
+        for (size_t p = 0; p < pairs.size(); ++p) {
+            const LeagueAgent &a = agents[pairs[p].first], &b = agents[pairs[p].second];
+            const uint64_t key = mix(seed ^ mix(static_cast<uint64_t>(d) ^ mix(hs(a.name) ^ mix(hs(b.name)))));
+            double sum = 0;
+            for (int order = 0; order < 2; ++order) {  // order 0: a in seat 0; order 1: b in seat 0
+                std::array<std::mt19937_64, 2> rng{std::mt19937_64(mix(key ^ (4ull * order))), std::mt19937_64(mix(key ^ (4ull * order + 1)))};
+                const double r0 = order == 0 ? play_league_hand(deck, {&a, &b}, rng) : play_league_hand(deck, {&b, &a}, rng);
+                sum += order == 0 ? r0 : -r0;
+            }
+            value[p][d] = sum / 2;
+        }
+        if ((d + 1) % 1000 == 0 || d + 1 == deals) {
+            const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::cerr << "deal " << d + 1 << "/" << deals << " (" << std::fixed << std::setprecision(1) << sec << " s, about "
+                      << sec / (d + 1) * (deals - d - 1) << " s left)\n" << std::defaultfloat;
+        }
+    }
+    auto mean_ci = [](const std::vector<double>& x) {
+        double m = 0, v = 0;
+        for (double y : x) m += y;
+        m /= x.size();
+        for (double y : x) v += (y - m) * (y - m);
+        const double se = x.size() > 1 ? std::sqrt(v / (x.size() - 1) / x.size()) : 0.0;
+        return std::make_pair(m, 1.96 * se);
+    };
+    std::ofstream pc(out + "/league_pairs.csv");
+    pc << "agent,opponent,deals,ante_per_hand,ci95\n" << std::setprecision(6);
+    std::vector<std::vector<std::pair<double, double>>> cell(n, std::vector<std::pair<double, double>>(n, {0.0, 0.0}));
+    for (size_t p = 0; p < pairs.size(); ++p) {
+        const auto [m, h] = mean_ci(value[p]);
+        const auto [i, j] = pairs[p];
+        cell[i][j] = {m, h}; cell[j][i] = {-m, h};
+        pc << agents[i].name << ',' << agents[j].name << ',' << deals << ',' << m << ',' << h << '\n';
+        pc << agents[j].name << ',' << agents[i].name << ',' << deals << ',' << -m << ',' << h << '\n';
+    }
+    // each agent's mean result against the field: per deal, the average over its opponents, then the interval over deals
+    std::vector<std::pair<double, double>> field(n);
+    std::ofstream ac(out + "/league_agents.csv");
+    ac << "agent,kind,partition,snapshot,policy,opponents,deals,mean_vs_field,ci95\n" << std::setprecision(6);
+    for (int i = 0; i < n; ++i) {
+        std::vector<double> per(deals, 0.0);
+        for (size_t p = 0; p < pairs.size(); ++p) {
+            if (pairs[p].first == i) for (int d = 0; d < deals; ++d) per[d] += value[p][d] / (n - 1);
+            if (pairs[p].second == i) for (int d = 0; d < deals; ++d) per[d] -= value[p][d] / (n - 1);
+        }
+        field[i] = mean_ci(per);
+        ac << agents[i].name << ',' << agents[i].kind << ',' << agents[i].partition << ',' << agents[i].snapshot << ','
+           << agents[i].policy << ',' << n - 1 << ',' << deals << ',' << field[i].first << ',' << field[i].second << '\n';
+    }
+    std::vector<int> order(n);
+    for (int i = 0; i < n; ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&](int x, int y) { return field[x].first > field[y].first; });
+    std::ostringstream md;
+    md << std::fixed << std::setprecision(3);
+    md << "League: " << deals << " deals, each played twice with the seats swapped (duplicate), seed " << seed
+       << ". Values: ante per hand for the row agent, 95% interval over deals.\n\n";
+    md << "| rank | agent | mean against the field |\n|---:|---|---:|\n";
+    for (int r = 0; r < n; ++r) md << "| " << r + 1 << " | " << agents[order[r]].name << " | " << field[order[r]].first << " ± " << field[order[r]].second << " |\n";
+    md << "\n| row vs column |";
+    for (int c : order) md << ' ' << agents[c].name << " |";
+    md << "\n|---|";
+    for (int c = 0; c < n; ++c) md << "---:|";
+    md << '\n';
+    for (int r : order) {
+        md << "| " << agents[r].name << " |";
+        for (int c : order) {
+            if (r == c) md << " - |";
+            else md << ' ' << cell[r][c].first << " ± " << cell[r][c].second << " |";
+        }
+        md << '\n';
+    }
+    std::ofstream(out + "/league_matrix.md") << md.str();
+    if (o["--deals-csv"] == "1") {
+        std::ofstream dc(out + "/league_deals.csv");
+        dc << "deal";
+        for (const auto& [i, j] : pairs) dc << ',' << agents[i].name << " vs " << agents[j].name;
+        dc << '\n' << std::setprecision(6);
+        for (int d = 0; d < deals; ++d) {
+            dc << d;
+            for (size_t p = 0; p < pairs.size(); ++p) dc << ',' << value[p][d];
+            dc << '\n';
+        }
+    }
+    std::cout << md.str();
+    return 0;
+}
+
 #include "sota/stud7_net_main.hpp"
 #include "sota/rebel_main.hpp"
 
@@ -2686,6 +2901,7 @@ int main(int argc, char** argv) {
         if (mode == "eval") return eval(argc, argv);
         if (mode == "self-test") return self_test(argc, argv);
         if (mode == "serve") return serve(argc, argv);
+        if (mode == "league") return league(argc, argv);
         throw std::runtime_error("usage: aswiss_stud train|eval|self-test|serve [options]");
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";

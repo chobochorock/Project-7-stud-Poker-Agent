@@ -1162,6 +1162,37 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - 분할 이유(라벨과 z 값)를 bucket 계보에 붙이는 것. 학습의 `splits.csv`(`-LogSplits`)를 읽어야 한다.
 - bucket 탐색기와 손 전체 설명. 계획은 `../INTERPRETABILITY_PLAN_KO.md`에 있다.
 
+## 리그: 저장한 정책끼리의 맞대결 (2026-11-09 추가)
+
+LBR은 한 정책이 최악의 상대에게 얼마나 지는지(공략당하는 정도)를 잰다. 리그는 정책끼리 실제로 맞붙여 누가 이기는지를 잰다. 둘은 다른 질문이라 함께 본다.
+
+**`aswiss_stud league`**
+- 참가자는 스냅숏(context, atom = k-means, aswiss, history)과 엔진의 규칙 기반 휴리스틱(`baseline`, `bluff-defense`, `over-bluff`, `hidden-bluff`, `slow-play`)이다.
+- 모든 쌍이 같은 deal을 쓰고, deal마다 자리를 바꿔 두 번 둔다(duplicate). 카드 운이 한 deal 안에서 상쇄된다.
+- 4구 버림/공개는 두 자리 모두 게임의 휴리스틱 H4다(학습 H4 스냅숏은 거부).
+- 혼합 정책의 행동 표본은 (seed, deal, 쌍, 자리 순서)로 정한 난수를 쓴다. 그래서 한 쌍의 결과는 리그에 누가 더 있는지와 무관하고, 다시 돌리면 바이트 단위로 같다(확인함).
+- 출력(ante/hand, 행 참가자 기준, 95% 구간):
+  - `league_matrix.md`: 순위(전체 상대에 대한 평균)와 쌍별 표
+  - `league_pairs.csv`: 쌍별 결과
+  - `league_agents.csv`: 참가자별 평균. 구간은 deal에 대해 잰다.
+  - `league_deals.csv`: deal별 값(`--deals-csv`)
+- 검증: 같은 스냅숏을 두 이름으로 넣은 쌍이 −0.04 ± 0.23(2,000 deal)으로 0과 구별되지 않았다. 작은 모델 다섯과 휴리스틱 둘의 2,000 deal 리그(쌍 15개, 6만 판)가 2초 걸렸다.
+
+**`league.py`:** 실행 폴더와 roots로 스냅숏을 고르고(`snapshots.csv`에서 정확히 그 roots, 없으면 그 아래 가장 최근 것을 고르고 알려 줌), 폴더 이름으로 partition과 atlas를 정해 `agents.csv`를 만든 뒤 `league`를 부른다.
+
+```powershell
+# 학습 중인 aswiss_stud.exe와 겹치지 않게 다른 이름으로 빌드
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action build -ExeName aswiss_league.exe
+python agents\adaptive_buckets\aswiss\stud7\league.py agents\adaptive_buckets\aswiss\stud7\aswiss_league.exe agents\adaptive_buckets\aswiss\stud7\data\league_s1 --deals 50000 `
+  --agent heuristic=heuristic `
+  --agent k256_41M=agents\adaptive_buckets\aswiss\stud7\data\runs_100m\atom_k256_s1@40950000 `
+  --agent k256_100M=agents\adaptive_buckets\aswiss\stud7\data\runs_100m\atom_k256_s1@100000000 `
+  --agent aswiss_last=agents\adaptive_buckets\aswiss\stud7\data\runs_fair\history_bbf_street_s1@last
+```
+
+- 참가자 이름(`NAME=`)은 행동 표본의 난수에도 들어간다. 같은 이름과 seed로 다시 돌리면 결과가 같다.
+- 구간 크기는 대략 deal 수의 제곱근에 반비례한다. 쌍별 95% 구간이 2,000 deal에서 ±0.16–0.35였으므로 50,000 deal이면 ±0.03–0.07쯤이다.
+
 ## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, 2026-11-08)
 
 **조건**

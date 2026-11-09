@@ -104,6 +104,8 @@ eval|final|presplit)
 plot)
     specs=(); for a in $ARMS; do specs+=("${NAME[$a]}$SUFFIX:${LABEL[$a]}"); done
     base=k256; for k in k256 k341 k512 k1024; do case " $ARMS " in *" $k "*) base=$k; break ;; esac; done  # first k-means arm run
+    # the baseline is drawn even when ARMS leaves it out (e.g. ARMS=hist_bbf on a folder that also holds k256)
+    case " $ARMS " in *" $base "*) ;; *) [ -d "$OUT/${NAME[$base]}$SUFFIX" ] && specs+=("${NAME[$base]}$SUFFIX:${LABEL[$base]}") ;; esac
     "$PYTHON" "$HERE/plot_stud.py" "$OUT" "$OUT/results$SUFFIX" --runs "${specs[@]}" --baseline "${NAME[$base]}$SUFFIX" --epoch-only
     "$PYTHON" "$HERE/plot_stud_time.py" "$OUT" "$OUT/results${SUFFIX}_cputime.png" --runs "${specs[@]}" --clock cpu  # equal CPU time
     pre=eval_presplit$PRESPLIT_PARTICLES.jsonl

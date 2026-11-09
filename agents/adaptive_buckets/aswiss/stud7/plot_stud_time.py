@@ -37,7 +37,7 @@ ap.add_argument("--clock", choices=["wall", "cpu"], default="wall")
 a = ap.parse_args()
 
 
-from train_clock import cpu_clock  # noqa: E402  (training CPU seconds; see train_clock.py)
+from train_clock import cpu_clock, read_rows  # noqa: E402  (training CPU seconds; see train_clock.py)
 colors = ["#444444", "#6a51a3", "#1b9e77", "#000000", "#e6550d", "#3182bd", "#777777", "#d62728", "#17becf"]
 fig, ax = plt.subplots(2, 2, figsize=(14, 10))
 LBR_LT = 0.1  # LBR panels: symmetric log, linear within +-LBR_LT ante (negative values stay visible); nothing is cut off
@@ -45,8 +45,8 @@ for i, spec in enumerate(a.runs):
     name, rest = spec.split(":", 1)
     label, _, group = rest.partition("|")
     d = os.path.join(a.runs_dir, name)
-    snap = list(csv.DictReader(open(os.path.join(d, "snapshots.csv"))))
-    cv = list(csv.DictReader(open(os.path.join(d, "curve.csv"))))
+    snap = read_rows(os.path.join(d, "snapshots.csv"))
+    cv = read_rows(os.path.join(d, "curve.csv"))
     roots = np.array([0.0] + [float(r["roots"]) for r in cv]); sec = np.array([0.0] + [float(r["seconds"]) for r in cv])
     snap_cpu, wall_only = None, False
     if a.clock == "cpu":

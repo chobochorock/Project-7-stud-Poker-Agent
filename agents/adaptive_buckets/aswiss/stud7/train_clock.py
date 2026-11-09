@@ -8,8 +8,17 @@ Prints, per run, the training CPU seconds at its last curve.csv row (and in hour
   (online_lbr.csv online_seconds, single-threaded); the first row after a restart adds its training wall seconds
   instead, because the CPU time between the last row before a stop and the stop is in no row.
 """
-import csv, os, sys
+import csv, io, os, sys
 import numpy as np
+
+
+def read_rows(path):
+    """Rows of a CSV file that a running trainer may be appending to: only complete lines (up to the last newline; the
+    trainer's buffered writes can stop mid-line) and only rows with exactly the header's fields."""
+    with open(path, newline="") as f:
+        text = f.read()
+    text = text[:text.rfind("\n") + 1]
+    return [r for r in csv.DictReader(io.StringIO(text)) if None not in r and None not in r.values()]
 
 
 def cpu_clock(d, cv, snap):
@@ -22,7 +31,7 @@ def cpu_clock(d, cv, snap):
     online = [], []
     op = os.path.join(d, "online_lbr.csv")
     if os.path.exists(op):
-        for r in csv.DictReader(open(op)): online[0].append(float(r["roots"])); online[1].append(float(r["online_seconds"]))
+        for r in read_rows(op): online[0].append(float(r["roots"])); online[1].append(float(r["online_seconds"]))
     o_at = lambda x: online[1][np.searchsorted(online[0], x, side="right") - 1] if online[0] and x >= online[0][0] else 0.0
     # process CPU time restarts at every resumption: the row after a restart adds its training wall seconds instead (the
     # CPU time between the last row before the stop and the stop is not in any row; the trainers are single-threaded)
@@ -39,8 +48,8 @@ def cpu_clock(d, cv, snap):
 if __name__ == "__main__":
     if len(sys.argv) < 2: sys.exit(__doc__)
     for d in sys.argv[1:]:
-        cv = list(csv.DictReader(open(os.path.join(d, "curve.csv"))))
-        snap = list(csv.DictReader(open(os.path.join(d, "snapshots.csv"))))
+        cv = read_rows(os.path.join(d, "curve.csv"))
+        snap = read_rows(os.path.join(d, "snapshots.csv"))
         c = cpu_clock(d, cv, snap)
         if c is None or not cv:
             print(f"{d}: no CPU column (older run); training wall seconds {cv[-1]['seconds'] if cv else 0}")

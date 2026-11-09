@@ -15,7 +15,7 @@ roots from curve.csv; runs without CPU columns keep wall seconds and are marked 
 """
 import argparse, csv, math, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from train_clock import cpu_clock
+from train_clock import cpu_clock, read_rows
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -62,14 +62,14 @@ def load(name):
     d = os.path.join(a.runs_dir, name)
     to_cpu = None
     if a.clock == "cpu" and os.path.exists(os.path.join(d, "curve.csv")):
-        cv = list(csv.DictReader(open(os.path.join(d, "curve.csv"))))
-        c = cpu_clock(d, cv, list(csv.DictReader(open(os.path.join(d, "snapshots.csv")))))
+        cv = read_rows(os.path.join(d, "curve.csv"))
+        c = cpu_clock(d, cv, read_rows(os.path.join(d, "snapshots.csv")))
         if c is not None:
             rr = np.array([0.0] + [float(r["roots"]) for r in cv])
             to_cpu = lambda x: float(np.interp(x, rr, c[0]))
     if a.clock == "cpu" and to_cpu is None: wall_only.add(name)
     out = {}
-    for r in csv.DictReader(open(path)):
+    for r in read_rows(path):
         t = to_cpu(float(r["roots"])) if to_cpu else float(r["seconds"])
         out.setdefault(r["policy"], []).append((int(r["roots"]), t, float(r["lbr_pair"]), int(r["particles"]),
                                                 float(r["online_seconds"])))

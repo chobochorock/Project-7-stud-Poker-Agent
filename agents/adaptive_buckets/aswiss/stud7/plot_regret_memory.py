@@ -15,6 +15,7 @@ The regret sum is a training-time diagnostic of the regrets the trainer accumula
 sum over buckets, so it also grows with the number of buckets, which differs between runs (curve.csv column buckets).
 """
 import argparse, csv, os
+from train_clock import read_rows
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -31,7 +32,7 @@ missing_regret, missing_mem, zeros = [], [], []
 
 
 def read(path):
-    return list(csv.DictReader(open(path))) if os.path.exists(path) else []
+    return read_rows(path) if os.path.exists(path) else []
 
 
 epochs = {}

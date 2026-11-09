@@ -200,6 +200,8 @@ elseif ($Action -eq "plot") {
     # baseline: the first k-means arm that was run (k256 when present)
     $base = @("k256", "k341", "k512", "k1024") | Where-Object { $Arms -contains $_ } | Select-Object -First 1
     if (-not $base) { $base = "k256" }
+    # the baseline is drawn even when -Arms leaves it out (e.g. -Arms hist_bbf on a folder that also holds k256)
+    if ($Arms -notcontains $base -and (Test-Path (Join-Path $Out (RunName $base)))) { $specs += "$(RunName $base):$($Arm[$base][3])" }
     & $Python (Join-Path $Here "plot_stud.py") $Out (Join-Path $Out "results$Suffix") --runs @specs --baseline (RunName $base) --epoch-only
     # equal-CPU-time view: LBR against training CPU seconds (train_clock.py)
     & $Python (Join-Path $Here "plot_stud_time.py") $Out (Join-Path $Out "results${Suffix}_cputime.png") --runs @specs --clock cpu
@@ -216,7 +218,7 @@ elseif ($Action -eq "plot") {
     $online = @($Arms | Where-Object { Test-Path (Join-Path (Join-Path $Out (RunName $_)) "online_lbr.csv") })
     if ($online.Count -gt 0) {
         $ospecs = @($online | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" })
-        $obase = if ($online -contains $base) { @("--baseline", (RunName $base)) } else { @() }
+        $obase = if (Test-Path (Join-Path (Join-Path $Out (RunName $base)) "online_lbr.csv")) { @("--baseline", (RunName $base)) } else { @() }
         foreach ($w in @(100, 2000)) {
             & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_w$w.png") --runs @ospecs --window $w @obase
             & $Python (Join-Path $Here "plot_online_lbr.py") $Out (Join-Path $Out "results${Suffix}_online_cpu_w$w.png") --runs @ospecs --window $w @obase --clock cpu

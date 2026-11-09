@@ -245,7 +245,9 @@ class TorchBackend:
                 torch.randint(0, store.size, (batch,), device=dev, generator=gen)
             idx = T["idx"][r]; idx = torch.where(idx == store.pad, torch.full_like(idx, pad), idx)
             val = T["val"][r]
-            a1 = torch.relu(F.embedding_bag(idx, P["W1"], per_sample_weights=val, mode="sum", sparse=True, padding_idx=pad) + P["b1"])
+            # dense first-layer gradient: inputs are a few thousand wide, and sparse gradients (sorting, coalescing every
+            # step) cost several times the step on a GPU; the update below still touches only the rows the batch used
+            a1 = torch.relu(F.embedding_bag(idx, P["W1"], per_sample_weights=val, mode="sum", padding_idx=pad) + P["b1"])
             a2 = torch.relu(a1 @ P["W2"] + P["b2"])
             y = a2 @ P["W3"] + P["b3"]
             if kind == "value":
@@ -274,13 +276,14 @@ class TorchBackend:
                     st["m"][k].mul_(BETA1).add_(g, alpha=1 - BETA1)
                     st["v"][k].mul_(BETA2).addcmul_(g, g, value=1 - BETA2)
                     P[k].sub_(lr * (st["m"][k] / c1) / (torch.sqrt(st["v"][k] / c2) + EPS))
-                g = P["W1"].grad.coalesce()
-                rr, gv = g.indices()[0], g.values()
-                keep = rr != pad; rr, gv = rr[keep], gv[keep]
+                touched = torch.bincount(idx.reshape(-1), minlength=pad + 1) > 0
+                touched[pad] = False
+                tm = touched[:, None]
+                g1 = P["W1"].grad
                 m1, v1 = st["m"]["W1"], st["v"]["W1"]
-                m1[rr] = BETA1 * m1[rr] + (1 - BETA1) * gv
-                v1[rr] = BETA2 * v1[rr] + (1 - BETA2) * gv * gv
-                P["W1"][rr] -= lr * (m1[rr] / c1) / (torch.sqrt(v1[rr] / c2) + EPS)
+                m1.copy_(torch.where(tm, BETA1 * m1 + (1 - BETA1) * g1, m1))
+                v1.copy_(torch.where(tm, BETA2 * v1 + (1 - BETA2) * g1 * g1, v1))
+                P["W1"].sub_(torch.where(tm, lr * (m1 / c1) / (torch.sqrt(v1 / c2) + EPS), torch.zeros_like(m1)))
             if s == steps - 1: loss_v = float(report.detach())
         self.opt[key] = st
         out = {k: P[k].detach().cpu().numpy().astype(np.float32) for k in NAMES}

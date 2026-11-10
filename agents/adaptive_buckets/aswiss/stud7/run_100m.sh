@@ -23,6 +23,7 @@ LOG_REGRET=${LOG_REGRET:-0}; LOG_REGRET_KMEANS=${LOG_REGRET_KMEANS:-0}; LOG_SPLI
 PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-2000}
 # BUDGET_CPU_SECONDS=S: the ARMS stop when their training CPU time reaches S (rerun without it to continue)
 # FREEZE_SPLITS_AT=R: tabular split arms stop judging (no label pass, no split) at epochs ending at root R or later
+# JUDGE_AT=R: the epoch containing root R ends there and is judged, frozen or not (one forced split)
 # EXE=PATH: executable to build and use (a second name lets new arms use new code while older arms keep running)
 BUDGET_CPU_SECONDS=${BUDGET_CPU_SECONDS:-0}
 EXE=${EXE:-$HERE/aswiss_stud}
@@ -77,6 +78,7 @@ run)
         # GPU arms: the training runs in a second process, so their budget is wall-clock (--budget-seconds)
         [ "$BUDGET_CPU_SECONDS" != 0 ] && online="$online $( [ -n "$gpu" ] && echo --budget-seconds || echo --budget-cpu-seconds ) $BUDGET_CPU_SECONDS"
         [ "${FREEZE_SPLITS_AT:-0}" != 0 ] && { [ "${PART[$a]}" = history ] || [ "${PART[$a]}" = aswiss ]; } && online="$online --freeze-splits-at $FREEZE_SPLITS_AT"
+        [ "${JUDGE_AT:-0}" != 0 ] && { [ "${PART[$a]}" = history ] || [ "${PART[$a]}" = aswiss ]; } && online="$online --judge-at $JUDGE_AT"
         case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
                             atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup $gpu "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \

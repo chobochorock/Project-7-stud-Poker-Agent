@@ -1834,7 +1834,8 @@ int train(int argc, char** argv) {
                                 {"--backward-z", ""}, {"--gate-eps", "0"}, {"--gate-stat", "avg"},
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
-                                {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}, {"--freeze-splits-at", "0"}});
+                                {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}, {"--freeze-splits-at", "0"},
+                                {"--judge-at", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
@@ -2027,8 +2028,16 @@ int train(int argc, char** argv) {
     // window): training goes on over the partition reached, with snapshots and epochs as before. It is not part of the
     // checkpoint configuration, so a run can be frozen when it is resumed (the run is the same up to the freeze).
     const uint64_t freeze_at = std::stoull(o["--freeze-splits-at"]);
-    auto judging = [&](uint64_t end) { return track && (freeze_at == 0 || end < freeze_at); };
-    uint64_t epoch_end = std::min(T, s.epoch_start + s.L);
+    // --judge-at R (R > 0, a root still ahead): the epoch containing R ends at R and is judged there, frozen or not
+    // (snapshot snapshot_K.bin, regret row, label pass, splits, as at any epoch end). The schedule then goes on from R
+    // as from any epoch end (the next epoch is twice as long). Not part of the checkpoint configuration either: a
+    // root already passed is ignored, so the same command can be rerun after the judgment.
+    const uint64_t judge_at = std::stoull(o["--judge-at"]);
+    auto judging = [&](uint64_t end) { return track && (freeze_at == 0 || end < freeze_at || (judge_at && end == judge_at)); };
+    auto schedule_end = [&](uint64_t end) { return judge_at > s.t && judge_at < end ? judge_at : end; };
+    if (judge_at && !track) throw std::runtime_error("--judge-at needs a splitting partition (history or aswiss)");
+    uint64_t epoch_end = schedule_end(std::min(T, s.epoch_start + s.L));
+    if (judge_at > s.t) std::cerr << "judgment forced at root " << judge_at << (judge_at > T ? " (beyond --roots: no effect)" : "") << "\n";
     while (s.t < T) {
         ++s.t;
         auto deck = fresh_deck();
@@ -2241,7 +2250,7 @@ int train(int argc, char** argv) {
             std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
                       << " splits=" << splits << (track && !judging(s.t) ? " (splits frozen)" : "") << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
             if (log_regret && !gated) model.iterate_regret_half(true);  // the next epoch's window (gated: reset at judgments)
-            s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = std::min(T, s.t + s.L);
+            s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = schedule_end(std::min(T, s.t + s.L));
         }
         if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();
         if (s.t % 1000 == 0 && std::filesystem::exists(stop_file)) g_stop = 1;

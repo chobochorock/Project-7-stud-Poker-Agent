@@ -1153,6 +1153,13 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - **스냅숏:** `-SnapshotEvery 50000000`은 5천만 roots(분할 없이 약 9시간)마다 스냅숏을 남긴다. epoch 스냅숏(163.83M, 327.67M roots)과 별개다. 스냅숏 주기는 체크포인트 설정에 없어서 이어 갈 때 바꿀 수 있다. 스냅숏 하나는 수백 MB다.
 - **고르기:** 새 스냅숏이 생기면 `-Action eval -AverageOnly -Arms hist_bbf`와 `-Action final -AverageOnly -Arms hist_bbf`로 LBR을 잰다. 가장 낮은 것을 웹에 고정한다(`ASWISS_SNAPSHOT`).
 - **분할을 다시 하려면:** `-Action stop`으로 멈추고, `-FreezeSplitsAt` 없이 같은 명령으로 실행한다.
+
+- **원하는 roots에서 한 번만 분할하려면 (`-JudgeAt R`, 학습기 `--judge-at R`, 2026-11-10 추가):**
+  - R이 들어 있는 epoch를 R에서 끝내고, 동결 여부와 관계없이 그 자리에서 판정(분할)한다. 스냅숏, regret 행, 라벨 순회, 역방향 분할은 다른 epoch 끝과 같다.
+  - 그 뒤의 일정은 다른 epoch 끝처럼 R부터 이어진다(다음 epoch는 두 배 길이).
+  - 체크포인트 설정에 들어가지 않는다. 이미 지난 R은 무시하므로 같은 명령을 다시 실행해도 된다.
+  - `-FreezeSplitsAt 1`과 함께 주면 R에서 한 번만 나누고 다시 동결한다.
+  - 시험(작은 실행): 동결 중 100k에서 bucket 123 → 417로 분할했다. 옵션을 주지 않은 실행은 이전 바이너리와 스냅숏이 바이트 단위로 같았다. 중간에 끊었다가 재개한 실행도 끊지 않은 실행과 스냅숏이 같았다.
   - 분할은 다음 epoch 끝(163.83M, 327.67M, 655.35M roots 중 다음 것)에서 다시 일어난다.
   - 이 런의 라벨(평균 정책)은 epoch 끝에 새로 계산하므로 멈췄던 동안 빠지는 입력이 없다.
   - 확인: 7만 roots부터 멈춘 시험용 미니 런을 31만 roots에서 다시 켜니, 63만 roots에서 719개 bucket이 분할됐다(442 → 1,964).

@@ -47,6 +47,7 @@ param(
     # arms started earlier keep running with (and locking) aswiss_stud.exe
     [string]$ExeName = "aswiss_stud.exe",
     [long]$FreezeSplitsAt = 0,     # > 0: epochs ending at or after this root are not judged (no label pass, no split); tabular arms
+    [long]$JudgeAt = 0,            # > 0: the epoch containing this root ends there and is judged, frozen or not (one forced split)
     [string]$Gxx = ""   # path to g++.exe when it is not on PATH
 )
 $ErrorActionPreference = "Stop"
@@ -150,6 +151,7 @@ elseif ($Action -eq "run") {
         $gpu = $a -like "*_gpu"
         if ($BudgetCpuSeconds -gt 0) { $argv += @($(if ($gpu) { "--budget-seconds" } else { "--budget-cpu-seconds" }), $BudgetCpuSeconds) }
         if ($FreezeSplitsAt -gt 0 -and $Arm[$a][1] -in @("history", "aswiss")) { $argv += @("--freeze-splits-at", $FreezeSplitsAt) }
+        if ($JudgeAt -gt 0 -and $Arm[$a][1] -in @("history", "aswiss")) { $argv += @("--judge-at", $JudgeAt) }
         if ($OnlineLbrEvery -gt 0) {
             $every = if ($Arm[$a][1] -eq "rebel") { $OnlineLbrRebelEvery } else { $OnlineLbrEvery }
             $argv += @("--online-lbr-every", $every, "--online-lbr-particles", $OnlineLbrParticles)

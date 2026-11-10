@@ -225,8 +225,9 @@ notes = [f"{run}: newest snapshot LBR > {OFF_SCALE_LBR:g}, not drawn" for run in
     + " Same trainer for every arm (external-sampling MCCFR+, linear averaging).",
     "LBR: engine PolicyLBR, same deals / LBR seed / 64 particles for every snapshot; an approximate exploitability "
     "LOWER bound. Hollow circles: newest snapshot re-evaluated with more pairs.",
-    "Gap proxy: sum over the traverser's visited states of max_a Q - E_pi Q under external sampling, mean of both seats "
-    "(trajectory-relaxed; not a bound). Ante units.",
+    "Gap proxy: sum over the traverser's visited states of max_a Q - E_pi Q under external sampling, mean of both seats; "
+    "in expectation at least the exploitability (NashConv/2) of the policy scored, but very loose: it also counts the "
+    "value of seeing the opponent's hidden cards, which stays positive at an equilibrium. Ante units.",
     *(["Method B arms (*_b: labels from the split-time average policy; *_wb: window labels and B labels "
        "combined) spend an extra average-policy pass of 25% of each epoch's roots per seat at the epoch end (history arms: "
        "at most 2.56M roots); these traversals are not counted on the x axis."]

@@ -1220,6 +1220,29 @@ python agents\adaptive_buckets\aswiss\stud7\league.py agents\adaptive_buckets\as
 - 최신 ASWISS의 우위에는 더 긴 학습(200M 이상 대 100M)이 섞여 있다. 같은 학습량(128M 대 100M)에서는 k-means 1024와 비겼다. 학습량을 맞춘 비교는 runs_fair의 k-means 256(255.79M roots, ASWISS와 같은 CPU 24시간)을 넣으면 일부 할 수 있다.
 - **기록할 차이:** seed 1개다. 참가자마다 학습량(roots, CPU 시간)이 다르다. k-means 256/341/1024와 ASWISS는 같은 휴리스틱 self-play 자료로 만든 codebook을 쓴다(K만 다름). 4구 버림/공개는 모두 휴리스틱 H4다.
 
+## gap proxy가 재는 것 (2026-11-10 정리)
+
+`curve.csv`의 gap 열("Training-deal gap proxy of the current policy")과 평가의 `gap_proxy_ante`(`--gap-roots`, 고정 deal)는 같은 양이다.
+
+**정의**
+- 외부 샘플링 순회에서 탐색자의 모든 결정 노드 h(자기 행동은 모두 펼치고, 상대와 카드는 표본)마다 max_a q̃(h,a) − Σ_a σ(a) q̃(h,a)를 더한다. 두 자리의 평균이고 단위는 ante다.
+- 학습 중 값은 그 root의 후회를 반영하기 **전**의 현재 정책으로 잰다. 그래서 각 deal을 배우기 전에 채점하는 값(test-then-train)이다.
+- 학습 시간이 따로 들지 않는다. 그리고 원 게임의 실제 이력 위에서 재므로 추상화가 다른 실행끼리 같은 잣대로 비교된다.
+
+**분해 (기댓값)**
+- 표본 위치 h에 갈 확률이 상대·우연 도달확률 π₋ᵢ(h)이므로 기댓값은 다음과 같다(잡음 때문에 max가 위로 치우치는 Jensen 항은 더해지기만 한다).
+  $$\mathbb E[\text{gap}]\ \ge\ \tfrac12\sum_i\sum_{I\in\mathcal I_i}\Big[\underbrace{\psi\big(r^\sigma(I)\big)}_{\text{정보집합 후회}}+\underbrace{V^\sigma_I}_{\text{숨은 카드를 아는 값}}\Big],\qquad V^\sigma_I=\sum_{h\in I}\pi_{-i}(h)\max_aq(h,a)-\max_a\sum_{h\in I}\pi_{-i}(h)\,q(h,a)\ \ge0.$$
+- 앞 항의 합 ρ(σ)는 NashConv(σ)의 상한이다(`ASWISS_CONVERGENCE_KO.md` Lemma 7). 그래서 **기댓값으로는 그 정책의 exploitability(NashConv/2)의 상한**이다.
+  - 학습 곡선의 값은 교대 갱신 때문에 두 자리가 바로 이웃한 두 프로필로 잰 것의 평균이다.
+  - 이전 그림 각주는 "상한이 아님"이라고 적었는데, 위 분해대로 고쳤다.
+- **아주 느슨하다.** 뒤 항 V(상대의 숨은 카드를 알면 얻는 값)는 균형에서도 0이 아니다. 그래서 값이 수백 ante에 머문다. 같은 정책의 LBR(하한)은 약 1이다.
+
+**읽는 법**
+- 분할 직후 치솟는 것은 새 자식의 표가 0(균등 전략)에서 다시 시작하기 때문이다.
+- ASWISS가 k-means 아래로 내려가는 것은 앞 항(정보집합 단위 후회, bucket 안 상쇄 포함)이 세밀한 분할로 줄어드는 것과 맞다.
+- 분할을 멈춘 뒤에도 계속 내려가지만 평균 정책의 LBR은 평평했다. 이 값은 현재 정책을 재고, 큰 바닥 V를 포함하기 때문이다. 그래서 이 값의 감소를 exploitability의 감소로 읽으면 안 된다.
+- 바닥을 줄이는 방법(구현 안 함): 같은 공개 정보에서 상대 숨은 카드를 여러 번 다시 뽑아 평균한 뒤 max를 취하면, 정보집합 후회 ψ(r(I))에 가까워지고 V가 빠진다. 다시 뽑는 횟수만큼 비용이 든다.
+
 ## 웹 전략 분석의 bucket 신뢰도 (2026-11-10 추가)
 
 웹의 전략 분석 카드에 그 결정이 쓰는 bucket의 신뢰도를 함께 보인다. 신뢰도는 그 bucket의 후회에 반비례한다.

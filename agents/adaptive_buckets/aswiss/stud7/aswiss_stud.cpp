@@ -14,7 +14,8 @@
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
 // League: ./aswiss_stud league --agents FILE [--deals 20000] [--seed 2026110901] --out DIR  (duplicate head-to-head; see league())
-// Bucket regret: ./aswiss_stud bucket-regret --atlas ATLAS --snapshot FILE [--roots 2000000]  (web confidence; see bucket_regret())
+// Bucket regret: ./aswiss_stud bucket-regret [--partition history|atom|aswiss|context] --atlas ATLAS --snapshot FILE [--roots 2000000]
+//                (per-bucket regret of the average policy: web confidence, comparisons; see bucket_regret())
 //
 // Reuses the engine in ../../../cpp_mccfr/stud_mccfr.cpp (rules, power atlas, PolicyLBR) unchanged.
 // Atom: the hard power InfoKey of a frozen atlas (power cluster x betting summary x legal mask), i.e.
@@ -2582,9 +2583,9 @@ int league(int argc, char** argv) {
 }
 
 // ---- bucket-regret: each bucket's regret under a snapshot's average policy (confidence in the web analysis) ----------
-// ./aswiss_stud bucket-regret --atlas ATLAS --snapshot FILE [--roots 2000000] [--seed 2026111001] [--min-visits 20]
-//                             [--r0 0] [--power-cache 1000000] [--out FILE (default SNAPSHOT.regret.csv)]
-// History partition. The average-policy pass of method B: both seats play the snapshot's average policy, the traverser
+// ./aswiss_stud bucket-regret [--partition history] --atlas ATLAS --snapshot FILE [--roots 2000000] [--seed 2026111001]
+//                             [--min-visits 20] [--r0 0] [--power-cache 1000000] [--out FILE (default SNAPSHOT.regret.csv)]
+// The average-policy pass of method B: both seats play the snapshot's average policy, the traverser
 // expands its own actions, the other seat and chance are sampled; roots split into two halves by parity. Per bucket:
 //   visits            traverser nodes of the bucket in the pass
 //   plain_per_visit   max(0, max_a R(a)) / visits (R: the sampled counterfactual regret sums; biased up by the noise)
@@ -2596,11 +2597,45 @@ int league(int argc, char** argv) {
 //                     regrets (inversely proportional); r0 = the median regret_per_visit of the buckets with at least
 //                     --min-visits visits, unless --r0 > 0. Fewer visits: no confidence (empty), too few samples.
 // The first line is a comment with the settings and r0; `serve --bucket-regret FILE` reports the row of the bucket.
+// Printed summary: rho_cross_half / rho_plain_half (the bucket regret total per root, rho_P/2, cross-fitted / plain),
+// scored_visit_share (share of the traverser visits in buckets with --min-visits or more) and regret_per_visit_scored
+// (their visit-weighted regret per visit): totals grow with the number of buckets, the per-visit figure compares
+// abstractions of different sizes; the cross-fitted values are conservative where a bucket has few visits.
+// --partition atom|aswiss|context (k-means and atom-label runs): the same pass with the atom key's bucket (no
+// --avg-fill there), so a fixed k-means snapshot and an ASWISS snapshot get the same statistic on the same deals.
+double avg_traverse_atom(const Model& model, State state, int traverser, std::mt19937_64& rng, BucketHalves& halves, int half) {
+    if (state.terminal) return terminal_net_search(state, traverser);
+    const int actor = state.actor;
+    const uint8_t mask = valid_mask(state, actor);
+    const uint32_t b = model.lookup(model.atom_key(state, actor));
+    const auto avg = model.bucket_policy(b, mask, true);
+    if (actor != traverser) {
+        step(state, actor, sample_action(avg, mask, rng));
+        return avg_traverse_atom(model, std::move(state), traverser, rng, halves, half);
+    }
+    std::array<double, A> v{};
+    double node = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        State child = state;
+        step(child, actor, static_cast<Action>(a));
+        v[a] = avg_traverse_atom(model, std::move(child), traverser, rng, halves, half);
+        node += avg[a] * v[a];
+    }
+    if (b != kNone) {
+        auto& h = halves[b];
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) h[half * A + a] += v[a] - node;
+        h[2 * A + half] += 1;
+    }
+    return node;
+}
 int bucket_regret(int argc, char** argv) {
-    auto o = parse(argc, argv, {{"--atlas", ""}, {"--snapshot", ""}, {"--roots", "2000000"}, {"--seed", "2026111001"},
-                                {"--min-visits", "20"}, {"--r0", "0"}, {"--power-cache", "1000000"}, {"--out", ""}});
+    auto o = parse(argc, argv, {{"--partition", "history"}, {"--atlas", ""}, {"--snapshot", ""}, {"--roots", "2000000"},
+                                {"--seed", "2026111001"}, {"--min-visits", "20"}, {"--r0", "0"}, {"--power-cache", "1000000"},
+                                {"--out", ""}});
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
-    Model model(Partition::History, atlas.get());
+    const Partition partition = parse_partition(o["--partition"]);
+    Model model(partition, atlas.get());
     model.load(o.at("--snapshot"));
     if (model.has_h4()) throw std::runtime_error("bucket-regret: snapshots with a learned H4 are not supported");
     const uint64_t roots = std::stoull(o["--roots"]), seed = std::stoull(o["--seed"]);
@@ -2612,9 +2647,13 @@ int bucket_regret(int argc, char** argv) {
     for (uint64_t i = 0; i < roots; ++i) {
         auto deck = fresh_deck();
         std::shuffle(deck.begin(), deck.end(), rng);
-        for (int p = 0; p < 2; ++p)
-            avg_traverse_h(model, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, p, rng, nullptr,
-                           nullptr, nullptr, &halves, static_cast<int>(i & 1));
+        for (int p = 0; p < 2; ++p) {
+            if (partition == Partition::History)
+                avg_traverse_h(model, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, p, rng, nullptr,
+                               nullptr, nullptr, &halves, static_cast<int>(i & 1));
+            else
+                avg_traverse_atom(model, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), p, rng, halves, static_cast<int>(i & 1));
+        }
         if ((i + 1) % 100000 == 0 || i + 1 == roots) {
             const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             std::cerr << "root " << i + 1 << "/" << roots << " (" << std::fixed << std::setprecision(0) << sec << " s, about "
@@ -2647,11 +2686,11 @@ int bucket_regret(int argc, char** argv) {
     }
     std::ofstream csv(out);
     if (!csv) throw std::runtime_error("bucket-regret: cannot write " + out);
-    csv << "# snapshot=" << o["--snapshot"] << ",roots=" << roots << ",seed=" << seed << ",min_visits=" << min_visits
+    csv << "# snapshot=" << o["--snapshot"] << ",partition=" << o["--partition"] << ",roots=" << roots << ",seed=" << seed << ",min_visits=" << min_visits
         << ",r0=" << std::setprecision(9) << r0 << "\n";
     csv << "bucket,visits,regret_per_visit,cross_per_visit,plain_per_visit,best_action,confidence\n";
     std::array<int, 5> band{};  // confidence >= 0.8, 0.6, 0.4, 0.2, below
-    double total_cross = 0, total_plain = 0;
+    double total_cross = 0, total_plain = 0, visits_all = 0, visits_scored = 0, regret_scored = 0;
     for (const auto& r : rows) {
         const double reg = std::max(0.0, r.cross);
         csv << r.b << ',' << r.visits << ',' << reg << ',' << r.cross << ',' << r.plain << ','
@@ -2663,10 +2702,14 @@ int bucket_regret(int argc, char** argv) {
         }
         csv << '\n';
         total_cross += r.cross * r.visits; total_plain += r.plain * r.visits;
+        visits_all += r.visits;
+        if (r.visits >= min_visits) { visits_scored += r.visits; regret_scored += reg * r.visits; }
     }
-    std::cout << std::setprecision(6) << "{\"out\":\"" << json_escape(out) << "\",\"roots\":" << roots << ",\"buckets_seen\":" << rows.size()
+    std::cout << std::setprecision(6) << "{\"out\":\"" << json_escape(out) << "\",\"partition\":\"" << o["--partition"] << "\",\"roots\":" << roots << ",\"buckets_seen\":" << rows.size()
               << ",\"buckets_scored\":" << enough.size() << ",\"model_buckets\":" << model.bucket_count() << ",\"r0\":" << r0
               << ",\"rho_cross_half\":" << total_cross / (2.0 * roots) << ",\"rho_plain_half\":" << total_plain / (2.0 * roots)
+              << ",\"visits\":" << visits_all << ",\"scored_visit_share\":" << (visits_all > 0 ? visits_scored / visits_all : 0.0)
+              << ",\"regret_per_visit_scored\":" << (visits_scored > 0 ? regret_scored / visits_scored : 0.0)
               << ",\"confidence_bands\":{\">=0.8\":" << band[0] << ",\"0.6-0.8\":" << band[1] << ",\"0.4-0.6\":" << band[2]
               << ",\"0.2-0.4\":" << band[3] << ",\"<0.2\":" << band[4] << "}}\n";
     return 0;

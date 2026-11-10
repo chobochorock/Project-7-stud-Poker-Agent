@@ -1249,6 +1249,16 @@ python web_app.py
 - 시간: 학습과 같은 속도(이 환경의 작은 모델에서 초당 약 1,400 roots)라 2M roots면 약 25분으로 본다. bucket이 많으므로 방문 20회를 넘는 bucket 비율은 roots에 따라 달라진다. 화면 마지막 줄의 `buckets_scored`로 확인한다.
 - 시험(30만 roots 학습한 작은 모델, 4만 roots 측정): bucket 2,274개 중 1,480개를 방문했고 1,351개에 신뢰도를 매겼다. r0는 0.19 ante/방문이었다. 많이 오는 bucket의 신뢰도는 0.69–0.92였다.
 
+**k-means 스냅숏과의 비교 (`--partition atom`)**
+- 같은 측정을 k-means(원자) 스냅숏에도 할 수 있다. 같은 `--seed`와 `--roots`면 같은 deal을 쓴다.
+- k-means 1024 100M(`runs_100m`)에는 학습 중 bucket 후회 기록(`regret.csv`)이 없다. 그 실행은 `-LogRegret`가 생기기 전이었고, 원자 실행의 log.csv C열은 0이다. 학습 중 기록은 `runs_online`과 `runs_fair`의 k-means 256과 ASWISS에만 있다. 그래서 k-means 1024와는 이 스냅숏 측정으로 비교한다.
+- 화면 요약:
+  - `rho_cross_half`, `rho_plain_half`: bucket 후회 총량 ρ_P/2(root당, 교차와 plain)
+  - `scored_visit_share`: 방문이 `--min-visits` 이상인 bucket에 들어간 방문의 비율
+  - `regret_per_visit_scored`: 그 bucket들의 방문 가중 방문당 후회
+- **크기가 다른 추상화는 방문당 후회로 비교한다.** 총량은 bucket이 많을수록 커진다. 교차값은 방문이 적은 bucket에서 낮게 나온다(보수적).
+- 시험(각각 30만 roots만 학습한 작은 모델, 4만 roots 측정): ASWISS(bucket 2,274개) 방문당 0.21 ante, ρ_P/2 교차 9.9 / plain 11.0. k-means 256(bucket 35,642개) 방문당 4.57 ante, 교차 118 / plain 357. 작은 k-means는 bucket당 학습이 적어 후회가 크고, plain과 교차의 차이(잡음)도 크다.
+
 ## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, 2026-11-08)
 
 **조건**

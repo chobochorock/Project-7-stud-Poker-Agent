@@ -16,6 +16,7 @@
 // League: ./aswiss_stud league --agents FILE [--deals 20000] [--seed 2026110901] --out DIR  (duplicate head-to-head; see league())
 // Bucket regret: ./aswiss_stud bucket-regret [--partition history|atom|aswiss|context] --atlas ATLAS --snapshot FILE [--roots 2000000]
 //                (per-bucket regret of the average policy: web confidence, comparisons; see bucket_regret())
+// H profile:     ./aswiss_stud h-profile --atlas ATLAS --snapshot FILE [--roots 300000]  (posterior vs card cancellation; see h_profile())
 //
 // Reuses the engine in ../../../cpp_mccfr/stud_mccfr.cpp (rules, power atlas, PolicyLBR) unchanged.
 // Atom: the hard power InfoKey of a frozen atlas (power cluster x betting summary x legal mask), i.e.
@@ -2715,6 +2716,177 @@ int bucket_regret(int argc, char** argv) {
     return 0;
 }
 
+// ---- h-profile: where the cancellation of a history-key snapshot sits (posterior keys vs card resolution) -----------
+// ./aswiss_stud h-profile --atlas ATLAS --snapshot FILE [--roots 300000] [--seed 2026111002] [--max-units 20000000]
+// The average-policy pass of bucket-regret (both seats play the snapshot's average policy; the traverser expands its
+// actions; roots split into two halves by parity). Every traverser node adds its sampled counterfactual regrets to one
+// unit at each of five levels, all refinements of the bucket:
+//   L0 bucket                      the posterior bucket (what the policy is stored on)
+//   L1 key                         the bucket-history key (the label unit: street, legal mask, previous own bucket and
+//                                  action, opponent actions since, power cluster at a street's first decision)
+//   L2 bucket x cluster            the bucket and the power cluster (codebook cell) of the actor's cards at this decision
+//   L3 bucket x cluster x made     plus the category and primary rank of the actor's best hand (card information finer
+//                                  than the codebook cell)
+//   L4 key x cluster               both refinements together
+// For each level: S_L = sum over units of psi(R_u) per root and per seat (rho/2 at that resolution), plain and
+// cross-fitted (one half picks a unit's action, the other values it). Every level refines the bucket, so S_L >= S_0
+// (subadditivity of psi) and the differences are the cancellation inside buckets that the refinement exposes:
+//   S_1 - S_0 = H_post        between history keys (what further posterior splits could remove)
+//   S_2 - S_0 = H_cluster     between codebook cells
+//   S_3 - S_2 = H_beyond      inside codebook cells, from finer card information (what splitting the codebook would add)
+// In expectation the plain value is at least the true S_L (noise lifts the maximum) and the cross-fitted value at most
+// it (a unit's action is picked on one half and valued on the other; a unit seen in one half only adds 0). So the
+// plain difference between two levels is the optimistic cancellation, and the cross-fitted difference is what a
+// refinement chosen on one half actually gains on the other: with few visits per fine unit it can be negative,
+// meaning that at this sample size the finer labels are too noisy to help. `both_halves_share` is the share of visits
+// in units seen in both halves. Per-street values follow. The model is not changed.
+template <class V> struct ProfileLevel {
+    std::unordered_map<uint64_t, std::array<V, 2 * A + 2>> units;
+    std::array<std::unordered_map<uint64_t, uint8_t>, 1> street_of;  // unit -> street (5..7)
+    double dropped = 0;
+};
+inline uint64_t pmix(uint64_t h, uint64_t v) {
+    h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+    h ^= h >> 31; h *= 0xbf58476d1ce4e5b9ull; h ^= h >> 29;
+    return h;
+}
+struct ProfileState {
+    ProfileLevel<double> l0, l1, l2;
+    ProfileLevel<float> l3, l4;  // the finest levels: float sums halve their memory
+    size_t cap = 20000000;
+};
+template <class V>
+void profile_add(ProfileLevel<V>& lv, uint64_t id, int street, const std::array<double, A>& r, uint8_t mask, int half, size_t cap) {
+    auto it = lv.units.find(id);
+    if (it == lv.units.end()) {
+        if (lv.units.size() >= cap) { lv.dropped += 1; return; }
+        it = lv.units.emplace(id, std::array<V, 2 * A + 2>{}).first;
+        lv.street_of[0][id] = static_cast<uint8_t>(street);
+    }
+    for (int a = 0; a < A; ++a) if (mask & (1u << a)) it->second[half * A + a] += static_cast<V>(r[a]);
+    it->second[2 * A + half] += 1;
+}
+double hprof_traverse(const Model& model, const PowerAtlas& atlas, State state, Trail trail, int traverser, std::mt19937_64& rng,
+                      ProfileState& ps, int half) {
+    if (state.terminal) return terminal_net_search(state, traverser);
+    const int actor = state.actor;
+    const uint8_t mask = valid_mask(state, actor);
+    const HFull key = model.hkey(state, actor, trail);
+    const uint32_t b = model.hlookup(key), seen = b == kNone ? kUnseen : b;
+    const auto avg = model.bucket_policy(b, mask, true);
+    if (actor != traverser) {
+        const Action a = sample_action(avg, mask, rng);
+        trail_step(trail, state, actor, a, seen);
+        step(state, actor, a);
+        return hprof_traverse(model, atlas, std::move(state), trail, traverser, rng, ps, half);
+    }
+    std::array<double, A> v{};
+    double node = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        State child = state;
+        Trail child_trail = trail;
+        trail_step(child_trail, state, actor, static_cast<Action>(a), seen);
+        step(child, actor, static_cast<Action>(a));
+        v[a] = hprof_traverse(model, atlas, std::move(child), child_trail, traverser, rng, ps, half);
+        node += avg[a] * v[a];
+    }
+    std::array<double, A> r{};
+    for (int a = 0; a < A; ++a) if (mask & (1u << a)) r[a] = v[a] - node;
+    const int street = state.street;
+    // unit ids of the five levels (the street is part of every bucket and key, so of every unit)
+    const uint64_t id0 = b == kNone ? 0xffffffffffffull : b;
+    const uint64_t id1 = pmix(pmix(pmix(pmix(pmix(1, key.ctx), key.m.prev), key.m.action), key.m.cluster), key.m.opp);
+    const uint64_t cluster = 1 + atlas.assign(state, actor);
+    const uint64_t id2 = pmix(pmix(2, id0), cluster);
+    const Score best = best_hand(all_cards(state.players[actor]));
+    const uint64_t id3 = pmix(pmix(id2, 100 + best[0]), 200 + best[1]);
+    const uint64_t id4 = pmix(pmix(4, id1), cluster);
+    profile_add(ps.l0, id0, street, r, mask, half, ps.cap);
+    profile_add(ps.l1, id1, street, r, mask, half, ps.cap);
+    profile_add(ps.l2, id2, street, r, mask, half, ps.cap);
+    profile_add(ps.l3, id3, street, r, mask, half, ps.cap);
+    profile_add(ps.l4, id4, street, r, mask, half, ps.cap);
+    return node;
+}
+// per street (index 0: all, 1..3: streets 5..7): plain and cross-fitted psi totals, visits, visits in units seen in both halves
+template <class V> void profile_totals(const ProfileLevel<V>& lv, std::array<double, 4>& plain, std::array<double, 4>& cross,
+                                       std::array<double, 4>& visits, std::array<double, 4>& both) {
+    plain.fill(0); cross.fill(0); visits.fill(0); both.fill(0);
+    for (const auto& [id, h] : lv.units) {
+        double best = 0, m0 = 0, m1 = 0;
+        int a0 = -1, a1 = -1;
+        for (int a = 0; a < A; ++a) {
+            best = std::max(best, static_cast<double>(h[a]) + h[A + a]);
+            if (h[a] > m0) { m0 = h[a]; a0 = a; }
+            if (h[A + a] > m1) { m1 = h[A + a]; a1 = a; }
+        }
+        const double c = (a0 >= 0 ? static_cast<double>(h[A + a0]) : 0.0) + (a1 >= 0 ? static_cast<double>(h[a1]) : 0.0);
+        const double vis = static_cast<double>(h[2 * A]) + h[2 * A + 1];
+        const bool two = h[2 * A] > 0 && h[2 * A + 1] > 0;
+        const int st = lv.street_of[0].at(id);
+        for (int k : {0, st - 4}) {
+            plain[k] += best; cross[k] += c; visits[k] += vis;
+            if (two) both[k] += vis;
+        }
+    }
+}
+int h_profile(int argc, char** argv) {
+    auto o = parse(argc, argv, {{"--atlas", ""}, {"--snapshot", ""}, {"--roots", "300000"}, {"--seed", "2026111002"},
+                                {"--max-units", "20000000"}, {"--power-cache", "1000000"}});
+    const auto atlas = load_atlas(o.at("--atlas"), std::stoull(o["--power-cache"]));
+    if (!atlas) throw std::runtime_error("h-profile needs --atlas (the run's)");
+    Model model(Partition::History, atlas.get());
+    model.load(o.at("--snapshot"));
+    if (model.has_h4()) throw std::runtime_error("h-profile: snapshots with a learned H4 are not supported");
+    const uint64_t roots = std::stoull(o["--roots"]), seed = std::stoull(o["--seed"]);
+    ProfileState ps;
+    ps.cap = std::stoull(o["--max-units"]);
+    std::mt19937_64 rng(seed);
+    const auto t0 = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < roots; ++i) {
+        auto deck = fresh_deck();
+        std::shuffle(deck.begin(), deck.end(), rng);
+        for (int p = 0; p < 2; ++p)
+            hprof_traverse(model, *atlas, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, p, rng, ps, static_cast<int>(i & 1));
+        if ((i + 1) % 50000 == 0 || i + 1 == roots) {
+            const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::cerr << "root " << i + 1 << "/" << roots << " (" << std::fixed << std::setprecision(0) << sec << " s, about "
+                      << sec / (i + 1) * (roots - i - 1) << " s left), units L0-L4 " << ps.l0.units.size() << " " << ps.l1.units.size() << " "
+                      << ps.l2.units.size() << " " << ps.l3.units.size() << " " << ps.l4.units.size() << "\n" << std::defaultfloat;
+        }
+    }
+    const double per = 2.0 * static_cast<double>(roots);  // per root and seat (rho/2)
+    std::ostringstream js;
+    js << std::setprecision(6) << "{\"snapshot\":\"" << json_escape(o["--snapshot"]) << "\",\"roots\":" << roots << ",\"seed\":" << seed
+       << ",\"model_buckets\":" << model.bucket_count() << ",\"levels\":[";
+    const char* names[5] = {"bucket", "key", "bucket_x_cluster", "bucket_x_cluster_x_made_hand", "key_x_cluster"};
+    std::array<std::array<double, 4>, 5> P{}, C{}, Vv{}, Bt{};
+    std::array<size_t, 5> units{};
+    std::array<double, 5> dropped{};
+    profile_totals(ps.l0, P[0], C[0], Vv[0], Bt[0]); units[0] = ps.l0.units.size(); dropped[0] = ps.l0.dropped;
+    profile_totals(ps.l1, P[1], C[1], Vv[1], Bt[1]); units[1] = ps.l1.units.size(); dropped[1] = ps.l1.dropped;
+    profile_totals(ps.l2, P[2], C[2], Vv[2], Bt[2]); units[2] = ps.l2.units.size(); dropped[2] = ps.l2.dropped;
+    profile_totals(ps.l3, P[3], C[3], Vv[3], Bt[3]); units[3] = ps.l3.units.size(); dropped[3] = ps.l3.dropped;
+    profile_totals(ps.l4, P[4], C[4], Vv[4], Bt[4]); units[4] = ps.l4.units.size(); dropped[4] = ps.l4.dropped;
+    for (int l = 0; l < 5; ++l) {
+        js << (l ? "," : "") << "{\"level\":\"" << names[l] << "\",\"units\":" << units[l] << ",\"visits\":" << Vv[l][0]
+           << ",\"dropped_visits\":" << dropped[l] << ",\"both_halves_share\":" << (Vv[l][0] > 0 ? Bt[l][0] / Vv[l][0] : 0.0)
+           << ",\"plain\":" << P[l][0] / per << ",\"cross\":" << C[l][0] / per << ",\"by_street\":{";
+        for (int k = 1; k <= 3; ++k)
+            js << (k > 1 ? "," : "") << "\"" << k + 4 << "\":{\"plain\":" << P[l][k] / per << ",\"cross\":" << C[l][k] / per
+               << ",\"both_halves_share\":" << (Vv[l][k] > 0 ? Bt[l][k] / Vv[l][k] : 0.0) << "}";
+        js << "}}";
+    }
+    js << "],\"H_post\":{\"plain\":" << (P[1][0] - P[0][0]) / per << ",\"cross\":" << (C[1][0] - C[0][0]) / per << "}"
+       << ",\"H_cluster\":{\"plain\":" << (P[2][0] - P[0][0]) / per << ",\"cross\":" << (C[2][0] - C[0][0]) / per << "}"
+       << ",\"H_beyond_codebook\":{\"plain\":" << (P[3][0] - P[2][0]) / per << ",\"cross\":" << (C[3][0] - C[2][0]) / per << "}"
+       << ",\"H_key_and_cluster\":{\"plain\":" << (P[4][0] - P[0][0]) / per << ",\"cross\":" << (C[4][0] - C[0][0]) / per << "}"
+       << ",\"seconds\":" << std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() << "}\n";
+    std::cout << js.str();
+    return 0;
+}
+
 #include "sota/stud7_net_main.hpp"
 #include "sota/rebel_main.hpp"
 
@@ -3081,6 +3253,7 @@ int main(int argc, char** argv) {
         if (mode == "serve") return serve(argc, argv);
         if (mode == "league") return league(argc, argv);
         if (mode == "bucket-regret") return bucket_regret(argc, argv);
+        if (mode == "h-profile") return h_profile(argc, argv);
         throw std::runtime_error("usage: aswiss_stud train|eval|self-test|serve [options]");
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";

@@ -1220,6 +1220,45 @@ python agents\adaptive_buckets\aswiss\stud7\league.py agents\adaptive_buckets\as
 - 최신 ASWISS의 우위에는 더 긴 학습(200M 이상 대 100M)이 섞여 있다. 같은 학습량(128M 대 100M)에서는 k-means 1024와 비겼다. 학습량을 맞춘 비교는 runs_fair의 k-means 256(255.79M roots, ASWISS와 같은 CPU 24시간)을 넣으면 일부 할 수 있다.
 - **기록할 차이:** seed 1개다. 참가자마다 학습량(roots, CPU 시간)이 다르다. k-means 256/341/1024와 ASWISS는 같은 휴리스틱 self-play 자료로 만든 codebook을 쓴다(K만 다름). 4구 버림/공개는 모두 휴리스틱 H4다.
 
+## 상쇄가 어디에 있나: `h-profile` (2026-11-10 추가)
+
+분할을 멈춘 `hist_bbf`의 LBR 정체 원인을 가르기 위한 측정이다. 원인 후보는 두 가지다.
+- posterior: 분할을 멈춰서 bucket 안 키들 사이의 방향 불일치가 다시 커졌다.
+- prior: codebook(카드 군집) 칸 안의 불일치는 어떤 분할로도 줄일 수 없다.
+
+**`aswiss_stud h-profile --atlas ATLAS --snapshot FILE [--roots 300000]`**
+- `bucket-regret`과 같은 평균 정책 순회(같은 seed면 L0 값이 그것의 ρ_P/2와 같다)다. 탐색자 노드의 표본 반사실 후회를 다섯 단위에 동시에 더한다. 모두 bucket을 세분한 것이다.
+
+  | 단위 | 뜻 |
+  |---|---|
+  | L0 bucket | 정책이 저장되는 bucket |
+  | L1 key | bucket 이력 키(라벨 단위) |
+  | L2 bucket × cluster | 그 결정에서 본 카드의 codebook 칸 |
+  | L3 bucket × cluster × made hand | 칸보다 세밀한 카드 정보(최고 족보의 범주와 주요 숫자) |
+  | L4 key × cluster | 둘을 함께 |
+
+- 단위마다 S_L = Σ ψ(R_u)를 root·자리당으로 구한다(plain과 교차 추정). 차이가 bucket 안 상쇄다.
+  - **H_post = S₁ − S₀:** 키 사이. posterior 분할을 더 하면 줄일 수 있는 것
+  - **H_cluster = S₂ − S₀:** codebook 칸 사이
+  - **H_beyond = S₃ − S₂:** codebook 칸 안, 더 세밀한 카드 정보로 드러나는 것. codebook을 나누면 얻을 것
+- **읽는 법:**
+  - plain 값은 잡음 때문에 위로 치우친다. 기댓값으로 참값 이상이다.
+  - 교차 값은 기댓값으로 참값 이하다. 한 절반에서 고르고 다른 절반에서 잰다.
+  - 그래서 plain 차이는 낙관적인 상쇄량이고, **교차 차이는 "한 절반의 자료로 세분하면 다른 절반에서 실제로 얼마를 얻나"**다. 세밀한 단위의 방문이 적으면 교차 차이가 음수일 수 있다. 그 자료량에서는 세분해도 이득이 없다는 뜻이다.
+  - `both_halves_share`(두 절반 모두에 나온 단위의 방문 비율)도 함께 본다.
+- **시험 (30만 roots만 학습한 작은 모델, bucket 2,274개, 4만 roots 측정):**
+
+  | | plain | 교차 |
+  |---|---:|---:|
+  | H_post | 110 | 63 |
+  | H_cluster | 176 | 112 |
+  | H_beyond | 43 | −46 |
+
+  - 이 작은 모델에서는 키 사이와 codebook 칸 사이의 불일치가 크다.
+  - codebook보다 세밀한 카드 정보는 이 자료량에서 실제 이득이 없었다.
+  - 학습량이 적은 모델의 값이라 정체 원인과는 무관하다. 측정이 돌아가는지 확인한 것이다.
+- **본 측정(노트북):** 128.47M(동결 전)과 최신 스냅숏을 같은 seed·roots로 재서 비교한다. 4만 roots에 이 컨테이너에서 47초였다.
+
 ## gap proxy가 재는 것 (2026-11-10 정리)
 
 `curve.csv`의 gap 열("Training-deal gap proxy of the current policy")과 평가의 `gap_proxy_ante`(`--gap-roots`, 고정 deal)는 같은 양이다.

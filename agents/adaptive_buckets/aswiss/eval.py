@@ -24,7 +24,10 @@ out.write(",".join(header + ["expl_bucket_avg", "expl_true_avg", "expl_current"]
 for k, row in enumerate(rows):
     vals = []
     for kind in ("bucket", "true", "current"):
-        pol = np.fromfile(f"{run}/policy_{kind}_{k}.bin").reshape(-1, W)
+        path = f"{run}/policy_{kind}_{k}.bin"
+        if not os.path.exists(path):  # pure_aswiss keeps no per-information-set average ("true"): nan
+            vals.append(float("nan")); continue
+        pol = np.fromfile(path).reshape(-1, W)
         vals.append(exploitability(tree, levels, pol, counts))
     out.write(",".join([row[h] for h in header] + [f"{v:.6g}" for v in vals]) + "\n"); out.flush()
     print(row["iters"], row["buckets_after"], " ".join(f"{v:.5f}" for v in vals), flush=True)

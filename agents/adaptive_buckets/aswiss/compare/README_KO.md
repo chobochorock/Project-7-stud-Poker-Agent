@@ -399,3 +399,45 @@ lazy 라우팅이 반복 하나에 계산한 트리 노드 수(`route.csv`, 분�
 - 원안·순간 전략 실행은 다른 날 전이(lazy) 실행 셋과 함께 돌아 같은 1,800초에 반복이 더 적다(4.80억 대 약 7.3억). 창 라벨, MCCFR, k-means 참고값도 다른 날(2단계)의 실행이다. 그래서 시간 축보다 같은 반복 수의 비교를 본다. 평가기(정확한 최선 응답, bucket 평균 정책)와 학습기, 시작 분할, seed는 모두 같다.
 - k-means 고정 추상화는 bucket 수가 다르다(11,693). 같은 크기의 비교가 아니라 고정 추상화의 정체 수준을 보이는 기준선이다.
 - 원안·평균 전략도 분할 판정은 창 라벨(방문한 정보집합만, 방문하지 않은 정보집합은 판정에서 빠짐)이다.
+
+---
+
+# 순수 ASWISS 24시간 (2026-11-10 시작, 진행 중)
+
+**사용자 요청:** atlas 없이, 정보집합별 표 없이, 분할 때의 순간 전략들의 후회 합을 업데이트 방향으로 삼아 매번 bucket을 다시 찾는(그 비용을 시간에 그대로 넣는) 방식으로 mini-stud에서 실제로 학습·수렴하는지 24시간 확인한다.
+
+**학습기 `../pure_aswiss.cpp` (새로 씀; `aswiss.cpp`의 정보집합별 누적 표를 쓰지 않으려고 따로 만듦)**
+- 시작: P0(시점 bucket, 게임 구조만). 학습: 순수 외부 샘플링 MCCFR(regret matching, 균등 평균, 교대 순회).
+- **정보집합에 대해 아무것도 저장하지 않는다.** bucket은 쓸 때마다 P0에서 분할 사건을 따라 내려가며 다시 찾는다(route).
+- **업데이트 방향:** 분할 사건마다 그 epoch의 순간 전략들에 대한 반사실 후회의 합 Σ_j r^{σ_j}(I)의 argmax(반사실 도달확률당 후회가 `--tol` 이하면 "없음").
+  - epoch의 순간 전략을 전부 저장할 수는 없으므로, epoch 반복 중 K개를 무작위로 골라 bucket 전략표를 저장한다. 합의 불편 추정이다(정리 A).
+  - K_k = min(64, 8 × (k+1)), epoch k마다 늘린다.
+  - 방향 하나를 정확히 구하려면 저장한 전략으로 상대의 앞선 결정(도달확률)과 이후 모든 결정(값)을 계산해야 한다. 그러려면 그 결정들의 bucket도 같은 방법으로 다시 찾아야 한다.
+- **분할 판정:** bucket마다 그 epoch에 탐색자가 방문한 정보집합을 최대 16개 저수지 표본으로 둔다(bucket당 메모리, 정보집합당이 아님). 그 멤버들의 방향(같은 K개 전략)이 두 종류 이상이면 라벨별로 나눈다. 자식은 표를 0에서 시작한다.
+- **route 구현 (같은 규칙, 같은 결과, 시간만 다름):**
+  - `--memo none`: 매번 P0부터 다시 계산(엄격판)
+  - `--memo iter`: 한 반복 안에서 구한 route만 그 반복 동안 재사용
+  - `--route-impl table`: 분할 뒤 모든 정보집합의 bucket을 한 번 계산해 저장(정보집합별 표; 전이 비용의 기준선)
+- **검증:**
+  - Leduc 1.5만 반복에서 세 구현의 정책 파일 8개가 바이트 단위로 같았다. 학습 시간은 엄격판 59초, 반복 메모 3.5초, 표 0.02초였다.
+  - 중간에 죽였다가 재개한 실행이 끊지 않은 실행과 바이트 단위로 같았다.
+  - 검사점은 20분마다(학습 시간에서 뺌)이고, 같은 명령으로 다시 실행하면 이어 간다.
+- 평가: epoch 끝마다 정보집합별 정책 파일을 학습 시계 밖에서 만들고 `../eval.py`로 정확한 exploitability를 잰다. 정보집합별 sequence-form 평균은 없으므로 그 열은 nan이다.
+
+**돌리는 것 (이 컨테이너, 코어 하나씩, seed 1, 학습 86,400초)**
+
+| 이름 | 게임 | route |
+|---|---|---|
+| `small_strict` | mini-stud | 엄격(메모 없음) |
+| `small_itermemo` | mini-stud | 반복 메모 |
+| `small_table` | mini-stud | 표(기준선) |
+| `leduc_strict` | Leduc | 엄격(메모 없음) |
+
+시작 30초 뒤: 엄격판은 3,000반복(2단계), 반복 메모는 7,000반복(3단계), 표는 409.5만 반복(12단계)이었다. 결과는 실행이 끝나면 이 절에 적는다.
+
+```bash
+g++ -O3 -std=c++17 agents/adaptive_buckets/aswiss/pure_aswiss.cpp -o pure_aswiss
+python agents/adaptive_buckets/aswiss/export.py small DATA/small
+./pure_aswiss --tree DATA/small --buckets DATA/small/bucket_timestep.bin --seconds 86400 --seed 1 --route-impl lazy --memo none --out RUN
+python agents/adaptive_buckets/aswiss/eval.py DATA/small RUN
+```

@@ -1220,6 +1220,35 @@ python agents\adaptive_buckets\aswiss\stud7\league.py agents\adaptive_buckets\as
 - 최신 ASWISS의 우위에는 더 긴 학습(200M 이상 대 100M)이 섞여 있다. 같은 학습량(128M 대 100M)에서는 k-means 1024와 비겼다. 학습량을 맞춘 비교는 runs_fair의 k-means 256(255.79M roots, ASWISS와 같은 CPU 24시간)을 넣으면 일부 할 수 있다.
 - **기록할 차이:** seed 1개다. 참가자마다 학습량(roots, CPU 시간)이 다르다. k-means 256/341/1024와 ASWISS는 같은 휴리스틱 self-play 자료로 만든 codebook을 쓴다(K만 다름). 4구 버림/공개는 모두 휴리스틱 H4다.
 
+## 웹 전략 분석의 bucket 신뢰도 (2026-11-10 추가)
+
+웹의 전략 분석 카드에 그 결정이 쓰는 bucket의 신뢰도를 함께 보인다. 신뢰도는 그 bucket의 후회에 반비례한다.
+
+**재는 것 (`aswiss_stud bucket-regret`)**
+- 스냅숏의 평균 정책(웹이 두는 정책)으로 방법 B의 평균 전략 순회를 `--roots`번 한다. 탐색자는 자기 행동을 모두 펼치고, 상대와 카드는 표본으로 뽑는다.
+- bucket마다 탐색자 방문 수와 표본 반사실 후회를 두 절반(root 홀짝)으로 나눠 쌓는다.
+- **방문당 후회** = max(0, 교차 추정) / 방문 수. 교차 추정은 한 절반에서 가장 후회가 큰 행동을 고르고 다른 절반에서 그 값을 잰 것이다(ρ_P/2와 같은 방법). 같은 표본으로 고르고 재면 잡음만큼 위로 치우치기 때문이다. 뜻은 "이 bucket에 올 때마다, 평균 정책 대신 가장 좋은 한 행동을 두면 평균 몇 ante를 더 버는가"다.
+- **신뢰도** = r0 / (r0 + 방문당 후회), 0–1. 후회가 0이면 1이고, r0에서 0.5이고, 후회가 크면 r0/후회에 가까워진다(반비례). r0는 방문이 `--min-visits`(20) 이상인 bucket들의 방문당 후회 중앙값이다(`--r0`로 고정 가능). 그래서 0.5가 이 모델의 보통 bucket이다.
+- 방문이 `--min-visits`보다 적으면 신뢰도를 매기지 않는다(표본 부족). 측정 순회에 한 번도 오지 않은 bucket은 "방문하지 않은 bucket"으로 보인다.
+- 출력은 `SNAPSHOT.regret.csv`다. 첫 줄 주석에 설정과 r0가 있다. 화면에는 ρ̂_P/2(교차, plain)와 신뢰도 구간별 bucket 수를 찍는다.
+- 학습에는 영향이 없다. 교차 추정 표에 방문 수 칸을 더했지만, 같은 설정의 학습(문턱 실행 포함)에서 스냅숏과 `gate.csv`가 바이트 단위로 같았다.
+
+**웹에 붙이기**
+- `aswiss_agent.py`는 쓰는 스냅숏 옆에 `SNAPSHOT.regret.csv`가 있으면 자동으로 `serve --bucket-regret`에 넘긴다. `ASWISS_BUCKET_REGRET`로 다른 파일을 주거나 `none`으로 끌 수 있다.
+- EXPLAIN 기록에 `regret`(방문 수, 방문당 후회, 교차·plain 값, 후회가 가장 큰 행동, 신뢰도, r0)이 붙고, 분석 카드에 "신뢰도" 줄이 생긴다.
+- 웹은 기본으로 가장 최근 스냅숏을 쓴다. 학습이 계속되어 새 스냅숏이 생기면 그 스냅숏의 regret 파일이 없어 신뢰도가 사라진다. 그래서 `ASWISS_SNAPSHOT`으로 스냅숏을 고정하는 것을 권한다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action build -ExeName aswiss_web.exe
+$S = "agents\adaptive_buckets\aswiss\stud7"
+$env:ASWISS_SNAPSHOT = "$S\data\runs_fair\history_bbf_street_s1\snapshot_rNNNNNNNNN.bin"   # 웹에 쓸 스냅숏
+& $S\aswiss_web.exe bucket-regret --atlas $S\atlas\atlas_power1024_heur_eps20_seed37301.bin --snapshot $env:ASWISS_SNAPSHOT --roots 2000000
+python web_app.py
+```
+
+- 시간: 학습과 같은 속도(이 환경의 작은 모델에서 초당 약 1,400 roots)라 2M roots면 약 25분으로 본다. bucket이 많으므로 방문 20회를 넘는 bucket 비율은 roots에 따라 달라진다. 화면 마지막 줄의 `buckets_scored`로 확인한다.
+- 시험(30만 roots 학습한 작은 모델, 4만 roots 측정): bucket 2,274개 중 1,480개를 방문했고 1,351개에 신뢰도를 매겼다. r0는 0.19 ante/방문이었다. 많이 오는 bucket의 신뢰도는 0.69–0.92였다.
+
 ## `runs_fair` 결과: 같은 학습 CPU 24시간 (seed 1, 2026-11-08)
 
 **조건**

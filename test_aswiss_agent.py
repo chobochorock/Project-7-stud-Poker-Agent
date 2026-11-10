@@ -59,6 +59,24 @@ class ASWISSWebTests(unittest.TestCase):
                     self.assertIn(record["action_taken"], record["probabilities"])
             controller.start_next_round()
 
+    def test_bucket_confidence_when_a_regret_file_is_loaded(self):
+        controller = self.start(["aswiss", "heuristic"])
+        if not any(getattr(agent, "bucket_regret_path", None) is not None for agent in controller.agents.values()):
+            self.skipTest("no SNAPSHOT.regret.csv (aswiss_stud bucket-regret) next to the snapshot")
+        records = []
+        for _ in range(20):
+            records += [r for r in controller.analysis if r.get("by") == "aswiss" and r.get("bucket") is not None]
+            controller.start_next_round()
+        self.assertTrue(records)
+        for record in records:
+            regret = record["regret"]
+            self.assertGreaterEqual(regret["visits"], 0)
+            if regret["confidence"] is not None:
+                c, r0 = regret["confidence"], regret["r0"]
+                self.assertGreater(c, 0.0)
+                self.assertLessEqual(c, 1.0)
+                self.assertAlmostEqual(c, r0 / (r0 + regret["per_visit"]), places=5)
+
     def test_analysis_needs_heads_up_ev(self):
         controller = WebPokerController()
         controller.start(["human", "heuristic", "heuristic"], game_mode="ev", ante=1000, log_file=None, replay_dir=None)

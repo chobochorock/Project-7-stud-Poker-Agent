@@ -14,6 +14,7 @@
 //                           [--particles 64] [--gap-roots 4000] [--seed 2026102701]
 // Test:  ./aswiss_stud self-test --atlas ATLAS
 // League: ./aswiss_stud league --agents FILE [--deals 20000] [--seed 2026110901] --out DIR  (duplicate head-to-head; see league())
+// Bucket regret: ./aswiss_stud bucket-regret --atlas ATLAS --snapshot FILE [--roots 2000000]  (web confidence; see bucket_regret())
 //
 // Reuses the engine in ../../../cpp_mccfr/stud_mccfr.cpp (rules, power atlas, PolicyLBR) unchanged.
 // Atom: the hard power InfoKey of a frozen atlas (power cluster x betting summary x legal mask), i.e.
@@ -1488,7 +1489,8 @@ double avg_traverse(const Model& model, State state, int traverser, std::mt19937
 // `sub`, the traverser's regrets at the keys in `only` are also summed per (key, key of its previous decision); `pk`
 // carries each seat's previous key (ctx 0: none yet). `stats` may be null (a replay that only fills `sub`).
 using HSet = std::unordered_set<HFull, HFullHash>;
-using BucketHalves = std::unordered_map<uint32_t, std::array<double, 2 * A>>;  // bucket -> regret sums of halves 0 and 1
+// bucket -> regret sums of halves 0 and 1 (entries 0..2A-1), then the traverser visits of each half (2A, 2A+1)
+using BucketHalves = std::unordered_map<uint32_t, std::array<double, 2 * A + 2>>;
 // rho_P/2 per root from n roots split into two halves: {plain, cross-fitted}. plain = sum_B max(0, max_a R_B(a)) is
 // biased upward by sampling noise; cross-fitted takes each bucket's best action on one half and its regret on the
 // other, both ways (no selection bias; slightly low).
@@ -1559,6 +1561,7 @@ double avg_traverse_h(const Model& model, State state, Trail trail, int traverse
         if (ss) { ss->r[a] += r; ss->sq[a] += r * r; }
         if (halves && b != kNone) (*halves)[b][half * A + a] += r;
     }
+    if (halves && b != kNone) (*halves)[b][2 * A + half] += 1;
     if (st) st->visits += 1;
     if (ss) ss->visits += 1;
     return node;
@@ -1672,7 +1675,7 @@ void merge_sub(SubMap& to, const SubMap& from) {
 void merge_halves(BucketHalves& to, const BucketHalves& from) {
     for (const auto& [b, h] : from) {
         auto& t = to[b];
-        for (int j = 0; j < 2 * A; ++j) t[j] += h[j];
+        for (int j = 0; j < 2 * A + 2; ++j) t[j] += h[j];
     }
 }
 
@@ -2578,6 +2581,97 @@ int league(int argc, char** argv) {
     return 0;
 }
 
+// ---- bucket-regret: each bucket's regret under a snapshot's average policy (confidence in the web analysis) ----------
+// ./aswiss_stud bucket-regret --atlas ATLAS --snapshot FILE [--roots 2000000] [--seed 2026111001] [--min-visits 20]
+//                             [--r0 0] [--power-cache 1000000] [--out FILE (default SNAPSHOT.regret.csv)]
+// History partition. The average-policy pass of method B: both seats play the snapshot's average policy, the traverser
+// expands its own actions, the other seat and chance are sampled; roots split into two halves by parity. Per bucket:
+//   visits            traverser nodes of the bucket in the pass
+//   plain_per_visit   max(0, max_a R(a)) / visits (R: the sampled counterfactual regret sums; biased up by the noise)
+//   cross_per_visit   (R_1(a_0) + R_0(a_1)) / visits, a_h = argmax of half h's sums when positive: one half picks
+//                     the action, the other values it, so the noise does not pick its own maximum (as rho_P/2)
+//   regret_per_visit  max(0, cross_per_visit): ante a visit would gain on average by switching to the best fixed
+//                     action instead of the average policy (the bucket's term of rho_P, per visit)
+//   confidence        r0 / (r0 + regret_per_visit) in (0, 1]: 1 at no regret, 1/2 at r0, about r0 / regret for large
+//                     regrets (inversely proportional); r0 = the median regret_per_visit of the buckets with at least
+//                     --min-visits visits, unless --r0 > 0. Fewer visits: no confidence (empty), too few samples.
+// The first line is a comment with the settings and r0; `serve --bucket-regret FILE` reports the row of the bucket.
+int bucket_regret(int argc, char** argv) {
+    auto o = parse(argc, argv, {{"--atlas", ""}, {"--snapshot", ""}, {"--roots", "2000000"}, {"--seed", "2026111001"},
+                                {"--min-visits", "20"}, {"--r0", "0"}, {"--power-cache", "1000000"}, {"--out", ""}});
+    const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
+    Model model(Partition::History, atlas.get());
+    model.load(o.at("--snapshot"));
+    if (model.has_h4()) throw std::runtime_error("bucket-regret: snapshots with a learned H4 are not supported");
+    const uint64_t roots = std::stoull(o["--roots"]), seed = std::stoull(o["--seed"]);
+    const double min_visits = std::stod(o["--min-visits"]);
+    const std::string out = o["--out"].empty() ? o["--snapshot"] + ".regret.csv" : o["--out"];
+    BucketHalves halves;
+    std::mt19937_64 rng(seed);
+    const auto t0 = std::chrono::steady_clock::now();
+    for (uint64_t i = 0; i < roots; ++i) {
+        auto deck = fresh_deck();
+        std::shuffle(deck.begin(), deck.end(), rng);
+        for (int p = 0; p < 2; ++p)
+            avg_traverse_h(model, sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, p, rng, nullptr,
+                           nullptr, nullptr, &halves, static_cast<int>(i & 1));
+        if ((i + 1) % 100000 == 0 || i + 1 == roots) {
+            const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+            std::cerr << "root " << i + 1 << "/" << roots << " (" << std::fixed << std::setprecision(0) << sec << " s, about "
+                      << sec / (i + 1) * (roots - i - 1) << " s left), buckets seen " << halves.size() << "\n" << std::defaultfloat;
+        }
+    }
+    struct Row { uint32_t b; double visits, plain, cross; int best; };
+    std::vector<Row> rows;
+    rows.reserve(halves.size());
+    for (const auto& [b, h] : halves) {
+        double best = 0, m0 = 0, m1 = 0;
+        int a0 = -1, a1 = -1, ab = -1;
+        for (int a = 0; a < A; ++a) {
+            if (h[a] + h[A + a] > best) { best = h[a] + h[A + a]; ab = a; }
+            if (h[a] > m0) { m0 = h[a]; a0 = a; }
+            if (h[A + a] > m1) { m1 = h[A + a]; a1 = a; }
+        }
+        const double cross = (a0 >= 0 ? h[A + a0] : 0.0) + (a1 >= 0 ? h[a1] : 0.0);
+        const double visits = h[2 * A] + h[2 * A + 1];
+        if (visits > 0) rows.push_back({b, visits, best / visits, cross / visits, ab});
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& x, const Row& y) { return x.b < y.b; });
+    double r0 = std::stod(o["--r0"]);
+    std::vector<double> enough;
+    for (const auto& r : rows) if (r.visits >= min_visits) enough.push_back(std::max(0.0, r.cross));
+    if (r0 <= 0) {
+        if (enough.empty()) throw std::runtime_error("bucket-regret: no bucket has --min-visits visits; raise --roots");
+        std::nth_element(enough.begin(), enough.begin() + enough.size() / 2, enough.end());
+        r0 = std::max(enough[enough.size() / 2], 1e-12);
+    }
+    std::ofstream csv(out);
+    if (!csv) throw std::runtime_error("bucket-regret: cannot write " + out);
+    csv << "# snapshot=" << o["--snapshot"] << ",roots=" << roots << ",seed=" << seed << ",min_visits=" << min_visits
+        << ",r0=" << std::setprecision(9) << r0 << "\n";
+    csv << "bucket,visits,regret_per_visit,cross_per_visit,plain_per_visit,best_action,confidence\n";
+    std::array<int, 5> band{};  // confidence >= 0.8, 0.6, 0.4, 0.2, below
+    double total_cross = 0, total_plain = 0;
+    for (const auto& r : rows) {
+        const double reg = std::max(0.0, r.cross);
+        csv << r.b << ',' << r.visits << ',' << reg << ',' << r.cross << ',' << r.plain << ','
+            << (r.best >= 0 ? kActionNames[r.best] : "none") << ',';
+        if (r.visits >= min_visits) {
+            const double c = r0 / (r0 + reg);
+            csv << c;
+            ++band[c >= 0.8 ? 0 : c >= 0.6 ? 1 : c >= 0.4 ? 2 : c >= 0.2 ? 3 : 4];
+        }
+        csv << '\n';
+        total_cross += r.cross * r.visits; total_plain += r.plain * r.visits;
+    }
+    std::cout << std::setprecision(6) << "{\"out\":\"" << json_escape(out) << "\",\"roots\":" << roots << ",\"buckets_seen\":" << rows.size()
+              << ",\"buckets_scored\":" << enough.size() << ",\"model_buckets\":" << model.bucket_count() << ",\"r0\":" << r0
+              << ",\"rho_cross_half\":" << total_cross / (2.0 * roots) << ",\"rho_plain_half\":" << total_plain / (2.0 * roots)
+              << ",\"confidence_bands\":{\">=0.8\":" << band[0] << ",\"0.6-0.8\":" << band[1] << ",\"0.4-0.6\":" << band[2]
+              << ",\"0.2-0.4\":" << band[3] << ",\"<0.2\":" << band[4] << "}}\n";
+    return 0;
+}
+
 #include "sota/stud7_net_main.hpp"
 #include "sota/rebel_main.hpp"
 
@@ -2785,7 +2879,7 @@ std::string policy_json(const std::array<double, A>& p, uint8_t mask) {
 }
 int serve(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--partition", "history"}, {"--atlas", ""}, {"--snapshot", ""}, {"--policy", "average"},
-                                {"--seed", "7"}, {"--power-cache", "1000000"}});
+                                {"--seed", "7"}, {"--power-cache", "1000000"}, {"--bucket-regret", ""}});
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     Model model(parse_partition(o["--partition"]), atlas.get());
     model.load(o.at("--snapshot"));
@@ -2793,6 +2887,31 @@ int serve(int argc, char** argv) {
     if (!average && o["--policy"] != "current") throw std::runtime_error("--policy must be average or current");
     const bool history = model.partition() == Partition::History;
     std::mt19937_64 rng(std::stoull(o["--seed"]));
+    // --bucket-regret FILE (bucket-regret output): each bucket's regret per visit and confidence, reported by EXPLAIN
+    struct RegretRow { double visits, regret, cross, plain; std::string best, confidence; };
+    std::unordered_map<uint32_t, RegretRow> regret_rows;
+    std::string regret_meta;
+    const bool with_regret = !o["--bucket-regret"].empty();
+    if (with_regret) {
+        std::ifstream in(o["--bucket-regret"]);
+        if (!in) throw std::runtime_error("cannot read --bucket-regret " + o["--bucket-regret"]);
+        std::string row;
+        while (std::getline(in, row)) {
+            if (!row.empty() && row.back() == '\r') row.pop_back();
+            if (row.empty()) continue;
+            if (row[0] == '#') { regret_meta = row.substr(1); continue; }
+            if (row.rfind("bucket,", 0) == 0) continue;
+            auto f = split(row, ',');
+            f.resize(7);
+            regret_rows[static_cast<uint32_t>(std::stoul(f[0]))] = {std::stod(f[1]), std::stod(f[2]), std::stod(f[3]), std::stod(f[4]), f[5], f[6]};
+        }
+    }
+    auto meta_value = [&](const std::string& name) {  // r0, roots, ... from the comment line
+        const auto at = regret_meta.find(name + "=");
+        if (at == std::string::npos) return std::string();
+        const auto end = regret_meta.find(',', at);
+        return regret_meta.substr(at + name.size() + 1, end == std::string::npos ? std::string::npos : end - at - name.size() - 1);
+    };
     std::cout << "READY\n" << std::flush;
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -2882,6 +3001,22 @@ int serve(int argc, char** argv) {
                         for (uint32_t x = b; x != kNone; x = model.parent_of(x)) js << (depth++ ? "," : "") << x;
                         js << "]";
                     }
+                    if (with_regret) {
+                        const auto it = b == kNone ? regret_rows.end() : regret_rows.find(b);
+                        js << ",\"regret\":";
+                        if (it == regret_rows.end()) {
+                            js << "{\"visits\":0,\"confidence\":null,\"r0\":" << (meta_value("r0").empty() ? "null" : meta_value("r0"))
+                               << ",\"pass_roots\":" << (meta_value("roots").empty() ? "null" : meta_value("roots")) << "}";
+                        } else {
+                            const RegretRow& r = it->second;
+                            js << std::setprecision(6) << "{\"visits\":" << r.visits << ",\"per_visit\":" << r.regret
+                               << ",\"cross_per_visit\":" << r.cross << ",\"plain_per_visit\":" << r.plain << ",\"best_action\":\""
+                               << r.best << "\",\"confidence\":" << (r.confidence.empty() ? "null" : r.confidence) << ",\"r0\":"
+                               << (meta_value("r0").empty() ? "null" : meta_value("r0")) << ",\"min_visits\":"
+                               << (meta_value("min_visits").empty() ? "null" : meta_value("min_visits")) << ",\"pass_roots\":"
+                               << (meta_value("roots").empty() ? "null" : meta_value("roots")) << "}";
+                        }
+                    }
                 }
                 js << "}";
                 std::cout << "EXPLAIN\t" << js.str() << "\n";
@@ -2902,6 +3037,7 @@ int main(int argc, char** argv) {
         if (mode == "self-test") return self_test(argc, argv);
         if (mode == "serve") return serve(argc, argv);
         if (mode == "league") return league(argc, argv);
+        if (mode == "bucket-regret") return bucket_regret(argc, argv);
         throw std::runtime_error("usage: aswiss_stud train|eval|self-test|serve [options]");
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";

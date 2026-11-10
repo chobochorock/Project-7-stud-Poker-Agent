@@ -11,6 +11,9 @@ Files (environment variables override):
   ASWISS_SNAPSHOT  the snapshot to play (default: the newest snapshot listed in ASWISS_RUN_DIR/snapshots.csv)
   ASWISS_RUN_DIR   default stud7/data/runs_fair/history_bbf_street_s1
   ASWISS_PARTITION default history (the partition the snapshot was trained with)
+  ASWISS_BUCKET_REGRET  each bucket's regret per visit and confidence (aswiss_stud bucket-regret); default
+                   SNAPSHOT.regret.csv when it exists, else none. EXPLAIN then carries "regret" (visits, regret per
+                   visit, confidence = r0 / (r0 + regret)); "none" turns it off.
 The C++ side refuses a request whose hand it cannot replay from the 5th-street root (the bucket-history key depends on
 the whole hand); the agent then plays the heuristic agent's action and records the error, instead of stopping the
 game.
@@ -81,6 +84,17 @@ class ASWISSAgent(BasePokerAgent):
             except ValueError:
                 seed = 7
         self.snapshot_path = snapshot_path
+        regret_env = os.environ.get("ASWISS_BUCKET_REGRET", "")
+        if regret_env.lower() == "none":
+            regret_path = None
+        elif regret_env:
+            regret_path = Path(regret_env)
+            if not regret_path.is_file():
+                raise FileNotFoundError(regret_path)
+        else:
+            default = Path(str(snapshot_path) + ".regret.csv")
+            regret_path = default if default.is_file() else None
+        self.bucket_regret_path = regret_path
         self.last_explanation: dict[str, Any] | None = None
         self.explanations: list[dict[str, Any]] = []
         self.fallbacks = 0
@@ -94,6 +108,8 @@ class ASWISSAgent(BasePokerAgent):
             "--policy", policy,
             "--seed", str(seed),
         ]
+        if regret_path is not None:
+            command += ["--bucket-regret", str(regret_path)]
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         self._process = subprocess.Popen(
             command, cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

@@ -229,6 +229,7 @@ function analysisCard(record, isCurrent) {
     ["카드 군집", key.cluster == null ? "새 카드 없음" : key.cluster],
   ];
   if (record.current) rows.push(["현재 정책", Object.entries(record.current).map(([a, p]) => `${a} ${formatPercent(p, 0)}`).join(" · ")]);
+  if (record.regret) rows.push(["신뢰도", confidenceText(record.regret)]);
   if (record.stack_matches_training === false) rows.push(["주의", "스택이 학습(ante의 1000배)과 다릅니다."]);
   for (const [label, value] of rows) {
     const dt = document.createElement("dt"); dt.textContent = label;
@@ -237,6 +238,19 @@ function analysisCard(record, isCurrent) {
   }
   card.appendChild(meta);
   return card;
+}
+
+// bucket confidence (aswiss_stud bucket-regret): r0 / (r0 + regret per visit), inversely proportional to the bucket's
+// regret under the average policy; empty when the bucket had too few visits in the measuring pass
+function confidenceText(regret) {
+  const visits = Number(regret.visits || 0).toLocaleString();
+  if (regret.confidence == null) {
+    return regret.visits ? `표본 부족 (측정 순회에서 방문 ${visits}회)` : "측정 순회에서 방문하지 않은 bucket";
+  }
+  const c = Number(regret.confidence);
+  const level = c >= 0.8 ? "높음" : c >= 0.5 ? "보통" : c >= 0.2 ? "낮음" : "매우 낮음";
+  const best = regret.best_action ? `, 후회가 가장 큰 행동 ${regret.best_action}` : "";
+  return `${c.toFixed(2)} (${level}) · 후회 ${Number(regret.per_visit).toFixed(3)} ante/방문, 방문 ${visits}회${best}`;
 }
 
 function probabilityBars(probabilities, taken, isCurrent) {

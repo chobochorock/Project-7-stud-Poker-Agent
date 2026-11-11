@@ -58,10 +58,10 @@
 ## 2. 확인 메모 (Claude)
 
 **Gap proxy는 "확실한 상한"이 아니라 "기댓값으로 상한"이다.**
-- 성립하는 것: E[gap] ≥ ½ Σ_I [ψ(r^σ(I)) + V_I] ≥ ½ NashConv(σ) = exploitability(σ). 근거는 Lemma 7(ρ(σ) ≥ NashConv(σ))과 V_I ≥ 0이다(`aswiss/stud7/README_KO.md` "gap proxy가 재는 것").
+- 성립하는 것: E[gap] ≥ ½ Σ_I [ψ(r^σ(I)) + V_I] ≥ ½ NashConv(σ) = exploitability(σ). 근거는 Lemma 1·7(ρ(σ) ≥ NashConv(σ); `ASWISS_CONVERGENCE_KO.md`)과 V_I ≥ 0이다(`aswiss/stud7/README_KO.md` "gap proxy가 재는 것").
 - 성립하지 않는 것: 측정값 하나하나가 상한이라는 보장은 없다. 표본 잡음이 있다.
 - 학습 곡선의 값은 교대 갱신 때문에 두 자리를 바로 이웃한 두 프로필로 잰 것의 평균이다. 한 프로필의 상한이 아니다.
-- 직접 검토할 부분: Lemma 7과 위 부등식 사슬.
+- 직접 검토할 부분: Lemma 1·7과 위 부등식 사슬.
 
 **순간 전략 방향과 평균 전략 방향이 다른 반례는 있다. 확인과 증명을 마쳤다.**
 - 정리 E(`ASWISS_CONVERGENCE_KO.md` §10): Σ_t r^{σ_t}(I,a) = T·r^{σ̄}(I,a) + T·Ω + T·K + c_I.

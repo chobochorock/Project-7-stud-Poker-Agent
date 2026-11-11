@@ -39,6 +39,8 @@
 //   current bucket (its leaf's pointer; a pending leaf's provisional pointer).
 //   --prior-start equal | length | identity (test only: one leaf per information set; with --m 1 --eager 1 the run
 //   is identical to --mode pure, test T4). --features general | poker. --leaf-cache / --pend-cache: caches (T2).
+// --prior-ratio R (pp): after every posterior judgment the prior grows (best first) to at least R x the posterior
+// buckets, and immediate splits may go up to that size; --crossfit 0: prior tests chosen and accepted on all rows.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -105,7 +107,8 @@ enum { PC = 0, UM, UO, UC, HO, AM, PM, PO };
 // ======================= options =======================
 bool pp_mode = true, split_on = true, measure = false, eager = false, leaf_cache_on = true, pend_cache_on = true, memo_on = true, table_on = true;
 int members_cap = 64, m_samples = 16, min_leaf = 1, kmax = KMAX, rows_per_octave = 2, esd_min_n = 5;
-double zthr = 2.0, inherit_r = 0, inherit_s = 0;
+double zthr = 2.0, inherit_r = 0, inherit_s = 0, prior_ratio = 0;
+bool crossfit = true;
 string outlier = "esd", scale = "counterfactual", schedule = "static", prior_split = "immediate", prior_start = "equal", features = "general";
 long long eps_check = 1000;
 
@@ -507,6 +510,11 @@ Candidate best_split(const vector<Row>& rows, const vector<char>& half, int n) {
         }
     }
     if (!best.ok) return best;
+    if (nA == (int)rows.size()) {  // --crossfit 0: chosen and accepted on all rows (exact small games have no noise)
+        best.gainB = best.gainA;
+        best.ok = best.gainA > 1e-12 * max(1.0, baseA);
+        return best;
+    }
     Acc pB, lB, rB;
     for (size_t i = 0; i < rows.size(); ++i) if (half[i]) { pB.add(rows[i], n); (feat(rows[i].I, best.d) <= best.thr ? lB : rB).add(rows[i], n); }
     best.gainB = sse(pB, n) - sse(lB, n) - sse(rB, n);
@@ -552,8 +560,8 @@ void commit_split(int l, const Candidate& cd, int lv, size_t nrows) {
 int n_leaves_alive() { int c = 0; for (const Leaf& L : leaves) c += L.node >= 0; return c; }
 bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
     vector<Row> rows = leaf_rows(l, lv, bs);
-    vector<char> half(rows.size());
-    for (auto& h : half) h = (char)(split_rng() & 1);
+    vector<char> half(rows.size(), 0);
+    if (crossfit) for (auto& h : half) h = (char)(split_rng() & 1);
     const Candidate cd = best_split(rows, half, counts[cell_members[leaves[l].cell][0]]);
     if (!cd.ok) { ++n_prior_rejected; return false; }
     commit_split(l, cd, lv, rows.size());
@@ -562,7 +570,7 @@ bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
 // epoch mode (and held signals at an epoch end): best first over the waiting leaves and their descendants
 void process_waiting(bool best_first) {
     if (waiting.empty()) return;
-    const int cap = 2 * n_leaves_alive();
+    const int cap = max(2 * n_leaves_alive(), (int)min<double>(nI, ceil(prior_ratio * B)));
     if (!best_first) {  // immediate mode's held signals: one binary test each, in order, up to the cap
         vector<int> w = move(waiting); waiting.clear();
         for (int l : w) {
@@ -578,7 +586,7 @@ void process_waiting(bool best_first) {
     vector<Item> items;
     auto make = [&](int l, int lv, int bs, vector<Row> rows) {
         Item it; it.l = l; it.lv = lv; it.bs = bs; it.rows = move(rows);
-        it.half.resize(it.rows.size()); for (auto& h : it.half) h = (char)(split_rng() & 1);
+        it.half.assign(it.rows.size(), 0); if (crossfit) for (auto& h : it.half) h = (char)(split_rng() & 1);
         it.cd = best_split(it.rows, it.half, counts[cell_members[leaves[l].cell][0]]);
         it.gain = it.cd.ok ? it.cd.gainB : -1;
         if (!it.cd.ok) ++n_prior_rejected;
@@ -601,6 +609,53 @@ void process_waiting(bool best_first) {
         for (const Row& r : it.rows) (feat(r.I, it.cd.d) <= it.cd.thr ? ra : rb).push_back(r);
         make(a, it.lv, it.bs, move(ra));
         make(b, it.lv, it.bs, move(rb));
+    }
+}
+// --prior-ratio R: after a posterior judgment, grow the prior best first until it has at least R x (posterior buckets)
+// leaves (at most one per information set). Rows: every leaf's information sets with their per-visit directions at
+// the judgment just made, under the leaf's bucket of that level; the same criterion as a signalled split.
+void grow_to_ratio() {
+    if (prior_ratio <= 0 || events.empty()) return;
+    const int target = (int)min<double>(nI, ceil(prior_ratio * B));
+    if (n_leaves_alive() >= target) return;
+    const int lv = level_now - 1;
+    const Event& ev = events[lv];
+    vector<vector<int>> by_leaf(leaves.size());
+    for (int I = 0; I < nI; ++I) by_leaf[leaf_of(I)].push_back(I);
+    struct Item { double gain; int l; vector<Row> rows; Candidate cd; };
+    vector<Item> items;
+    auto make = [&](int l, vector<Row> rows) {
+        Item it; it.l = l; it.rows = move(rows);
+        vector<char> half(it.rows.size(), 0);
+        if (crossfit) for (auto& h : half) h = (char)(split_rng() & 1);
+        it.cd = best_split(it.rows, half, counts[cell_members[leaves[l].cell][0]]);
+        it.gain = it.cd.gainB;
+        if (it.cd.ok) items.push_back(move(it));
+    };
+    for (size_t l = 0; l < leaves.size(); ++l) {
+        if (leaves[l].node < 0 || by_leaf[l].size() < 2) continue;
+        const int bs = ancestor(leaves[l].pending ? leaves[l].prov : leaves[l].ptr, lv);
+        vector<Row> rows;
+        for (int I : by_leaf[l]) {
+            Row r; r.I = I; double R[W], M;
+            direction(I, bs, view(ev), lv, R, M);
+            if (M <= 0) continue;
+            r.w = M;
+            for (int a = 0; a < W; ++a) r.x[a] = a < counts[I] ? R[a] / M : 0;
+            rows.push_back(r);
+        }
+        make((int)l, move(rows));
+    }
+    while (!items.empty() && n_leaves_alive() < target) {
+        size_t k = 0;
+        for (size_t i = 1; i < items.size(); ++i) if (items[i].gain > items[k].gain) k = i;
+        Item it = move(items[k]); items.erase(items.begin() + k);
+        commit_split(it.l, it.cd, lv, it.rows.size());
+        const int a = (int)leaves.size() - 2, b = (int)leaves.size() - 1;
+        vector<Row> ra, rb;
+        for (const Row& r : it.rows) (feat(r.I, it.cd.d) <= it.cd.thr ? ra : rb).push_back(r);
+        make(a, move(ra));
+        make(b, move(rb));
     }
 }
 // a pending leaf with m samples: its pointer = the route of the samples' mean direction; signal when the samples'
@@ -639,7 +694,7 @@ void finalize(int l) {
     if (sig_lv >= 0) {
         ++n_signals;
         L.sig_level = sig_lv; L.sig_bucket = sig_b;
-        if (prior_split == "immediate" && n_leaves_alive() + 1 <= 2 * leaves_at_event) {
+        if (prior_split == "immediate" && n_leaves_alive() + 1 <= max(2 * leaves_at_event, (int)min<double>(nI, ceil(prior_ratio * B)))) {
             L.sig_level = -1;
             try_split_now(l, sig_lv, sig_b);
         } else waiting.push_back(l);
@@ -761,7 +816,7 @@ int main(int argc, char** argv) try {
                             {"--eager", "0"}, {"--leaf-cache", "1"}, {"--pend-cache", "1"}, {"--memo", "1"}, {"--table", "1"},
                             {"--rows-per-octave", "2"}, {"--checkpoint-minutes", "10"}, {"--stop-after-rows", "0"},
                             {"--esd-table", (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string()},
-                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}};
+                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -770,6 +825,7 @@ int main(int argc, char** argv) try {
     const string dir = opt.at("--tree"), out = opt.at("--out");
     pp_mode = opt["--mode"] == "pp";
     split_on = opt["--split"] == "1";
+    prior_ratio = stod(opt["--prior-ratio"]); crossfit = opt["--crossfit"] == "1";
     if (!pp_mode && opt["--mode"] != "pure") throw runtime_error("--mode must be pp or pure");
     members_cap = stoi(opt["--members"]); m_samples = stoi(opt["--m"]); min_leaf = stoi(opt["--min-leaf"]);
     kmax = min(KMAX, stoi(opt["--kmax"])); outlier = opt["--outlier"]; scale = opt["--scale"]; zthr = stod(opt["--z"]); esd_min_n = stoi(opt["--esd-min-n"]);
@@ -849,7 +905,8 @@ int main(int argc, char** argv) try {
     cfg << "pp_aswiss v1;tree=" << dir;
     for (const auto& [k, v] : opt)
         if (k != "--seconds" && k != "--iters" && k != "--checkpoint-minutes" && k != "--leaf-cache" && k != "--pend-cache" &&
-            k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze")
+            k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze" &&
+            !(k == "--prior-ratio" && v == "0") && !(k == "--crossfit" && v == "1"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1183,6 +1240,7 @@ int main(int argc, char** argv) try {
                 }
                 ++assign_ver;
             }
+            grow_to_ratio();
             leaves_at_event = n_leaves_alive();
         }
         assign_cpu += cpu_now() - a0;

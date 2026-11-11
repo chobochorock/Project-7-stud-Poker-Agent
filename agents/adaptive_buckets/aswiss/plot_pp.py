@@ -13,7 +13,7 @@ are compared at the same iterations. Writes:
   OUT_PREFIX.md                every arm at shared iterations (median over seeds, min-max) and its ratio to --kmeans
 Exact exploitability is NashConv/2 of the full game. Lines: median over seeds; thin lines: the seeds.
 """
-import argparse, csv, math, os
+import argparse, csv, math, os, textwrap
 from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
@@ -108,10 +108,10 @@ for name, ds, color, ref in arms:
         axb.plot(xs, [num(r, "prior_leaves") for r in rows], color=color, ls=":", lw=2, label=f"{name}: prior leaves")
 style(axb, "MCCFR iterations", "count", "(d) posterior buckets and prior leaves (first seed)")
 axb.legend(fontsize=8, frameon=False)
-fig.text(0.01, 0.005, "mini-stud small (51,114 information sets), pure external-sampling MCCFR, one core per run, equal CPU budget. "
-         "Dashed: fixed partitions trained by the same MCCFR (unabstracted; k-means with the pp-equal run's per-time-step "
-         "bucket counts, card + previous-street betting features).", fontsize=8, color=MUTED)
-fig.tight_layout(rect=(0, 0.03, 1, 1)); fig.savefig(a.prefix + "_curves.png", dpi=130); plt.close(fig)
+fig.text(0.01, 0.005, textwrap.fill("mini-stud small (51,114 information sets), pure external-sampling MCCFR, one core per run, "
+         "equal CPU budget. Dashed: fixed partitions trained by the same MCCFR (unabstracted; k-means with a pp-equal run's "
+         "per-time-step bucket counts, card + previous-street betting features).", 190), fontsize=8, color=MUTED)
+fig.tight_layout(rect=(0, 0.04, 1, 1)); fig.savefig(a.prefix + "_curves.png", dpi=130); plt.close(fig)
 
 # regret sums
 split_arms = [(n, ds, c, r) for n, ds, c, r in arms if not r and data[n] and data[n][0]]
@@ -136,8 +136,8 @@ if split_arms:
     note = "Vertical lines: epoch ends with at least one posterior split. Sums of max(0, max_a R(a)) over information sets " \
            "(infoset) or buckets (bucket), R = sampled cumulative regret of the run (measurement table, not used in training)."
     if nonpos: note += f" {nonpos} non-positive values are not drawn on the log axis."
-    fig.text(0.01, 0.005, note, fontsize=8, color=MUTED)
-    fig.tight_layout(rect=(0, 0.05, 1, 1)); fig.savefig(a.prefix + "_regret_sums.png", dpi=130); plt.close(fig)
+    fig.text(0.01, 0.005, textwrap.fill(note, 60 * len(split_arms) + 40), fontsize=8, color=MUTED)
+    fig.tight_layout(rect=(0, 0.08, 1, 1)); fig.savefig(a.prefix + "_regret_sums.png", dpi=130); plt.close(fig)
 
 # depth spread
 pp_dirs = [(n, ds[0], c) for n, ds, c, r in arms if not r and os.path.exists(os.path.join(ds[0], "depth_spread.csv"))]
@@ -162,8 +162,8 @@ if pp_dirs:
         axx.grid(True, color=GRID, lw=0.6); axx.tick_params(colors=MUTED)
         for s in axx.spines.values(): s.set_color(GRID)
         axx.legend(fontsize=8, frameon=False)
-    fig.text(0.01, 0.005, "Per-visit regret of an information set: its sampled regret summed over the current epoch divided by "
-             "its traverser visits in the epoch. Leaves without visits in the epoch are left out.", fontsize=8, color=MUTED)
+    fig.text(0.01, 0.005, textwrap.fill("Per-visit regret of an information set: its sampled regret summed over the current epoch "
+             "divided by its traverser visits in the epoch. Leaves without visits in the epoch are left out.", 60 * len(pp_dirs) + 40), fontsize=8, color=MUTED)
     fig.tight_layout(rect=(0, 0.05, 1, 1)); fig.savefig(a.prefix + "_depth_spread.png", dpi=130); plt.close(fig)
 
 # table at shared iterations

@@ -432,7 +432,7 @@ $$r_j(I,a)=\sum_{\sigma\in\text{사건 }j\text{에 저장한 전략}}\big[v^{\si
 | T3 ESD 문턱 표 | 통과. n ≥ 25에서 Rosner 근사식과 최대 0.012 차이, bucket 단위 오경보율 4.7–5.8% |
 | T4 정보집합마다 칸(identity) + m = 1 = pure | 통과 (Leduc, mini-stud) |
 | T5 멈췄다 이어 돌리기 | 통과 (pp, pure, ε 일정 + epoch 모드 + 측정) |
-| T6 Kuhn, Leduc 수렴 | 아래 14.5 |
+| T6 Kuhn, Leduc 수렴 | Kuhn은 분할 불가(아래), Leduc pp는 2.08 → 1.15로 통과, Leduc pure(명세 기본 ESD)는 2.08 → 2.31로 실패. 아래 14.5 |
 
 **구현 중에 시험이 찾은 오류 두 가지 (고쳤다)**
 - **ESD 문턱 표의 정의.**
@@ -450,13 +450,13 @@ $$r_j(I,a)=\sum_{\sigma\in\text{사건 }j\text{에 저장한 전략}}\big[v^{\si
 - ESD(n ≥ 5 필요), z = 2, 원안의 1σ 모두 정보집합 2개짜리 bucket을 영영 나누지 못한다.
 - 그래서 Kuhn의 exploitability는 1/3에서 그대로다.
 
-**Leduc (512k 반복, seed 1, 평균 정책의 정확한 exploitability)**
+**Leduc (512k 반복, seed 1, 평균 정책의 정확한 exploitability, 최종 기본값 `--min-leaf 1`)**
 
 | 규칙 | pure | pp-equal |
 |---|---|---|
-| ESD, 반사실 척도 (명세 기본) | 2.31, bucket 23 | 2.27, bucket 10 |
-| ESD, fact-counterfact | 2.24, bucket 8 | 2.35, bucket 7 |
-| 규칙 (a), z = 2 | **0.18, bucket 172** | 1.64, bucket 208, 잎 16 (`--min-leaf 8`) / 0.66, 잎 82 (`--min-leaf 1`, 256k) |
+| ESD, 반사실 척도 (명세 기본) | 2.31, bucket 23 | 1.15, bucket 36, prior 잎 30 (분할 24, 거절 36) |
+| ESD, fact-counterfact | 2.24, bucket 8 | 2.35, bucket 7, 잎 6 |
+| 규칙 (a), z = 2 | **0.18, bucket 172** | 0.90, bucket 305, 잎 82 (분할 76, 거절 207) |
 
 - 처음 행(125반복, 거의 균등 전략)은 2.08이다.
 - ESD 규칙은 판정마다 이상치로 걸리는 정보집합이 몇 개뿐이다.

@@ -39,6 +39,7 @@
 //   current bucket (its leaf's pointer; a pending leaf's provisional pointer).
 //   --prior-start equal | length | identity (test only: one leaf per information set; with --m 1 --eager 1 the run
 //   is identical to --mode pure, test T4). --features general | poker. --leaf-cache / --pend-cache: caches (T2).
+// --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
 // --measure 1 the regret sums of every row and depth_spread.csv (pp). train_seconds is process CPU time without
@@ -760,7 +761,7 @@ int main(int argc, char** argv) try {
                             {"--eager", "0"}, {"--leaf-cache", "1"}, {"--pend-cache", "1"}, {"--memo", "1"}, {"--table", "1"},
                             {"--rows-per-octave", "2"}, {"--checkpoint-minutes", "10"}, {"--stop-after-rows", "0"},
                             {"--esd-table", (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string()},
-                            {"--p0", ""}, {"--split", "1"}};
+                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -848,7 +849,7 @@ int main(int argc, char** argv) try {
     cfg << "pp_aswiss v1;tree=" << dir;
     for (const auto& [k, v] : opt)
         if (k != "--seconds" && k != "--iters" && k != "--checkpoint-minutes" && k != "--leaf-cache" && k != "--pend-cache" &&
-            k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table")
+            k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze")
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -947,6 +948,50 @@ int main(int argc, char** argv) try {
         filesystem::resize_file(pr_path, pr_bytes);
         if (filesystem::exists(ds_path)) filesystem::resize_file(ds_path, ds_bytes);
         resumed = true;
+        if (stoi(opt["--analyze"]) > 0) {
+            // --analyze N (pp): does the prior send information sets to the bucket their own direction would choose?
+            // For N information sets drawn uniformly among those whose leaf is resolved: own = the route of I alone
+            // through the genealogy from its starting bucket (the pending-leaf rule applied to I), pointer = its
+            // leaf's pointer. Writes analysis.json; nothing is trained and no output of the run changes.
+            if (!pp_mode) throw runtime_error("--analyze is for --mode pp");
+            const int nsamp = stoi(opt["--analyze"]);
+            vector<int> pool;
+            for (int I = 0; I < nI; ++I) if (!leaves[leaf_of(I)].pending) pool.push_back(I);
+            mt19937_64 ar(12345);
+            shuffle(pool.begin(), pool.end(), ar);
+            if ((int)pool.size() > nsamp) pool.resize(nsamp);
+            long long mis = 0; double wv = 0, wmis = 0; map<int, pair<long long, long long>> by_depth; map<int, long long> first_level;
+            const double t0 = cpu_now();
+            for (int I : pool) {
+                const Leaf& L = leaves[leaf_of(I)];
+                // own route level by level, compared with the pointer's ancestors
+                int b = p0_bucket[I], diverge = -1;
+                for (int lv = 0; lv < level_now; ++lv) {
+                    if (diverge < 0 && b != ancestor(L.ptr, lv)) diverge = lv;
+                    const Event& ev = events[lv];
+                    b = ev.unsplit[b] >= 0 ? ev.unsplit[b] : kid_for(ev, b, I, lv);
+                }
+                if (diverge < 0 && b != L.ptr) diverge = level_now;
+                const bool wrong = b != L.ptr;
+                const double w = vmeas.empty() ? 1.0 : (double)vmeas[I];
+                mis += wrong; wv += w; wmis += wrong ? w : 0;
+                auto& d = by_depth[L.depth]; ++d.first; d.second += wrong;
+                if (wrong) ++first_level[diverge];
+            }
+            ofstream j(out + "/analysis.json");
+            j << "{\"iters\":" << run.t << ",\"level\":" << level_now << ",\"buckets\":" << B << ",\"sampled\":" << pool.size()
+              << ",\"misassigned\":" << mis << ",\"share\":" << (pool.empty() ? 0.0 : (double)mis / pool.size())
+              << ",\"visit_weighted_share\":" << (wv > 0 ? wmis / wv : NAN) << ",\"by_leaf_depth\":{";
+            bool first = true;
+            for (const auto& [dd, c] : by_depth) { j << (first ? "" : ",") << "\"" << dd << "\":[" << c.first << "," << c.second << "]"; first = false; }
+            j << "},\"first_divergent_level\":{";
+            first = true;
+            for (const auto& [lv, c] : first_level) { j << (first ? "" : ",") << "\"" << lv << "\":" << c; first = false; }
+            j << "},\"seconds\":" << cpu_now() - t0 << "}\n";
+            cerr << "analysis: " << mis << " of " << pool.size() << " sampled information sets are not where their own route goes ("
+                 << (pool.empty() ? 0.0 : 100.0 * mis / pool.size()) << "%, visit-weighted " << (wv > 0 ? 100.0 * wmis / wv : NAN) << "%)\n";
+            return 0;
+        }
         cerr << "resumed at iteration " << run.t << ", level " << level_now << ", buckets " << B << ", CPU " << run.cpu_before << " s\n";
     } else {
         const uint64_t seed = stoull(opt["--seed"]);

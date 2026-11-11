@@ -104,6 +104,8 @@ for name, ds, color, ref in arms:
     rows = runs[0]
     xs = [num(r, "iters") for r in rows]
     axb.plot(xs, [num(r, "buckets_after") for r in rows], color=color, ls="--" if ref else "-", lw=2, label=f"{name}: posterior buckets")
+    if not ref and any(not math.isnan(num(r, "buckets_used")) for r in rows):
+        axb.plot(xs, [num(r, "buckets_used") for r in rows], color=color, ls="-.", lw=1.2, label=f"{name}: buckets in use")
     if any(num(r, "prior_leaves") > 0 for r in rows):
         axb.plot(xs, [num(r, "prior_leaves") for r in rows], color=color, ls=":", lw=2, label=f"{name}: prior leaves")
 style(axb, "MCCFR iterations", "count", "(d) posterior buckets and prior leaves (first seed)")
@@ -188,13 +190,23 @@ with open(a.prefix + ".md", "w") as f:
                 if kref and name != a.kmeans and kref.get(t, 0) > 0: cell += f" ({m / kref[t]:.2f})"
                 cells.append(cell)
             f.write(f"| {name} | " + " | ".join(cells) + " |\n")
-    f.write("\n### last row of the first seed\n\n| arm | iterations | CPU s | assign s | posterior buckets | prior leaves | prior splits | rejected | signals |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+    f.write("\n### last row of the first seed\n\n| arm | iterations | CPU s | assign s | posterior buckets | in use | prior leaves | prior splits | rejected | signals | misassigned (visit-weighted) |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
     for name, ds, _, _ in arms:
         runs = [r for r in data[name] if r]
         if not runs: continue
         r = runs[0][-1]
+        d0 = ds[0]
+        used = num(r, "buckets_used")
+        if math.isnan(used) and os.path.exists(os.path.join(d0, "final_bucket_map.bin")):
+            import numpy as np
+            used = len(np.unique(np.fromfile(os.path.join(d0, "final_bucket_map.bin"), np.int32)))
+        mis = ""
+        ap = os.path.join(d0, "analysis.json")
+        if os.path.exists(ap):
+            import json
+            j = json.load(open(ap)); mis = f"{100 * j['share']:.1f}% ({100 * j['visit_weighted_share']:.1f}%)"
         f.write(f"| {name} | {int(num(r, 'iters')):,} | {num(r, 'train_seconds'):.0f} | {num(r, 'assign_seconds'):.0f} | "
-                f"{int(num(r, 'buckets_after')):,} | {int(num(r, 'prior_leaves')):,} | {int(num(r, 'prior_splits')):,} | "
-                f"{int(num(r, 'prior_rejected')):,} | {int(num(r, 'signals')):,} |\n")
+                f"{int(num(r, 'buckets_after')):,} | {'' if math.isnan(used) else f'{int(used):,}'} | {int(num(r, 'prior_leaves')):,} | "
+                f"{int(num(r, 'prior_splits')):,} | {int(num(r, 'prior_rejected')):,} | {int(num(r, 'signals')):,} | {mis} |\n")
     if missing: f.write("\nMissing runs: " + ", ".join(f"{n} ({d})" for n, d in missing) + "\n")
 print("saved", a.prefix + "_curves.png", a.prefix + ".md")

@@ -1141,7 +1141,7 @@ int main(int argc, char** argv) try {
         draw_samples();
         ofstream(log_path) << "row,iters,epoch,level,buckets,buckets_after,splits,prior_leaves,pending_leaves,prior_splits,"
                               "prior_rejected,finalized,signals,waiting,K,eps_stat,eps,infoset_regret_sum,bucket_regret_sum,"
-                              "regret_sum_gap,table_regret_sum,train_seconds,assign_seconds,directions,gain_rejected\n";
+                              "regret_sum_gap,table_regret_sum,train_seconds,assign_seconds,directions,gain_rejected,buckets_used\n";
         ofstream(ev_path) << "event,iters,bucket,members,outliers,labels,children\n";
         ofstream(pr_path) << "iters,leaf,cell,depth,test,threshold,gain_choose_half,gain_check_half,rows,signal_level,left,right\n";
         if (measure && pp_mode) ofstream(ds_path) << "row,iters,leaf,cell,depth,infosets,visited,visits,rms,max_dev,pending\n";
@@ -1172,12 +1172,13 @@ int main(int argc, char** argv) try {
         for (int b = 0; b < B; ++b) s += vis[b] >= 25 || parent_eps[b] < 0 ? psi(&Q[(size_t)b * W], bucket_n[b]) / max<long long>(1, vis[b]) : parent_eps[b];
         return s;
     };
-    struct RowStats { double irs = NAN, brs = NAN, trs = 0; };
+    struct RowStats { double irs = NAN, brs = NAN, trs = 0; int used = 0; };  // used: buckets some information set is in now
     auto snapshot = [&](int before) {
         RowStats st;
         excl([&] {
             vector<int> bk(nI);
             for (int I = 0; I < nI; ++I) bk[I] = current_bucket(I);
+            { vector<char> u(B, 0); for (int b : bk) u[b] = 1; for (char c : u) st.used += c; }
             vector<double> avg((size_t)nI * W, 0.0), cur((size_t)nI * W, 0.0);
             for (int I = 0; I < nI; ++I) {
                 const int b = bk[I], n = counts[I];
@@ -1231,10 +1232,10 @@ int main(int argc, char** argv) try {
             const double irs = st.irs, brs = st.brs, trs = st.trs;
             int pend = 0, alive = 0;
             for (const Leaf& L : leaves) if (L.node >= 0) { ++alive; pend += L.pending; }
-            fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld\n",
+            fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld,%d\n",
                     run.rows, run.t, run.k, level_now, before, B, splits, pp_mode ? alive : 0, pp_mode ? pend : 0, n_prior_splits,
                     n_prior_rejected, n_finalize, n_signals, waiting.size(), run.curK, schedule == "eps" ? eps_stat() : NAN,
-                    run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected);
+                    run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used);
             fflush(logf);
             cerr << "row " << run.rows << " iters " << run.t << " level " << level_now << " buckets " << before << " -> " << B;
             if (pp_mode) cerr << " leaves " << alive << " pending " << pend << " prior splits " << n_prior_splits;

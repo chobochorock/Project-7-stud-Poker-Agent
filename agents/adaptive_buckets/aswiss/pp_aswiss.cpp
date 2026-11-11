@@ -41,6 +41,9 @@
 //   is identical to --mode pure, test T4). --features general | poker. --leaf-cache / --pend-cache: caches (T2).
 // --prior-ratio R (pp): after every posterior judgment the prior grows (best first) to at least R x the posterior
 // buckets, and immediate splits may go up to that size; --crossfit 0: prior tests chosen and accepted on all rows.
+// --resolve-now 1 (pp): new leaves get m samples drawn from their information sets (by counterfactual reach) at the
+// split and are finalized at once. --prior-criterion label: prior tests reduce the Gini impurity of the posterior
+// child each information set picks at the event (instead of the regret vectors' squared error).
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -108,7 +111,9 @@ enum { PC = 0, UM, UO, UC, HO, AM, PM, PO };
 bool pp_mode = true, split_on = true, measure = false, eager = false, leaf_cache_on = true, pend_cache_on = true, memo_on = true, table_on = true;
 int members_cap = 64, m_samples = 16, min_leaf = 1, kmax = KMAX, rows_per_octave = 2, esd_min_n = 5;
 double zthr = 2.0, inherit_r = 0, inherit_s = 0, prior_ratio = 0;
-bool crossfit = true;
+bool crossfit = true, resolve_now = false;
+string prior_criterion = "regret";
+vector<int> resolve_q;  // --resolve-now: new leaves with samples drawn at the split, finalized at once
 string outlier = "esd", scale = "counterfactual", schedule = "static", prior_split = "immediate", prior_start = "equal", features = "general";
 long long eps_check = 1000;
 
@@ -459,7 +464,7 @@ double es(int h, int p) {
 }
 
 // ======================= prior splits =======================
-struct Row { int I; double w; double x[W]; };
+struct Row { int I; double w; double x[W]; int lab = -1; };  // lab: the posterior child its direction picks at the event
 struct Candidate { Desc d; double thr = 0, gainA = 0, gainB = 0; bool ok = false; };
 // weighted squared error of vectors x (n dims) with weights w: sum w|x|^2 - |sum w x|^2 / sum w
 struct Acc { double w = 0, wx[W] = {}, wxx = 0; void add(const Row& r, int n) { w += r.w; for (int a = 0; a < n; ++a) { wx[a] += r.w * r.x[a]; wxx += r.w * r.x[a] * r.x[a]; } } };
@@ -484,9 +489,53 @@ vector<Desc> candidates(const vector<Row>& rows) {
     }
     return vector<Desc>(ds.begin(), ds.end());
 }
+// --prior-criterion label: the reduction of the reach-weighted Gini impurity of the rows' labels (the posterior child
+// each information set's own direction picks at the event), w (1 - sum p^2) = w - sum c^2 / w
+Candidate best_split_label(const vector<Row>& rows, const vector<char>& half) {
+    Candidate best;
+    if (rows.size() < 2) return best;
+    map<int, int> li;
+    for (const Row& r : rows) li.emplace(r.lab, 0);
+    int C = 0; for (auto& [l, i] : li) i = C++;
+    if (C < 2) return best;
+    auto imp = [&](const vector<double>& c, double w) { if (w <= 0) return 0.0; double q = 0; for (double x : c) q += x * x; return w - q / w; };
+    vector<double> totA(C, 0.0); double wA = 0; int nA = 0;
+    for (size_t i = 0; i < rows.size(); ++i) if (!half[i]) { totA[li[rows[i].lab]] += rows[i].w; wA += rows[i].w; ++nA; }
+    const double baseA = imp(totA, wA);
+    const vector<Desc> ds = candidates(rows);
+    vector<pair<double, int>> va;
+    vector<double> left(C), right(C);
+    for (const Desc& d : ds) {
+        va.clear();
+        for (size_t i = 0; i < rows.size(); ++i) if (!half[i]) va.push_back({feat(rows[i].I, d), (int)i});
+        sort(va.begin(), va.end());
+        fill(left.begin(), left.end(), 0.0); double wl = 0;
+        for (int k = 0; k + 1 < (int)va.size(); ++k) {
+            const Row& r = rows[va[k].second];
+            left[li[r.lab]] += r.w; wl += r.w;
+            if (va[k].first == va[k + 1].first) continue;
+            const int nl = k + 1, nr = nA - nl;
+            if (nl < min_leaf || nr < min_leaf) continue;
+            for (int c = 0; c < C; ++c) right[c] = totA[c] - left[c];
+            const double g = baseA - imp(left, wl) - imp(right, wA - wl);
+            if (g > best.gainA * (1 + 1e-12) + 1e-300) { best.gainA = g; best.d = d; best.thr = 0.5 * (va[k].first + va[k + 1].first); best.ok = true; }
+        }
+    }
+    if (!best.ok) return best;
+    if (nA == (int)rows.size()) { best.gainB = best.gainA; best.ok = best.gainA > 1e-12 * wA; return best; }
+    vector<double> pB(C, 0.0), lB(C, 0.0), rB(C, 0.0); double wp = 0, wl = 0, wr = 0;
+    for (size_t i = 0; i < rows.size(); ++i) if (half[i]) {
+        const int c = li[rows[i].lab]; pB[c] += rows[i].w; wp += rows[i].w;
+        if (feat(rows[i].I, best.d) <= best.thr) { lB[c] += rows[i].w; wl += rows[i].w; } else { rB[c] += rows[i].w; wr += rows[i].w; }
+    }
+    best.gainB = imp(pB, wp) - imp(lB, wl) - imp(rB, wr);
+    best.ok = best.gainB > 1e-12 * max(wp, 1e-300) && wl > 0 && wr > 0;
+    return best;
+}
 // the best binary test on the rows: chosen on half A (rows with half[i] == 0), checked on half B
 Candidate best_split(const vector<Row>& rows, const vector<char>& half, int n) {
     Candidate best;
+    if (prior_criterion == "label") return best_split_label(rows, half);
     if (rows.size() < 2) return best;
     const vector<Desc> ds = candidates(rows);
     vector<pair<double, int>> va;
@@ -521,25 +570,33 @@ Candidate best_split(const vector<Row>& rows, const vector<char>& half, int n) {
     best.ok = best.gainB > 1e-12 * max(1.0, sse(pB, n)) && lB.w > 0 && rB.w > 0;
     return best;
 }
+// one row: I's per-visit direction at event lv under bucket bs, its counterfactual reach, and its label there
+bool fill_row(Row& r, int I, int bs, int lv) {
+    const Event& ev = events[lv];
+    double R[W], M, R2[W];
+    direction(I, bs, view(ev), lv, R, M, R2);
+    if (!(M > 0)) return false;
+    r.I = I; r.w = M;
+    for (int a = 0; a < W; ++a) r.x[a] = a < counts[I] ? R[a] / M : 0;
+    if (ev.split_idx[bs] >= 0) { const Split& sp = ev.splits[ev.split_idx[bs]]; r.lab = kid_of_label(sp, label_of(sp, R, R2, M, counts[I], true)); }
+    else r.lab = -1;
+    return true;
+}
 // rows of a leaf: its information sets with per-visit directions at the signal event (bucket bs at level lv)
 vector<Row> leaf_rows(int l, int lv, int bs) {
     vector<Row> rows;
-    const Event& ev = events[lv];
     for (int I : cell_members[leaves[l].cell]) {
         if (leaf_of(I) != l) continue;
-        Row r; r.I = I;
-        double R[W], M;
-        direction(I, bs, view(ev), lv, R, M);
-        if (M <= 0) continue;
-        r.w = M;
-        for (int a = 0; a < W; ++a) r.x[a] = a < counts[I] ? R[a] / M : 0;
-        rows.push_back(r);
+        Row r;
+        if (fill_row(r, I, bs, lv)) rows.push_back(r);
     }
     return rows;
 }
 long long cur_t = 0;
+void finalize(int l);
 // split leaf l by candidate cd: l's node becomes internal, two new pending leaves (start of the genealogy)
-void commit_split(int l, const Candidate& cd, int lv, size_t nrows) {
+void commit_split(int l, const Candidate& cd, int lv, const vector<Row>& rows) {
+    const size_t nrows = rows.size();
     const int node = leaves[l].node, cell = leaves[l].cell, depth = leaves[l].depth;
     const int prov = leaves[l].pending ? leaves[l].prov : leaves[l].ptr;
     tnodes[node].d = cd.d; tnodes[node].thr = cd.thr; tnodes[node].leaf = -1;
@@ -556,6 +613,26 @@ void commit_split(int l, const Candidate& cd, int lv, size_t nrows) {
     ++cell_ver[cell]; ++assign_ver; ++n_prior_splits;
     fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%zu,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(cd.d).c_str(), cd.thr,
             cd.gainA, cd.gainB, nrows, lv, (int)leaves.size() - 2, (int)leaves.size() - 1);
+    if (resolve_now) {  // m samples per new leaf drawn from its rows by counterfactual reach, finalized right away
+        for (int s = 0; s < 2; ++s) {
+            const int nl = (int)leaves.size() - 2 + s;
+            vector<const Row*> part; double tw = 0;
+            for (const Row& r : rows) if ((feat(r.I, cd.d) <= cd.thr) == (s == 0)) { part.push_back(&r); tw += r.w; }
+            if (part.empty() || !(tw > 0)) continue;
+            vector<int32_t> smp;
+            for (int k = 0; k < m_samples; ++k) {
+                double x = uniform_real_distribution<double>(0, tw)(split_rng), acc = 0;
+                size_t j = 0;
+                for (; j + 1 < part.size(); ++j) { acc += part[j]->w; if (x < acc) break; }
+                smp.push_back(part[j]->I);
+            }
+            leaves[nl].samples = move(smp);
+            resolve_q.push_back(nl);
+        }
+    }
+}
+void drain_resolve() {  // finalize the leaves queued by --resolve-now (a finalize may split again and queue more)
+    while (!resolve_q.empty()) { const int l = resolve_q.back(); resolve_q.pop_back(); if (leaves[l].node >= 0) finalize(l); }
 }
 int n_leaves_alive() { int c = 0; for (const Leaf& L : leaves) c += L.node >= 0; return c; }
 bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
@@ -564,7 +641,7 @@ bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
     if (crossfit) for (auto& h : half) h = (char)(split_rng() & 1);
     const Candidate cd = best_split(rows, half, counts[cell_members[leaves[l].cell][0]]);
     if (!cd.ok) { ++n_prior_rejected; return false; }
-    commit_split(l, cd, lv, rows.size());
+    commit_split(l, cd, lv, rows);
     return true;
 }
 // epoch mode (and held signals at an epoch end): best first over the waiting leaves and their descendants
@@ -603,7 +680,7 @@ void process_waiting(bool best_first) {
         size_t k = 0;
         for (size_t i = 1; i < items.size(); ++i) if (items[i].gain > items[k].gain) k = i;
         Item it = move(items[k]); items.erase(items.begin() + k);
-        commit_split(it.l, it.cd, it.lv, it.rows.size());
+        commit_split(it.l, it.cd, it.lv, it.rows);
         const int a = (int)leaves.size() - 2, b = (int)leaves.size() - 1;
         vector<Row> ra, rb;
         for (const Row& r : it.rows) (feat(r.I, it.cd.d) <= it.cd.thr ? ra : rb).push_back(r);
@@ -619,7 +696,6 @@ void grow_to_ratio() {
     const int target = (int)min<double>(nI, ceil(prior_ratio * B));
     if (n_leaves_alive() >= target) return;
     const int lv = level_now - 1;
-    const Event& ev = events[lv];
     vector<vector<int>> by_leaf(leaves.size());
     for (int I = 0; I < nI; ++I) by_leaf[leaf_of(I)].push_back(I);
     struct Item { double gain; int l; vector<Row> rows; Candidate cd; };
@@ -636,21 +712,14 @@ void grow_to_ratio() {
         if (leaves[l].node < 0 || by_leaf[l].size() < 2) continue;
         const int bs = ancestor(leaves[l].pending ? leaves[l].prov : leaves[l].ptr, lv);
         vector<Row> rows;
-        for (int I : by_leaf[l]) {
-            Row r; r.I = I; double R[W], M;
-            direction(I, bs, view(ev), lv, R, M);
-            if (M <= 0) continue;
-            r.w = M;
-            for (int a = 0; a < W; ++a) r.x[a] = a < counts[I] ? R[a] / M : 0;
-            rows.push_back(r);
-        }
+        for (int I : by_leaf[l]) { Row r; if (fill_row(r, I, bs, lv)) rows.push_back(r); }
         make((int)l, move(rows));
     }
     while (!items.empty() && n_leaves_alive() < target) {
         size_t k = 0;
         for (size_t i = 1; i < items.size(); ++i) if (items[i].gain > items[k].gain) k = i;
         Item it = move(items[k]); items.erase(items.begin() + k);
-        commit_split(it.l, it.cd, lv, it.rows.size());
+        commit_split(it.l, it.cd, lv, it.rows);
         const int a = (int)leaves.size() - 2, b = (int)leaves.size() - 1;
         vector<Row> ra, rb;
         for (const Row& r : it.rows) (feat(r.I, it.cd.d) <= it.cd.thr ? ra : rb).push_back(r);
@@ -816,7 +885,7 @@ int main(int argc, char** argv) try {
                             {"--eager", "0"}, {"--leaf-cache", "1"}, {"--pend-cache", "1"}, {"--memo", "1"}, {"--table", "1"},
                             {"--rows-per-octave", "2"}, {"--checkpoint-minutes", "10"}, {"--stop-after-rows", "0"},
                             {"--esd-table", (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string()},
-                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}};
+                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}, {"--resolve-now", "0"}, {"--prior-criterion", "regret"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -826,6 +895,8 @@ int main(int argc, char** argv) try {
     pp_mode = opt["--mode"] == "pp";
     split_on = opt["--split"] == "1";
     prior_ratio = stod(opt["--prior-ratio"]); crossfit = opt["--crossfit"] == "1";
+    resolve_now = opt["--resolve-now"] == "1"; prior_criterion = opt["--prior-criterion"];
+    if (prior_criterion != "regret" && prior_criterion != "label") throw runtime_error("--prior-criterion must be regret or label");
     if (!pp_mode && opt["--mode"] != "pure") throw runtime_error("--mode must be pp or pure");
     members_cap = stoi(opt["--members"]); m_samples = stoi(opt["--m"]); min_leaf = stoi(opt["--min-leaf"]);
     kmax = min(KMAX, stoi(opt["--kmax"])); outlier = opt["--outlier"]; scale = opt["--scale"]; zthr = stod(opt["--z"]); esd_min_n = stoi(opt["--esd-min-n"]);
@@ -906,7 +977,8 @@ int main(int argc, char** argv) try {
     for (const auto& [k, v] : opt)
         if (k != "--seconds" && k != "--iters" && k != "--checkpoint-minutes" && k != "--leaf-cache" && k != "--pend-cache" &&
             k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze" &&
-            !(k == "--prior-ratio" && v == "0") && !(k == "--crossfit" && v == "1"))  // defaults of later options: old runs resume
+            !(k == "--prior-ratio" && v == "0") && !(k == "--crossfit" && v == "1") && !(k == "--resolve-now" && v == "0") &&
+            !(k == "--prior-criterion" && v == "regret"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1172,7 +1244,7 @@ int main(int argc, char** argv) try {
     };
     // the posterior judgment at an epoch end
     auto epoch_end = [&]() -> int {
-        if (pp_mode && !waiting.empty()) { const double a0 = cpu_now(); process_waiting(prior_split == "epoch"); assign_cpu += cpu_now() - a0; }
+        if (pp_mode && !waiting.empty()) { const double a0 = cpu_now(); process_waiting(prior_split == "epoch"); drain_resolve(); assign_cpu += cpu_now() - a0; }
         Event ev;
         ev.K = run.curK; ev.tables = move(run.cur_tables); ev.Bl = B; ev.t = run.t;
         ev.unsplit.assign(B, -1); ev.split_idx.assign(B, -1);
@@ -1241,6 +1313,7 @@ int main(int argc, char** argv) try {
                 ++assign_ver;
             }
             grow_to_ratio();
+            drain_resolve();
             leaves_at_event = n_leaves_alive();
         }
         assign_cpu += cpu_now() - a0;
@@ -1272,6 +1345,7 @@ int main(int argc, char** argv) try {
             const double a0 = cpu_now();
             vector<int> f = move(to_finalize); to_finalize.clear();
             for (int l : f) finalize(l);
+            drain_resolve();
             assign_cpu += cpu_now() - a0;
         }
         const bool budget_end = budget > 0 && train_secs() >= budget;

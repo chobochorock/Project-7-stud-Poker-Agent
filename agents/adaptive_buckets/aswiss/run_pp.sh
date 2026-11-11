@@ -13,6 +13,8 @@
 #   kmeans   --mode pure --p0 <k-means map> --split 0     (kmeans.py on ppeq's final bucket map, per time step; same seed)
 #   ppeq_a_r4 --mode pp --outlier label --prior-ratio 4 --crossfit 0   (prior >= 4 x posterior buckets, no cross-fit)
 #   ppeq_r4  --mode pp --prior-ratio 4 --crossfit 0
+#   ppeq_a_r4_rn, ppeq_a_r4_rnlab, ppeq_a_r4_lab: ppeq_a_r4 with --resolve-now 1, with both --resolve-now 1 and
+#            --prior-criterion label, and with --prior-criterion label
 #   kmeans_a, kmeans_a_r4 the same on ppeq_a's / ppeq_a_r4's final bucket maps
 # Runs whose exploitability.csv exists are skipped; a run stopped midway resumes from its state.bin when rerun. After its
 # evaluation (and, for pp runs, --analyze 3000 -> analysis.json) a run keeps only its last row's policy files and no
@@ -53,6 +55,9 @@ for s in $SEEDS; do
   echo "ppeq_fc $s --mode pp --prior-start equal --scale fact-counterfact --measure 1" >> "$jobs"
   echo "ppeq_a_r4 $s --mode pp --prior-start equal --outlier label --prior-ratio 4 --crossfit 0 --measure 1" >> "$jobs"
   echo "ppeq_r4 $s --mode pp --prior-start equal --prior-ratio 4 --crossfit 0 --measure 1" >> "$jobs"
+  echo "ppeq_a_r4_rn $s --mode pp --prior-start equal --outlier label --prior-ratio 4 --crossfit 0 --resolve-now 1 --measure 1" >> "$jobs"
+  echo "ppeq_a_r4_rnlab $s --mode pp --prior-start equal --outlier label --prior-ratio 4 --crossfit 0 --resolve-now 1 --prior-criterion label --measure 1" >> "$jobs"
+  echo "ppeq_a_r4_lab $s --mode pp --prior-start equal --outlier label --prior-ratio 4 --crossfit 0 --prior-criterion label --measure 1" >> "$jobs"
   echo "mccfr $s --mode pure --p0 $D/bucket_identity.bin --split 0" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
@@ -72,6 +77,7 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_esd" --arm "pp-equal=$(arm ppeq)" --arm "
   --arm "pp-equal fact-counterfact=$(arm ppeq_fc)" --arm "pp-equal, prior x4=$(arm ppeq_r4)" --ref "k-means=$(arm kmeans)" \
   --ref "MCCFR (no abstraction)=$(arm mccfr)" --kmeans k-means
 python3 "$A/plot_pp.py" "$OUT/pp_small_a" --arm "pp-equal, rule a=$(arm ppeq_a)" --arm "pp-equal, rule a, prior x4=$(arm ppeq_a_r4)" \
-  --arm "pure, rule a=$(arm pure_a)" --ref "k-means (rule a counts)=$(arm kmeans_a)" \
+  --arm "pure, rule a=$(arm pure_a)" --arm "x4 + resolve now=$(arm ppeq_a_r4_rn)" --arm "x4 + resolve now + label=$(arm ppeq_a_r4_rnlab)" \
+  --arm "x4 + label=$(arm ppeq_a_r4_lab)" --ref "k-means (rule a counts)=$(arm kmeans_a)" \
   --ref "k-means (rule a x4 counts)=$(arm kmeans_a_r4)" --ref "MCCFR (no abstraction)=$(arm mccfr)" --kmeans "k-means (rule a counts)"
 echo "done: $OUT/pp_small.md"

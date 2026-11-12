@@ -48,7 +48,8 @@ param(
     [string]$ExeName = "aswiss_stud.exe",
     [long]$FreezeSplitsAt = 0,     # > 0: epochs ending at or after this root are not judged (no label pass, no split); tabular arms
     [long]$JudgeAt = 0,            # > 0: the epoch containing this root ends there and is judged, frozen or not (one forced split)
-    [string]$Gxx = ""   # path to g++.exe when it is not on PATH
+    [string]$Gxx = "",   # path to g++.exe when it is not on PATH
+    [string]$PpExtra = ""  # pp arms only: more --partition pp options, e.g. "--mem-budget-mb 160"
 )
 $ErrorActionPreference = "Stop"
 # powershell -File passes "-Arms aswiss,k256" as the single string "aswiss,k256", so split on commas here
@@ -71,6 +72,12 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     k341      = @("atom_k341", "atom", 341, "k-means 341 (matched to ASWISS at 10M)", "")
     k512      = @("atom_k512", "atom", 512, "k-means 512", "")
     k1024     = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly", "")
+    # prior-posterior ASWISS (PP_STUD7_DESIGN_KO.md): no atlas (K = 0), judgments at 1000 * 2^k roots, particle
+    # directions, online LBR on the split schedule (switched on by -OnlineLbrEvery > 0)
+    pp        = @("pp_particle", "pp", 0, "prior-posterior ASWISS (particle directions, general features, no atlas)", "--epoch0 1000 --online-lbr-schedule split")
+    pp_poker  = @("pp_particle_poker", "pp", 0, "prior-posterior ASWISS, poker features", "--epoch0 1000 --online-lbr-schedule split --features poker")
+    pp_fill   = @("pp_particle_fill", "pp", 0, "prior-posterior ASWISS, assign by filling m visits", "--epoch0 1000 --online-lbr-schedule split --pp-assign fill")
+    pp_root   = @("pp_particle_root", "pp", 0, "prior-posterior ASWISS, new leaves from the root", "--epoch0 1000 --online-lbr-schedule split --leaf-start root")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
     escher    = @("net_escher", "net", 1024, "ESCHER (neural CFR)", "--algo escher")
@@ -86,7 +93,7 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
 }
 $unknown = @($Arms | Where-Object { -not $Arm.ContainsKey($_) })
 if ($unknown.Count -gt 0) { throw "unknown arm(s): $($unknown -join ', '); choose from: $($Arm.Keys -join ', ')" }
-function AtlasPath($k) { Join-Path $Atlas "atlas_power${k}_heur_eps20_seed37301.bin" }
+function AtlasPath($k) { if ($k -eq 0) { "" } else { Join-Path $Atlas "atlas_power${k}_heur_eps20_seed37301.bin" } }  # 0: no atlas (pp)
 $Suffix = if ($H4 -eq "learn") { "_h4_s$Seed" } else { "_s$Seed" }
 function RunName($a) { "$($Arm[$a][0])$Suffix" }
 New-Item -ItemType Directory -Force $Out | Out-Null
@@ -108,7 +115,8 @@ function FindGxx {
 function BuildIfStale {
     $sources = @((Join-Path $Here "aswiss_stud.cpp"), (Join-Path $Here "h4_lbr_generated.hpp"),
                  (Join-Path $Here "..\..\..\cpp_mccfr\stud_mccfr.cpp")) +
-               @(Get-ChildItem (Join-Path $Here "sota\*.hpp") | ForEach-Object { $_.FullName })
+               @(Get-ChildItem (Join-Path $Here "sota\*.hpp") | ForEach-Object { $_.FullName }) +
+               @(Get-ChildItem (Join-Path $Here "pp_*.hpp") | ForEach-Object { $_.FullName })
     $stale = -not (Test-Path $Exe)
     if (-not $stale) {
         $built = (Get-Item $Exe).LastWriteTime
@@ -139,11 +147,12 @@ elseif ($Action -eq "run") {
         if ((Test-Path $pidFile) -and (Get-Process -Id (Get-Content $pidFile) -ErrorAction SilentlyContinue)) {
             Write-Host "$name is already running (pid $(Get-Content $pidFile)); skipped"; continue
         }
-        $argv = @("train", "--partition", $Arm[$a][1], "--atlas", (AtlasPath $Arm[$a][2]), "--z", "2", "--seed", $Seed,
+        $argv = @("train", "--partition", $Arm[$a][1]) + $(if ($Arm[$a][2] -ne 0) { @("--atlas", (AtlasPath $Arm[$a][2])) } else { @() }) + @("--z", "2", "--seed", $Seed,
                   "--roots", $Roots, "--epoch0", "10000", "--checkpoint-every", $CheckpointEvery,
                   "--snapshot-every", $SnapshotEvery, "--curve-every", $CurveEvery, "--h4", $H4, "--out", $dir)
         if ($Threads -gt 1) { $argv += @("--threads", $Threads) }
         if ($Arm[$a][4]) { $argv += $Arm[$a][4] -split " " }
+        if ($PpExtra -and $Arm[$a][1] -eq "pp") { $argv += $PpExtra -split " " }
         if (($LogRegret -and $Arm[$a][1] -in @("history", "aswiss")) -or ($LogRegretKmeans -and $Arm[$a][1] -eq "atom")) {
             $argv += @("--log-regret", "1")
         }

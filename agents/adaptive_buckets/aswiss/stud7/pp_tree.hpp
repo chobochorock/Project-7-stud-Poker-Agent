@@ -1,0 +1,156 @@
+// Prior-posterior ASWISS on 7-stud: the state of the partition (start cells, prior tree, leaves with pointers, the
+// posterior genealogy and its split events) and the prior-tree fit (PP_STUD7_DESIGN_KO.md sections 4-6). Included
+// inside the anonymous namespace of aswiss_stud.cpp after pp_obs.hpp.
+#pragma once
+
+namespace pp {
+
+struct Opts {
+    bool fill = false;           // --pp-assign fill: pending leaves fill m training visits (spec "assign while learning")
+    bool root_start = false;     // --leaf-start root: new prior leaves route from the start of the genealogy
+    bool poker = false;          // --features poker
+    bool label_criterion = true; // --prior-criterion label (Gini of the rows' posterior children) | regret (TARA)
+    bool crossfit = false;       // --crossfit 1: tests chosen on one half of the rows, checked on the other
+    int particles = 64, n0 = 64, n_min = 8, m = 16, rho = 64, min_leaf = 1;
+    double z = 2, ratio = 4, pass_frac = 0.125, budget = 0.25, budget_min_steps = 2e6, judge_mem_mb = 256, mem_budget_mb = 0;
+    int threads = 1;
+    bool online_split = false;   // --online-lbr-schedule split
+};
+
+struct TNode { Desc d; float thr = 0; int32_t left = -1, right = -1, leaf = -1; };
+struct Split { int32_t level = 0; std::array<uint32_t, A + 1> kid{}; };  // kid[a]: child of label a, kid[A]: the none child
+struct FillRow { Sample x; std::array<float, A> r{}, se{}; int8_t label = -1; };
+struct Leaf {
+    int32_t node = -1;
+    uint16_t ctx = 0, depth = 0;
+    bool pending = false;
+    uint32_t ptr = 0xffffffffu, prov = 0xffffffffu, start_b = 0xffffffffu;
+    int32_t start_level = 0;
+    uint64_t born = 0;
+    std::vector<FillRow> fill;   // --pp-assign fill: the samples collected while pending
+};
+struct Cell { uint16_t ctx = 0; int32_t root = -1; uint32_t bucket = 0xffffffffu; };
+// a particle estimate of one sample's direction (r: per-visit regret, se: its standard error over the particles)
+struct Dir { std::array<double, A> r{}, se{}; uint8_t mask = 0; int label = -1; double neff = 0; uint64_t steps = 0; };
+struct Rows { std::vector<Sample> x; std::vector<Dir> d; };              // a judgment's rows with their directions
+struct Reservoir { uint64_t visits = 0; std::vector<Sample> x; std::vector<uint64_t> h; };
+
+struct Data {
+    Opts opt;
+    std::unordered_map<uint16_t, int32_t> cell_of;
+    std::vector<Cell> cells;
+    std::vector<TNode> nodes;
+    std::vector<Leaf> leaves;
+    std::vector<int32_t> born;                     // per bucket record: the split level it was created at
+    std::unordered_map<uint32_t, Split> splits;    // bucket -> its split event
+    int32_t level = 0;                             // split events so far (a judgment that split nothing is not one)
+    std::map<int32_t, std::vector<std::array<float, A>>> tables;  // stored average tables per level (root / fill)
+    // counters (checkpointed)
+    uint64_t epoch_nodes = 0;                      // training decision nodes since the last judgment (the budget's unit)
+    double steps_per_sample = 4000;                // policy lookups per particle estimate (from the last judgment)
+    uint64_t last_split_root = 0, fill_estimates = 0, prior_splits = 0, signals = 0;
+    bool frozen = false;                           // --mem-budget-mb reached: no more judgments
+    int32_t leaves_at_judgment = 0;
+    std::vector<std::string> split_rows;           // prior_splits.csv rows not yet written (fill mode, during training)
+
+    uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
+        while (b != 0xffffffffu && born[b] > lv) b = parent[b];
+        return b;
+    }
+    uint32_t kid_of(uint32_t b, int label) const {
+        const Split& sp = splits.at(b);
+        return label >= 0 && sp.kid[label] != 0xffffffffu ? sp.kid[label] : sp.kid[A];
+    }
+    int32_t leaf_of(int32_t root, const Stream& s) const {
+        int32_t x = root;
+        while (nodes[x].leaf < 0) x = feat(s, nodes[x].d) <= nodes[x].thr ? nodes[x].left : nodes[x].right;
+        return nodes[x].leaf;
+    }
+    uint32_t current(int32_t l) const { return leaves[l].pending ? leaves[l].prov : leaves[l].ptr; }
+    size_t live_leaves() const { size_t n = 0; for (const Leaf& L : leaves) n += L.node >= 0; return n; }
+};
+
+// ---- prior-tree fit on the rows of one leaf ----
+struct Row {
+    Stream s;
+    std::array<float, A> x{};  // per-visit direction (regret criterion)
+    uint32_t lab = 0;          // the posterior child the row's own direction picks (label criterion)
+    double w = 1;
+};
+struct Candidate { Desc d; double thr = 0, gainA = 0, gainB = 0; bool ok = false; };
+
+std::vector<Desc> candidate_features(const std::vector<Row>& rows, bool poker) {
+    std::vector<Desc> all;
+    for (const Row& r : rows) features_of(r.s, poker, all);
+    std::sort(all.begin(), all.end());
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+    return all;
+}
+// The best binary test: chosen on half A (half[i] == 0), checked on half B (all rows when crossfit is off). Criterion:
+// label: reduction of the weighted Gini impurity of the rows' children, w - sum c^2 / w;
+// regret: reduction of the weighted squared error of the direction vectors, sum w|x|^2 - |sum w x|^2 / sum w.
+Candidate best_split(const std::vector<Row>& rows, const std::vector<char>& half, const Opts& opt) {
+    Candidate best;
+    if (rows.size() < 2) return best;
+    int nA = 0; for (char h : half) nA += !h;
+    const std::vector<Desc> ds = candidate_features(rows, opt.poker);
+    // label indices
+    std::map<uint32_t, int> li;
+    for (const Row& r : rows) li.emplace(r.lab, 0);
+    int C = 0; for (auto& [l, i] : li) i = C++;
+    if (opt.label_criterion && C < 2) return best;
+    struct Acc {
+        double w = 0, wxx = 0;
+        std::array<double, A> wx{};
+        std::vector<double> c;
+    };
+    auto add = [&](Acc& a, const Row& r) {
+        a.w += r.w;
+        if (opt.label_criterion) a.c[li[r.lab]] += r.w;
+        else for (int k = 0; k < A; ++k) { a.wx[k] += r.w * r.x[k]; a.wxx += r.w * r.x[k] * r.x[k]; }
+    };
+    auto fresh = [&] { Acc a; a.c.assign(C, 0.0); return a; };
+    auto imp = [&](const Acc& a) {
+        if (a.w <= 0) return 0.0;
+        double q = 0;
+        if (opt.label_criterion) { for (double x : a.c) q += x * x; return a.w - q / a.w; }
+        for (double x : a.wx) q += x * x;
+        return a.wxx - q / a.w;
+    };
+    auto sub = [&](const Acc& t, const Acc& l) {
+        Acc r = fresh(); r.w = t.w - l.w; r.wxx = t.wxx - l.wxx;
+        for (int k = 0; k < A; ++k) r.wx[k] = t.wx[k] - l.wx[k];
+        for (int c = 0; c < C; ++c) r.c[c] = t.c[c] - l.c[c];
+        return r;
+    };
+    Acc totA = fresh();
+    for (size_t i = 0; i < rows.size(); ++i) if (!half[i]) add(totA, rows[i]);
+    const double baseA = imp(totA);
+    std::vector<std::pair<double, int>> va;
+    for (const Desc& d : ds) {
+        va.clear();
+        for (size_t i = 0; i < rows.size(); ++i) if (!half[i]) va.push_back({feat(rows[i].s, d), static_cast<int>(i)});
+        std::sort(va.begin(), va.end());
+        Acc left = fresh();
+        for (int k = 0; k + 1 < static_cast<int>(va.size()); ++k) {
+            add(left, rows[va[k].second]);
+            if (va[k].first == va[k + 1].first) continue;
+            const int nl = k + 1, nr = nA - nl;
+            if (nl < opt.min_leaf || nr < opt.min_leaf) continue;
+            const double g = baseA - imp(left) - imp(sub(totA, left));
+            if (g > best.gainA * (1 + 1e-12) + 1e-300) {
+                best.gainA = g; best.d = d; best.thr = static_cast<float>(0.5 * (va[k].first + va[k + 1].first)); best.ok = true;
+            }
+        }
+    }
+    if (!best.ok) return best;
+    if (nA == static_cast<int>(rows.size())) { best.gainB = best.gainA; best.ok = best.gainA > 1e-12 * std::max(1.0, baseA); return best; }
+    Acc pB = fresh(), lB = fresh(), rB = fresh();
+    for (size_t i = 0; i < rows.size(); ++i)
+        if (half[i]) { add(pB, rows[i]); add(feat(rows[i].s, best.d) <= best.thr ? lB : rB, rows[i]); }
+    best.gainB = imp(pB) - imp(lB) - imp(rB);
+    best.ok = best.gainB > 1e-12 * std::max(1.0, imp(pB)) && lB.w > 0 && rB.w > 0;
+    return best;
+}
+
+}  // namespace pp

@@ -24,17 +24,22 @@ PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-
 # BUDGET_CPU_SECONDS=S: the ARMS stop when their training CPU time reaches S (rerun without it to continue)
 # FREEZE_SPLITS_AT=R: tabular split arms stop judging (no label pass, no split) at epochs ending at root R or later
 # JUDGE_AT=R: the epoch containing root R ends there and is judged, frozen or not (one forced split)
+# pp arms (pp, pp_poker, pp_fill, pp_root): --partition pp, no atlas, judgments from 1000 * 2^k roots, online LBR on the
+#   split schedule (needs ONLINE_LBR_EVERY > 0 to switch it on); PP_EXTRA="..." adds pp options (e.g. --mem-budget-mb 160)
 # EXE=PATH: executable to build and use (a second name lets new arms use new code while older arms keep running)
 BUDGET_CPU_SECONDS=${BUDGET_CPU_SECONDS:-0}
 EXE=${EXE:-$HERE/aswiss_stud}
 declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_wb]=aswiss_wb_k1024_z2 [k256]=atom_k256
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
-                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
+                 [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [pp]=pp_particle [pp_poker]=pp_particle_poker
+                 [pp_fill]=pp_particle_fill [pp_root]=pp_particle_root [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
-                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
+                 [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history
+                 [pp]=pp [pp_poker]=pp [pp_fill]=pp [pp_root]=pp [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [mmd]=1024 [escher]=1024 [escher_m1m]=1024 [escher_gpu]=1024 [rebel]=1024)
+              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [pp]=0 [pp_poker]=0 [pp_fill]=0 [pp_root]=0
+              [mmd]=1024 [escher]=1024 [escher_m1m]=1024 [escher_gpu]=1024 [rebel]=1024)
 # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
 declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
                   [hist_b]="--history-cards street --label avg --label-cap 2560000"
@@ -42,6 +47,9 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [hist_every]="--history-cards every --label-cap 2560000"
                   [hist_bb]="--history-cards street --label avg --label-cap 2560000 --backward 1"
                   [hist_bbf]="--history-cards street --label avg --label-cap 2560000 --backward 1 --avg-fill plain"
+                  [pp]="--epoch0 1000 --online-lbr-schedule split" [pp_poker]="--epoch0 1000 --online-lbr-schedule split --features poker"
+                  [pp_fill]="--epoch0 1000 --online-lbr-schedule split --pp-assign fill"
+                  [pp_root]="--epoch0 1000 --online-lbr-schedule split --leaf-start root"
                   [mmd]="--algo mmd" [escher]="--algo escher" [escher_m1m]="--algo escher --escher-capacity 1000000" [escher_gpu]="--algo escher"
                   [rebel]="--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
@@ -53,13 +61,17 @@ declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b
                   [hist_every]="bucket-history keys, cards at every decision"
                   [hist_bb]="ASWISS: bucket-history keys, method B, backward split"
                   [hist_bbf]="ASWISS + hybrid average for labels (--avg-fill plain)"
+                  [pp]="prior-posterior ASWISS (particle directions, general features, no atlas)"
+                  [pp_poker]="prior-posterior ASWISS, poker features" [pp_fill]="prior-posterior ASWISS, assign by filling m visits"
+                  [pp_root]="prior-posterior ASWISS, new leaves from the root"
                   [mmd]="MMD self-play (policy network)" [escher]="ESCHER (neural CFR)" [escher_m1m]="ESCHER, reservoirs of 1e6" [escher_gpu]="ESCHER, networks trained on the GPU" [rebel]="ReBeL (scaled: search + value networks)")
-atlas() { echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }
+atlas() { [ "$1" = 0 ] && return 0; echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }  # K = 0: no atlas (pp arms)
 mkdir -p "$OUT"
 case $ACTION in
 run)
     # rebuild when the executable is missing or older than its sources (for example after git pull)
     if [ ! -x "$EXE" ] || [ "$HERE/aswiss_stud.cpp" -nt "$EXE" ] || [ "$HERE/h4_lbr_generated.hpp" -nt "$EXE" ] ||
+       [ -n "$(find "$HERE" -maxdepth 1 -name 'pp_*.hpp' -newer "$EXE" 2>/dev/null)" ] ||
        [ "$HERE/../../../cpp_mccfr/stud_mccfr.cpp" -nt "$EXE" ] ||
        [ -n "$(find "$HERE/sota" -name '*.hpp' -newer "$EXE" 2>/dev/null)" ]; then
         g++ -O3 -std=c++17 -pthread "$HERE/aswiss_stud.cpp" -o "$EXE" ||
@@ -79,6 +91,7 @@ run)
         [ "$BUDGET_CPU_SECONDS" != 0 ] && online="$online $( [ -n "$gpu" ] && echo --budget-seconds || echo --budget-cpu-seconds ) $BUDGET_CPU_SECONDS"
         [ "${FREEZE_SPLITS_AT:-0}" != 0 ] && { [ "${PART[$a]}" = history ] || [ "${PART[$a]}" = aswiss ]; } && online="$online --freeze-splits-at $FREEZE_SPLITS_AT"
         [ "${JUDGE_AT:-0}" != 0 ] && { [ "${PART[$a]}" = history ] || [ "${PART[$a]}" = aswiss ]; } && online="$online --judge-at $JUDGE_AT"
+        [ "${PART[$a]}" = pp ] && [ -n "${PP_EXTRA:-}" ] && online="$online $PP_EXTRA"
         case ${PART[$a]} in history|aswiss) [ "$LOG_REGRET" = 1 ] && online="$online --log-regret 1" ;;
                             atom) [ "$LOG_REGRET_KMEANS" = 1 ] && online="$online --log-regret 1" ;; esac
         nohup $gpu "$EXE" train --partition "${PART[$a]}" --atlas "$(atlas "${K[$a]}")" --z 2 --seed "$SEED" --roots "$ROOTS" \

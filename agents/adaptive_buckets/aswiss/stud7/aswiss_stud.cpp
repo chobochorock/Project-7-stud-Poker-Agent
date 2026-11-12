@@ -108,6 +108,8 @@ __declspec(dllimport) int __stdcall GetProcessTimes(void* process, AswFileTime* 
 #include <map>
 #include <set>
 #include <unordered_set>
+#include <numeric>
+#include <queue>
 
 namespace {
 
@@ -122,7 +124,7 @@ struct NullAtlas final : PowerAtlas {
     uint16_t assign(const State&, int) const override { return 0; }
 };
 
-enum class Partition { Context, Atom, Aswiss, History };
+enum class Partition { Context, Atom, Aswiss, History, PP };
 
 struct Bucket {
     std::array<double, A> q{}, s{}, pending{};
@@ -184,6 +186,9 @@ void step(State& state, int actor, Action action) {
     if (result == ActionResult::RoundEnd) advance(state);
     else if (result != ActionResult::FoldEnd) state.actor = 1 - actor;
 }
+
+#include "pp_obs.hpp"   // --partition pp: observation streams, features, compact samples
+#include "pp_tree.hpp"  // --partition pp: prior tree, posterior genealogy, prior fit
 
 template <class T> void put(std::ofstream& out, const T& v) { out.write(reinterpret_cast<const char*>(&v), sizeof(T)); }
 template <class T> void get(std::ifstream& in, T& v) { in.read(reinterpret_cast<char*>(&v), sizeof(T)); }
@@ -544,8 +549,40 @@ class Model {
 public:
     Model(Partition partition, const PowerAtlas* atlas, bool learn_h4 = false)
         : partition_(partition), atlas_(atlas), h4_(learn_h4 ? std::make_unique<H4Table>(partition) : nullptr) {
-        if (partition != Partition::Context && !atlas) throw std::runtime_error("atom/aswiss partitions need --atlas");
+        if (partition != Partition::Context && partition != Partition::PP && !atlas)
+            throw std::runtime_error("atom/aswiss/history partitions need --atlas");
+        if (partition == Partition::PP) {
+            if (learn_h4) throw std::runtime_error("--partition pp needs the heuristic H4");
+            pp_ = std::make_unique<pp::Data>();
+        }
     }
+    // ---- --partition pp (pp_model.hpp) ----
+    void pp_setup(const pp::Opts& o, uint64_t seed);
+    const pp::Data* ppd() const { return pp_.get(); }
+    pp::Data* ppd() { return pp_.get(); }
+    uint32_t pp_locate(const State& s, int viewer, int32_t* leaf_out) const;
+    std::array<double, A> pp_policy_at(const State& s, int seat, int32_t level) const;
+    pp::Dir pp_direction(const pp::Sample& x, int32_t level, uint64_t seed) const;
+    int pp_label(const std::array<double, A>& r, const std::array<double, A>& se, uint8_t mask) const;
+    std::vector<pp::Dir> pp_directions(const std::vector<pp::Sample>& xs, int32_t level, uint64_t salt) const;
+    static State pp_view_state(const pp::Sample& x);
+    uint32_t pp_route_sum(uint32_t b, const std::vector<const pp::Dir*>& ds) const;
+    uint32_t pp_route_root(const pp::Cell& cell, const std::vector<const pp::Sample*>& xs, const std::vector<const pp::Dir*>& now,
+                           int32_t cur_level, uint64_t salt, uint64_t& steps);
+    uint32_t pp_train_bucket(const State& s, int v, bool traverser);
+    int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
+                   size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
+    void pp_finalize_fill(int32_t l, bool at_judgment);
+    bool pp_online_due(uint64_t t) const;
+    double traverse_pp(State state, int traverser, double weight, std::mt19937_64& rng);
+    template <class V> void pp_pass(State s, int traverser, std::mt19937_64& rng, V& visit) const;
+    template <class KeyOf> std::map<uint64_t, pp::Reservoir> pp_collect(uint64_t n, uint64_t seed, size_t cap, int shard, int shards,
+                                                                      KeyOf key_of) const;
+    int pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoch_len, uint64_t fill_steps, std::ostream& jlog,
+                 std::ostream& plog);
+    void pp_save(std::ofstream& out, bool full) const;
+    void pp_load(std::ifstream& in, bool full);
+    uint64_t pp_take_fill_steps() { const uint64_t v = pp_fill_steps_; pp_fill_steps_ = 0; return v; }
     bool has_h4() const { return h4_ != nullptr; }
     const H4Table* h4() const { return h4_.get(); }
     // --partition history: cards at every decision (true) or only at the first decision of each street (false)
@@ -589,6 +626,7 @@ public:
     // here, linear weight); the traverser enumerates its 12 actions, each followed by the betting traversal on the same
     // cards; the H4 regrets are applied with the betting regrets after the traversal (apply_regrets).
     double traverse_root(const std::vector<Card>& deck, int traverser, double weight, std::mt19937_64& rng, bool track) {
+        if (partition_ == Partition::PP) return traverse_pp(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng);
         if (partition_ == Partition::History)
             return traverse_h(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, traverser, weight, rng, track);
         if (!h4_) return traverse(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng, track);
@@ -638,7 +676,8 @@ public:
     }
     std::array<double, A> strategy(const State& state, int viewer, bool average, bool* found = nullptr) const {
         const uint8_t mask = valid_mask(state, viewer);
-        const uint32_t b = partition_ == Partition::History ? hlookup(hkey_replay(state, viewer)) : lookup(atom_key(state, viewer));
+        const uint32_t b = partition_ == Partition::PP ? pp_locate(state, viewer, nullptr)
+                         : partition_ == Partition::History ? hlookup(hkey_replay(state, viewer)) : lookup(atom_key(state, viewer));
         if (found) *found = b != kNone;
         if (b == kNone) return uniform_strategy(mask);
         return average ? normalized(buckets_[b].s, mask) : rm_plus(buckets_[b].q, mask);
@@ -1129,6 +1168,7 @@ public:
     // Pending regrets are always zero between roots, so they are not stored.
     void save_state(std::ofstream& out) const {
         put(out, static_cast<uint8_t>(partition_));
+        if (partition_ == Partition::PP) { pp_save(out, true); return; }
         if (partition_ == Partition::History) {
             put(out, static_cast<uint8_t>(hcards_every_));
             put_history(out);
@@ -1160,6 +1200,7 @@ public:
     void load_state(std::ifstream& in) {
         uint8_t partition; get(in, partition);
         if (partition != static_cast<uint8_t>(partition_)) throw std::runtime_error("checkpoint partition differs");
+        if (partition_ == Partition::PP) { pp_load(in, true); touched_.clear(); return; }
         if (partition_ == Partition::History) {
             uint8_t every; get(in, every);
             if (bool(every) != hcards_every_) throw std::runtime_error("checkpoint --history-cards differs");
@@ -1212,6 +1253,10 @@ public:
     // live buckets (referenced by a partition) per street 5/6/7
     std::array<size_t, 3> live_buckets() const {
         std::array<std::set<uint32_t>, 3> live;
+        if (partition_ == Partition::PP) {  // the buckets the live leaves point to (provisional pointers of pending leaves)
+            for (const auto& L : pp_->leaves) if (L.node >= 0) live[(L.ctx >> 8) - 5].insert(pp_->current(static_cast<int32_t>(&L - pp_->leaves.data())));
+            return {live[0].size(), live[1].size(), live[2].size()};
+        }
         if (partition_ == Partition::History) {  // referenced by a rest or an explicit entry (stale entries included)
             for (const auto& [ctx, c] : hctx_) {
                 auto& s = live[(ctx >> 8) - 5];
@@ -1227,10 +1272,23 @@ public:
         }
         return {live[0].size(), live[1].size(), live[2].size()};
     }
-    size_t contexts() const { return partition_ == Partition::History ? hctx_.size() : contexts_.size(); }
+    size_t contexts() const { return partition_ == Partition::PP ? pp_->cells.size() : partition_ == Partition::History ? hctx_.size() : contexts_.size(); }
     size_t bucket_records() const { return buckets_.size(); }  // live + retired (split parents are never freed)
     // approximate bytes of the training tables: bucket records, the atom window and the partition maps
     std::array<double, 3> table_megabytes() const {
+        if (partition_ == Partition::PP) {  // bucket tables; prior tree, leaves and genealogy; stored average tables
+            const pp::Data& D = *pp_;
+            double tables = 0;
+            for (const auto& [lv, t] : D.tables) tables += static_cast<double>(t.capacity() * sizeof(t[0]));
+            double fill = 0;
+            for (const auto& L : D.leaves) fill += static_cast<double>(L.fill.capacity() * sizeof(pp::FillRow));
+            constexpr double node = 2 * sizeof(void*);
+            return {buckets_.capacity() * sizeof(Bucket) / 1e6,
+                    (D.nodes.capacity() * sizeof(pp::TNode) + D.leaves.capacity() * sizeof(pp::Leaf) + fill +
+                     D.splits.size() * (sizeof(uint32_t) + sizeof(pp::Split) + node) + (D.born.capacity() + parent_.capacity()) * 4.0 +
+                     D.cells.capacity() * sizeof(pp::Cell)) / 1e6,
+                    tables / 1e6};
+        }
         if (partition_ == Partition::History) {
             size_t members = 0;
             for (const auto& [ctx, c] : hctx_) members += c.member.size();
@@ -1252,6 +1310,7 @@ public:
         out.write("ASWSTUD2", 8);
         put(out, static_cast<uint8_t>(partition_));
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
+        if (partition_ == Partition::PP) { pp_save(out, false); return; }
         if (partition_ == Partition::History) {  // every bucket record is kept: keys refer to retired buckets by id
             put(out, static_cast<uint8_t>(hcards_every_));
             put_history(out);
@@ -1288,6 +1347,11 @@ public:
         if (version == "ASWSTUD2") get(in, with_h4);
         h4_.reset();
         if (with_h4) { h4_ = std::make_unique<H4Table>(partition_); h4_->load(in); }
+        if (partition_ == Partition::PP) {
+            pp_load(in, false);
+            if (!in) throw std::runtime_error("truncated snapshot: " + path);
+            return;
+        }
         if (partition_ == Partition::History) {
             uint8_t every; get(in, every);
             hcards_every_ = every;
@@ -1330,6 +1394,7 @@ private:
         buckets_.emplace_back();
         if (avg_fill_) { plain_.emplace_back(); plain_last_.push_back(plain_clock_); }
         if (partition_ == Partition::History) parent_.push_back(parent);
+        if (partition_ == Partition::PP) { parent_.push_back(parent); pp_->born.push_back(pp_->level + (parent != kNone ? 1 : 0)); }
         return static_cast<uint32_t>(buckets_.size() - 1);
     }
     // history partition, genealogy and every bucket record (snapshots and checkpoints)
@@ -1397,6 +1462,9 @@ private:
     std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
     uint64_t rwin_roots_ = 0;
     HMap hatoms_;
+    // --partition pp
+    std::unique_ptr<pp::Data> pp_;
+    uint64_t pp_seed_ = 0, pp_root_now_ = 0, pp_epoch_ = 0, pp_fill_steps_ = 0;
 };
 
 // frozen snapshot as a PolicyLBR target; with a learned H4 it also supplies the H4 likelihood used by H4PolicyLBR
@@ -1693,7 +1761,8 @@ Partition parse_partition(const std::string& s) {
     if (s == "atom") return Partition::Atom;
     if (s == "aswiss") return Partition::Aswiss;
     if (s == "history") return Partition::History;
-    throw std::runtime_error("--partition must be context, atom, aswiss or history");
+    if (s == "pp") return Partition::PP;
+    throw std::runtime_error("--partition must be context, atom, aswiss, history or pp");
 }
 std::unique_ptr<PowerAtlas> load_atlas(const std::string& path, size_t cache) {
     if (path.empty()) return nullptr;
@@ -1812,6 +1881,8 @@ bool read_checkpoint(const std::string& file, const std::string& config, LoopSta
     return f && std::string(magic, 8) == "ASWEND01";
 }
 
+#include "pp_model.hpp"  // --partition pp: the Model members (routing, particle directions, judgment, files)
+
 namespace sota {  // SOTA neural baselines (sota/stud7_net_main.hpp, included before main)
 int train_net(int argc, char** argv);
 int eval_net(std::map<std::string, std::string>& o);
@@ -1824,7 +1895,7 @@ int train(int argc, char** argv) {
         if (std::string(argv[i]) == "--partition" && std::string(argv[i + 1]) == "net") return sota::train_net(argc, argv);
     for (int i = 2; i + 1 < argc; i += 2)  // --partition rebel: scaled-down ReBeL (search + value networks)
         if (std::string(argv[i]) == "--partition" && std::string(argv[i + 1]) == "rebel") return sota::train_rebel(argc, argv);
-    auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", "10000"},
+    auto o = parse(argc, argv, {{"--partition", "aswiss"}, {"--atlas", ""}, {"--roots", "1000000"}, {"--epoch0", ""},
                                 {"--z", "2"}, {"--seed", "1"}, {"--power-cache", "1000000"}, {"--out", ""},
                                 {"--inherit", "0"}, {"--checkpoint-every", "1000000"}, {"--snapshot-every", "0"},
                                 {"--curve-every", "10000"}, {"--h4", "heuristic"}, {"--label", "window"},
@@ -1835,8 +1906,16 @@ int train(int argc, char** argv) {
                                 {"--avg-fill", "none"}, {"--avg-fill-reach", "1e-4"}, {"--threads", "1"},
                                 {"--online-lbr-every", "0"}, {"--online-lbr-particles", "16"}, {"--online-lbr-policy", ""},
                                 {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}, {"--freeze-splits-at", "0"},
-                                {"--judge-at", "0"}});
+                                {"--judge-at", "0"},
+                                // --partition pp (PP_STUD7_DESIGN_KO.md; see pp_model.hpp)
+                                {"--pp-assign", "now"}, {"--leaf-start", "parent"}, {"--pp-particles", "64"},
+                                {"--pp-samples", "64"}, {"--pp-min-samples", "8"}, {"--pp-m", "16"}, {"--pp-rows", "64"},
+                                {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
+                                {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
+                                {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
+                                {"--online-lbr-schedule", "fixed"}});
     const Partition partition = parse_partition(o["--partition"]);
+    if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
     const bool learn_h4 = o["--h4"] == "learn";
@@ -1876,6 +1955,30 @@ int train(int argc, char** argv) {
     if (threads > 1 && !label_pass) std::cerr << "note: --threads only affects --label avg|window+avg; this run is serial\n";
     Model model(partition, atlas.get(), learn_h4);
     model.set_history_cards(o["--history-cards"] == "every");
+    // --partition pp: settings (all part of the checkpoint configuration below)
+    pp::Opts ppo;
+    const bool pp_mode = partition == Partition::PP;
+    if (pp_mode) {
+        auto choice = [&](const char* k, std::initializer_list<const char*> ok) {
+            for (const char* v : ok) if (o[k] == v) return;
+            throw std::runtime_error(std::string(k) + " has an unknown value: " + o[k]);
+        };
+        choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
+        choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
+        choice("--online-lbr-schedule", {"fixed", "split"});
+        if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
+        ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
+        ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
+        ppo.particles = std::stoi(o["--pp-particles"]); ppo.n0 = std::stoi(o["--pp-samples"]); ppo.n_min = std::stoi(o["--pp-min-samples"]);
+        ppo.m = std::stoi(o["--pp-m"]); ppo.rho = std::stoi(o["--pp-rows"]); ppo.min_leaf = std::stoi(o["--min-leaf"]);
+        ppo.z = std::stod(o["--z"]); ppo.ratio = std::stod(o["--prior-ratio"]); ppo.pass_frac = std::stod(o["--pp-pass-frac"]);
+        ppo.budget = std::stod(o["--pp-budget"]); ppo.budget_min_steps = std::stod(o["--pp-budget-min-steps"]);
+        ppo.judge_mem_mb = std::stod(o["--judge-mem-mb"]); ppo.mem_budget_mb = std::stod(o["--mem-budget-mb"]);
+        ppo.threads = threads; ppo.online_split = o["--online-lbr-schedule"] == "split";
+        if (ppo.particles < 1 || ppo.n0 < 2 || ppo.n_min < 2 || ppo.m < 1 || ppo.rho < ppo.m || ppo.min_leaf < 1)
+            throw std::runtime_error("--pp-particles >= 1, --pp-samples >= 2, --pp-min-samples >= 2, --pp-rows >= --pp-m >= 1, --min-leaf >= 1");
+        model.pp_setup(ppo, std::stoull(o["--seed"]));
+    } else if (o["--online-lbr-schedule"] != "fixed") throw std::runtime_error("--online-lbr-schedule split needs --partition pp");
     // --log-regret 1: regret.csv, the bucket regret total sum_B max(0, max_a R_B(a)) per root of the current epoch's window
     // (R_B: the sampled counterfactual regrets of the training iterates, before RM+ clipping), at every curve row and
     // at every epoch end before the split; the window restarts at each epoch end (with --gate-eps: at each judgment).
@@ -1909,7 +2012,14 @@ int train(int argc, char** argv) {
                           (o["--backward-z"].empty() ? "" : ";backward_z=" + o["--backward-z"]) : "")
         << (gated ? ";gate_eps=" + o["--gate-eps"] + ";gate_log=2" + (gate_iter ? ";gate_stat=iter" : "") : "")
         << (avg_fill ? ";avg_fill=plain;avg_fill_reach=" + o["--avg-fill-reach"] : "")
-        << (label_pass && threads > 1 ? ";label_pass=chunked" : "");  // any --threads > 1 gives the same bits
+        << (label_pass && threads > 1 ? ";label_pass=chunked" : "")  // any --threads > 1 gives the same bits
+        << (pp_mode ? ";pp_assign=" + o["--pp-assign"] + ";leaf_start=" + o["--leaf-start"] + ";pp_particles=" + o["--pp-particles"] +
+                          ";pp_samples=" + o["--pp-samples"] + ";pp_min_samples=" + o["--pp-min-samples"] + ";pp_m=" + o["--pp-m"] +
+                          ";pp_rows=" + o["--pp-rows"] + ";pp_pass_frac=" + o["--pp-pass-frac"] + ";pp_budget=" + o["--pp-budget"] +
+                          ";pp_budget_min_steps=" + o["--pp-budget-min-steps"] + ";judge_mem_mb=" + o["--judge-mem-mb"] +
+                          ";prior_ratio=" + o["--prior-ratio"] + ";prior_criterion=" + o["--prior-criterion"] + ";crossfit=" + o["--crossfit"] +
+                          ";min_leaf=" + o["--min-leaf"] + ";features=" + o["--features"] + ";mem_budget_mb=" + o["--mem-budget-mb"] +
+                          ";online_schedule=" + o["--online-lbr-schedule"] : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -1920,6 +2030,7 @@ int train(int argc, char** argv) {
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
     const std::string regret_path = out + "/regret.csv", splits_path = out + "/splits.csv";
+    const std::string ppj_path = out + "/pp_judge.csv", ppp_path = out + "/prior_splits.csv";
     LoopState s;
     s.L = epoch0;
     uint64_t online_bytes = 0, regret_bytes = 0;
@@ -1935,7 +2046,7 @@ int train(int argc, char** argv) {
         std::filesystem::resize_file(index_path, s.index_bytes);
         std::filesystem::resize_file(curve_path, s.curve_bytes);
         for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}, std::pair{avg_fill, fill_path},
-                                       std::pair{log_splits, splits_path}}) {
+                                       std::pair{log_splits, splits_path}, std::pair{pp_mode, ppj_path}, std::pair{pp_mode, ppp_path}}) {
             if (!on) continue;  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
             std::ifstream in(path);
             std::string line, kept;
@@ -1959,6 +2070,15 @@ int train(int argc, char** argv) {
                                                      "label_bits,keys,visits,regret,regret_sq,z\n";
         if (gated) std::ofstream(gate_path) << "epoch,roots,buckets,rho_plain_half,rho_cross_half,iterate_regret_half,eps,judged\n";
         if (avg_fill) std::ofstream(fill_path) << "epoch,roots,buckets,traverser_nodes,filled_nodes\n";
+        if (pp_mode) {
+            std::ofstream(ppj_path) << "epoch,roots,level,buckets_before,judged_buckets,samples_per_bucket,samples,splits,children,"
+                                       "pending_leaves,rows,leaves_fixed_by_rows,leaves_fixed_by_none,fill_leaves_fixed,signals,prior_splits,"
+                                       "leaves_after,buckets_after,steps_posterior,steps_prior,budget_steps,steps_per_sample,pass_roots,"
+                                       "shards_posterior,shards_prior,pass_seconds,estimate_seconds,judge_seconds,bucket_mb,tree_mb,"
+                                       "stored_tables_mb,rss_mb,peak_rss_mb,fill_steps,frozen\n";
+            std::ofstream(ppp_path) << "epoch,roots,leaf,street,legal_mask,depth,feature,threshold,gain_a,gain_b,rows,signal,left_leaf,"
+                                       "right_leaf,left_bucket,right_bucket\n";
+        }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
     }
@@ -1992,7 +2112,8 @@ int train(int argc, char** argv) {
         return 0;
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
-    std::ofstream regret, splits_log;
+    std::ofstream regret, splits_log, ppj_log, ppp_log;
+    if (pp_mode) { ppj_log.open(ppj_path, std::ios::app); ppp_log.open(ppp_path, std::ios::app); }
     if (log_regret) regret.open(regret_path, std::ios::app);
     if (log_splits) splits_log.open(splits_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
@@ -2019,11 +2140,12 @@ int train(int argc, char** argv) {
         s.curve_bytes = file_size_or_zero(curve_path);
         if (log_regret) { regret.flush(); regret_bytes = file_size_or_zero(regret_path); }
         if (log_splits) splits_log.flush();
+        if (pp_mode) { ppj_log.flush(); ppp_log.flush(); }
         write_checkpoint(out, config, s, model, &online, regret_slot);
         { std::ofstream(cpu_path + ".tmp") << std::setprecision(17) << train_cpu() << ' ' << s.t << '\n'; }
         std::filesystem::rename(cpu_path + ".tmp", cpu_path);
     };
-    const bool track = partition == Partition::Aswiss || partition == Partition::History;
+    const bool track = partition == Partition::Aswiss || partition == Partition::History || partition == Partition::PP;
     // --freeze-splits-at R (R > 0): an epoch ending at root R or later is not judged (no label pass, no split, no
     // window): training goes on over the partition reached, with snapshots and epochs as before. It is not part of the
     // checkpoint configuration, so a run can be frozen when it is resumed (the run is the same up to the freeze).
@@ -2042,7 +2164,7 @@ int train(int argc, char** argv) {
         ++s.t;
         auto deck = fresh_deck();
         std::shuffle(deck.begin(), deck.end(), deal_rng);
-        if (online.due(static_cast<long long>(s.t)))  // test, then train on this deal
+        if (ppo.online_split ? online.on() && model.pp_online_due(s.t) : online.due(static_cast<long long>(s.t)))  // test, then train
             for (const auto& policy : online.policies) {
                 SnapshotPolicy target{model, policy == "average", std::mt19937_64(online.target_seed(static_cast<long long>(s.t), policy))};
                 online.evaluate(static_cast<long long>(s.t), deck, target, policy, elapsed());
@@ -2050,7 +2172,7 @@ int train(int argc, char** argv) {
         // --label-cap: window sums only over the epoch's last label_cap roots (bounds the window's memory)
         // history keys with --label avg: no window at all (it would only feed the L/C diagnostic and doubles the memory)
         const bool in_window = judging(epoch_end) && (!label_cap || epoch_end - s.t < label_cap) &&
-                               !(partition == Partition::History && label_rule == "avg");
+                               !(partition == Partition::History && label_rule == "avg") && !pp_mode;
         for (int p = 0; p < 2; ++p) {
             model.traverse_root(deck, p, static_cast<double>(s.t), rng, in_window);
             model.plain_tick(0.5 * static_cast<double>(s.t));
@@ -2087,7 +2209,23 @@ int train(int argc, char** argv) {
             const auto w = model.window();
             const auto mb = model.table_megabytes();  // measured before the window is cleared
             int splits = 0;
-            if (judging(s.t) && label_rule == "window") splits = model.split(z, inherit);
+            if (pp_mode) {
+                // --mem-budget-mb: once the resident memory plus a judgment's transient memory reaches the budget, no more
+                // judgments (the partition reached so far is trained to the end)
+                pp::Data& D = *model.ppd();
+                if (ppo.mem_budget_mb > 0 && !D.frozen && memory_mb(1) + ppo.judge_mem_mb >= ppo.mem_budget_mb) {
+                    D.frozen = true;
+                    std::cerr << "memory budget " << ppo.mem_budget_mb << " MB reached: splits frozen from root " << s.t << "\n";
+                }
+                const uint64_t fill_steps = model.pp_take_fill_steps();
+                if (judging(s.t) && !D.frozen) {
+                    splits = model.pp_judge(std::stoull(o["--seed"]), s.k, s.t, s.t - s.epoch_start, fill_steps, ppj_log, ppp_log);
+                } else {
+                    ppj_log << s.k << ',' << s.t << ',' << D.level << std::string(29, ',') << memory_mb(1) << ',' << peak_rss_mb() << ','
+                            << fill_steps << ',' << D.frozen << '\n';
+                }
+            }
+            else if (judging(s.t) && label_rule == "window") splits = model.split(z, inherit);
             else if (judging(s.t) && partition == Partition::History) {  // method B with bucket-history keys
                 HMap avg;
                 BucketHalves halves;
@@ -3263,6 +3401,7 @@ int main(int argc, char** argv) {
         if (mode == "league") return league(argc, argv);
         if (mode == "bucket-regret") return bucket_regret(argc, argv);
         if (mode == "h-profile") return h_profile(argc, argv);
+        if (mode == "pp-test") return pp_test(argc, argv);
         throw std::runtime_error("usage: aswiss_stud train|eval|self-test|serve [options]");
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << "\n";

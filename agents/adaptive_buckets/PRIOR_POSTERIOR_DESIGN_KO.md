@@ -634,16 +634,17 @@ $$r_j(I,a)=\sum_{\sigma\in\text{사건 }j\text{에 저장한 전략}}\big[v^{\si
 - **메모리 열의 출처:** 15절의 순간 방향 실행은 메모리 열을 넣기 전에 돌았다. 그래서 seed 1을 지금 실행 파일로 다시 돌려 쟀다.
   - 다시 돌린 실행의 로그(반복 수, regret 합)는 원래 실행과 같은 값이다(행 15, 21에서 확인).
   - 이 두 칸만 seed 1 하나의 값이다.
+  - 다시 돌린 실행은 같은 CPU 900초에 반복을 조금 덜 돌았다(1,032만 대 1,069만, 2억 280만 대 2억 1,578만). 동시에 돈 실행 수가 달라서다. 메모리는 그 마지막 행의 값이다.
 
 ### 17.1 CPU 900초 시점 (seed 3개)
 
 | arm | iterations (median) | average policy, median [min, max] | current policy, median | posterior buckets in use (median) | prior leaves (median) | misassigned (visit-weighted) | routing tables MB (median) | peak RSS MB (median) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| pp mix, iterates, root (reference) | 10,826,846 | 0.1118 [0.08946, 0.1346] | 0.4592 | 18,491 | 30,908 | 39.0% (60.4%) | pending (seed 1 rerun still running) | pending (seed 1 rerun still running) |
+| pp mix, iterates, root (reference) | 10,826,846 | 0.1118 [0.08946, 0.1346] | 0.4592 | 18,491 | 30,908 | 39.0% (60.4%) | 332 (seed 1 rerun) | 418 (seed 1 rerun) |
 | pp mix, iterates, parent | 53,659,652 | 0.05225 [0.04638, 0.07904] | 0.4317 | 17,411 | 29,553 | not computable (parent start frees the old tables) | 172 | 315 |
 | pp mix, avg, root | 94,163,204 | 0.03434 [0.0255, 0.04828] | 0.3923 | 20,769 | 31,181 | 43.7% (64.2%) | 9.25 | 93.7 |
 | pp mix, avg, parent | 135,474,547 | 0.08504 [0.03136, 0.1098] | 0.386 | 20,740 | 30,600 | not computable (parent start frees the old tables) | 1.17 | 84.7 |
-| pure a, iterates | 215,778,690 | 0.007479 [0.006822, 0.01011] | 0.3573 | 16,850 | 0 | n/a (no prior) | pending (seed 1 rerun still running) | pending (seed 1 rerun still running) |
+| pure a, iterates | 215,778,690 | 0.007479 [0.006822, 0.01011] | 0.3573 | 16,850 | 0 | n/a (no prior) | 531 (seed 1 rerun) | 666 (seed 1 rerun) |
 | pure a, avg | 201,718,942 | 0.01811 [0.01324, 0.02303] | 0.3354 | 18,358 | 0 | n/a (no prior) | 8.01 | 110 |
 | k-means (rule a counts) | 223,881,628 | 0.3424 [0.3202, 0.3524] | 0.8021 | 10,007 | 0 | n/a (no prior) | not measured (run predates the column) | not measured (run predates the column) |
 | MCCFR (no abstraction) | 241,846,258 | 0.002235 [0.002137, 0.002237] | 0.3192 | 51,114 | 0 | n/a (no prior) | not measured (run predates the column) | not measured (run predates the column) |
@@ -674,11 +675,11 @@ $$r_j(I,a)=\sum_{\sigma\in\text{사건 }j\text{에 저장한 전략}}\big[v^{\si
    - CPU 900초: 평균 × 뿌리 0.034, 순간 × 뿌리 0.112(중앙값).
    - 같은 반복 수(819만)에서도 0.070 대 0.089로 평균 방향이 조금 낫다.
    - 차이는 주로 속도다. 평균 방향은 사건마다 전략 하나만 순회하므로 할당 계산이 가볍다. 같은 CPU에서 반복을 9배 돌았다(9,416만 대 1,083만).
-   - 메모리: 평균 × 뿌리는 사건 전략표 9.5 MB, 최대 상주 97 MB다. 순간 × 뿌리는 (seed 1 재실행 중, 끝나면 채운다).
+   - 메모리: 평균 × 뿌리는 사건 전략표 9.5 MB, 최대 상주 97 MB다. 순간 × 뿌리는 332 MB, 418 MB다(seed 1 재실행). 사건 전략표가 35분의 1이다.
 2. **pure에서는 평균 방향이 최종값에서 조금 나빴다.**
    - 같은 반복 수에서는 3,277만까지 비슷하다(0.030 대 0.030). 1억 3,107만에서는 0.0146 대 0.0097이다.
    - CPU 900초에서는 0.018 대 0.0075다.
-   - 메모리: 평균 8.0 MB(최대 상주 110 MB), 순간은 seed 1 재실행 중(끝나면 채운다).
+   - 메모리: 평균 8.0 MB(최대 상주 110 MB), 순간 531 MB(666 MB, seed 1 재실행). 사건 전략표가 66분의 1이다.
 3. **평균 방향에서는 부모 시작이 같은 반복 수에서 뿌리 시작보다 조금 나빴다.**
    - 3,277만: 0.040 대 0.035. 6,554만: 0.037 대 0.026.
    - 부모 시작은 같은 CPU에서 반복을 더 돌았다(1억 3,547만 대 9,416만). 판정 직전 값은 0.020, 0.022(1억 3,107만, seed 2개)였다.

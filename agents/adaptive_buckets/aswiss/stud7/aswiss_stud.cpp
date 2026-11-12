@@ -1913,7 +1913,7 @@ int train(int argc, char** argv) {
                                 {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
-                                {"--online-lbr-schedule", "fixed"}});
+                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
@@ -1975,10 +1975,15 @@ int train(int argc, char** argv) {
         ppo.budget = std::stod(o["--pp-budget"]); ppo.budget_min_steps = std::stod(o["--pp-budget-min-steps"]);
         ppo.judge_mem_mb = std::stod(o["--judge-mem-mb"]); ppo.mem_budget_mb = std::stod(o["--mem-budget-mb"]);
         ppo.threads = threads; ppo.online_split = o["--online-lbr-schedule"] == "split";
+        ppo.inherit_regret = std::stod(o["--inherit-regret"]); ppo.inherit_avg = std::stod(o["--inherit-avg"]);
+        if (ppo.inherit_regret < 0 || ppo.inherit_regret > 1 || ppo.inherit_avg < 0 || ppo.inherit_avg > 1)
+            throw std::runtime_error("--inherit-regret and --inherit-avg must be in [0, 1] (spec: a child's start may not exceed its parent)");
         if (ppo.particles < 1 || ppo.n0 < 2 || ppo.n_min < 2 || ppo.m < 1 || ppo.rho < ppo.m || ppo.min_leaf < 1)
             throw std::runtime_error("--pp-particles >= 1, --pp-samples >= 2, --pp-min-samples >= 2, --pp-rows >= --pp-m >= 1, --min-leaf >= 1");
         model.pp_setup(ppo, std::stoull(o["--seed"]));
     } else if (o["--online-lbr-schedule"] != "fixed") throw std::runtime_error("--online-lbr-schedule split needs --partition pp");
+    if (!pp_mode && (o["--inherit-regret"] != "0" || o["--inherit-avg"] != "0"))
+        throw std::runtime_error("--inherit-regret / --inherit-avg are --partition pp options (other partitions: --inherit 0|1)");
     // --log-regret 1: regret.csv, the bucket regret total sum_B max(0, max_a R_B(a)) per root of the current epoch's window
     // (R_B: the sampled counterfactual regrets of the training iterates, before RM+ clipping), at every curve row and
     // at every epoch end before the split; the window restarts at each epoch end (with --gate-eps: at each judgment).
@@ -2019,7 +2024,9 @@ int train(int argc, char** argv) {
                           ";pp_budget_min_steps=" + o["--pp-budget-min-steps"] + ";judge_mem_mb=" + o["--judge-mem-mb"] +
                           ";prior_ratio=" + o["--prior-ratio"] + ";prior_criterion=" + o["--prior-criterion"] + ";crossfit=" + o["--crossfit"] +
                           ";min_leaf=" + o["--min-leaf"] + ";features=" + o["--features"] + ";mem_budget_mb=" + o["--mem-budget-mb"] +
-                          ";online_schedule=" + o["--online-lbr-schedule"] : std::string());
+                          ";online_schedule=" + o["--online-lbr-schedule"] +
+                          (ppo.inherit_regret > 0 || ppo.inherit_avg > 0 ? ";inherit_regret=" + o["--inherit-regret"] + ";inherit_avg=" + o["--inherit-avg"]
+                                                                          : std::string()) : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

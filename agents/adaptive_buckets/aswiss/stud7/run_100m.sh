@@ -24,7 +24,7 @@ PRESPLIT_PARTICLES=${PRESPLIT_PARTICLES:-256}; PRESPLIT_PAIRS=${PRESPLIT_PAIRS:-
 # BUDGET_CPU_SECONDS=S: the ARMS stop when their training CPU time reaches S (rerun without it to continue)
 # FREEZE_SPLITS_AT=R: tabular split arms stop judging (no label pass, no split) at epochs ending at root R or later
 # JUDGE_AT=R: the epoch containing root R ends there and is judged, frozen or not (one forced split)
-# pp arms (pp, pp_poker, pp_fill, pp_parent): --partition pp, no atlas, judgments from 1000 * 2^k roots, online LBR on the
+# pp arms (pp, pp_poker, pp_fill, pp_parent, pp_inh): --partition pp, no atlas, judgments from 1000 * 2^k roots, online LBR on the
 #   split schedule (needs ONLINE_LBR_EVERY > 0 to switch it on); PP_EXTRA="..." adds pp options (e.g. --mem-budget-mb 160)
 # EXE=PATH: executable to build and use (a second name lets new arms use new code while older arms keep running)
 BUDGET_CPU_SECONDS=${BUDGET_CPU_SECONDS:-0}
@@ -33,12 +33,12 @@ declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_w
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
                  [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [pp]=pp_particle [pp_poker]=pp_particle_poker
-                 [pp_fill]=pp_particle_fill [pp_parent]=pp_particle_parent [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
+                 [pp_fill]=pp_particle_fill [pp_parent]=pp_particle_parent [pp_inh]=pp_particle_inherit_avg [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
                  [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history
-                 [pp]=pp [pp_poker]=pp [pp_fill]=pp [pp_parent]=pp [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
+                 [pp]=pp [pp_poker]=pp [pp_fill]=pp [pp_parent]=pp [pp_inh]=pp [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [pp]=0 [pp_poker]=0 [pp_fill]=0 [pp_parent]=0
+              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [pp]=0 [pp_poker]=0 [pp_fill]=0 [pp_parent]=0 [pp_inh]=0
               [mmd]=1024 [escher]=1024 [escher_m1m]=1024 [escher_gpu]=1024 [rebel]=1024)
 # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
 declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
@@ -50,6 +50,7 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [pp]="--epoch0 1000 --online-lbr-schedule split" [pp_poker]="--epoch0 1000 --online-lbr-schedule split --features poker"
                   [pp_fill]="--epoch0 1000 --online-lbr-schedule split --pp-assign fill"
                   [pp_parent]="--epoch0 1000 --online-lbr-schedule split --leaf-start parent"
+                  [pp_inh]="--epoch0 1000 --online-lbr-schedule split --inherit-regret 0 --inherit-avg 1"
                   [mmd]="--algo mmd" [escher]="--algo escher" [escher_m1m]="--algo escher --escher-capacity 1000000" [escher_gpu]="--algo escher"
                   [rebel]="--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
 declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b]="ASWISS, method B labels (average policy, sampled)"
@@ -64,6 +65,7 @@ declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b
                   [pp]="prior-posterior ASWISS (particle directions, root start, general features, no atlas)"
                   [pp_poker]="prior-posterior ASWISS, poker features" [pp_fill]="prior-posterior ASWISS, assign by filling m visits"
                   [pp_parent]="prior-posterior ASWISS, new leaves at the parent leaf's pointer"
+                  [pp_inh]="prior-posterior ASWISS, children inherit the average table (regret restarts)"
                   [mmd]="MMD self-play (policy network)" [escher]="ESCHER (neural CFR)" [escher_m1m]="ESCHER, reservoirs of 1e6" [escher_gpu]="ESCHER, networks trained on the GPU" [rebel]="ReBeL (scaled: search + value networks)")
 atlas() { [ "$1" = 0 ] && return 0; echo "$HERE/atlas/atlas_power$1_heur_eps20_seed37301.bin"; }  # K = 0: no atlas (pp arms)
 mkdir -p "$OUT"

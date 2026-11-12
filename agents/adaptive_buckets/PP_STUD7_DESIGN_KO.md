@@ -418,7 +418,7 @@
 | `aswiss/stud7/pp_tree.hpp` | 설정, prior 트리·잎·시작 칸, posterior 계보와 분할 사건, prior 분할 적합(라벨 기준/regret 기준, 교차 추정 옵션) |
 | `aswiss/stud7/pp_model.hpp` | Model의 pp 부분: 라우팅, 입자 방향 추정, 판정(패스 S, posterior 분할, 대기 칸, 패스 R, 포인터, prior 분할), `--pp-assign fill`, `--leaf-start root`, 저장, `pp-test` |
 | `aswiss/stud7/aswiss_stud.cpp` | `--partition pp` 연결: 옵션, 설정 문자열(재개 검사), `pp_judge.csv`, `prior_splits.csv`, 온라인 LBR 분할 일정, `--mem-budget-mb` |
-| `aswiss/stud7/run_100m.sh`, `run_100m.ps1` | 비교군 `pp`, `pp_poker`, `pp_fill`, `pp_root` (아틀라스 없음). `PP_EXTRA` / `-PpExtra`로 pp 옵션을 더한다 |
+| `aswiss/stud7/run_100m.sh`, `run_100m.ps1` | 비교군 `pp`(root 시작), `pp_parent`, `pp_inh`(λ = 0, μ = 1), `pp_poker`, `pp_fill` (모두 아틀라스 없음). `PP_EXTRA` / `-PpExtra`로 pp 옵션을 더한다 |
 
 ### 15.2 옵션 (기본값)
 
@@ -427,7 +427,8 @@
 | `--partition pp` | | prior–posterior. 아틀라스가 필요 없다 |
 | `--epoch0` | pp는 1000 | 판정 시점 1000·2^k roots [명세] |
 | `--pp-assign` | `now` | `now`: 판정 때 패스 R로 바로 확정. `fill`: 학습 중 m번 방문을 채운다 [사용자 Q2] |
-| `--leaf-start` | `parent` | `root`: 새 prior 잎을 계보의 처음부터 다시 정한다 (사건마다 평균 표 보관) |
+| `--leaf-start` | `root` | `root`: 새 prior 잎을 계보의 처음부터 다시 정한다 (사건마다 평균 표 보관). `parent`: 부모 잎의 포인터에서 시작 (빠름) |
+| `--inherit-regret`, `--inherit-avg` | 0, 0 | 약한 상속 [명세 옵션]: 나뉜 자식이 부모 누적 후회의 λ배, 평균 표의 μ배에서 시작한다 (0 ≤ λ, μ ≤ 1; 0이면 재시작) |
 | `--pp-particles` | 64 | 입자 수 |
 | `--z` | 2 | 라벨의 유의 문턱 |
 | `--pp-samples`, `--pp-min-samples` | 64, 8 | bucket당 표본 수와, 예산이 모자랄 때의 최소 |
@@ -454,7 +455,9 @@
 - **bucket 판정에는 표본이 2개 이상 필요하다.** ∅ 자식은 늘 만든다.
 - **표본이 없는 새 prior 잎은 부모 잎의 포인터를 받는다.**
 - **포커 옵션의 팟 크기는 상태에서 직접 읽는다**(관측 열에는 금액이 없다).
-- **아직 구현하지 않은 것:** 약한 상속, pp의 ε 일정.
+- **아직 구현하지 않은 것:** pp의 ε 일정.
+- **새 prior 잎의 기본 시작은 root다**(사용자 결정, 2026-11-12: "root방식은 고수하고, 나중에 속도 체감을 위한 옵션으로 남겨놓자"). 부모 시작은 `--leaf-start parent`로 남긴다.
+- **약한 상속을 옵션으로 넣었다**(사용자 지시, 2026-11-12). 실행기의 `pp_inh` 비교군은 λ = 0, μ = 1이다. 이 값은 Claude의 제안이다: 후회는 재시작해 분할 판정을 그대로 두고, 평균 표만 물려받아 분할 직후 배포 정책이 무너지지 않게 한다. 시험: 상속을 켜도 1스레드와 4스레드의 결과가 같고, epoch 중간(16,000 roots)에서 멈췄다 이어도 같다. 상속을 끈 기본 실행은 구현 전과 비트 단위로 같다.
 
 ### 15.4 시험 결과 (이 컨테이너)
 

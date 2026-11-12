@@ -564,6 +564,16 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             sp.kid.fill(kNone);
             for (int lab : labels) if (lab >= 0) sp.kid[lab] = new_bucket(b);
             sp.kid[A] = new_bucket(b);
+            // weak inheritance (spec option; default 0 = restart): children start from lambda x the parent's cumulative
+            // regrets and mu x its average table; the parent's own tables stay as they were (its level's average policy)
+            if (O.inherit_regret > 0 || O.inherit_avg > 0)
+                for (uint32_t kid : sp.kid) {
+                    if (kid == kNone) continue;
+                    for (int a = 0; a < A; ++a) {
+                        buckets_[kid].q[a] = O.inherit_regret * buckets_[b].q[a];
+                        buckets_[kid].s[a] = O.inherit_avg * buckets_[b].s[a];
+                    }
+                }
             children += labels.count(-1) ? labels.size() : labels.size() + 1;
             D.splits[b] = sp;
             split_buckets.push_back(b);

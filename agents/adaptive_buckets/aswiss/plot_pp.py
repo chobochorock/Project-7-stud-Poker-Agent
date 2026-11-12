@@ -190,7 +190,7 @@ with open(a.prefix + ".md", "w") as f:
                 if kref and name != a.kmeans and kref.get(t, 0) > 0: cell += f" ({m / kref[t]:.2f})"
                 cells.append(cell)
             f.write(f"| {name} | " + " | ".join(cells) + " |\n")
-    f.write("\n### last row of the first seed\n\n| arm | iterations | CPU s | assign s | posterior buckets | in use | prior leaves | prior splits | rejected | signals | misassigned (visit-weighted) |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+    f.write("\n### last row of the first seed\n\n| arm | iterations | CPU s | assign s | posterior buckets | in use | prior leaves | prior splits | rejected | signals | misassigned (visit-weighted) | routing tables MB | peak RSS MB |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
     for name, ds, _, _ in arms:
         runs = [r for r in data[name] if r]
         if not runs: continue
@@ -205,8 +205,11 @@ with open(a.prefix + ".md", "w") as f:
         if os.path.exists(ap):
             import json
             j = json.load(open(ap)); mis = f"{100 * j['share']:.1f}% ({100 * j['visit_weighted_share']:.1f}%)"
+        rmb, pmb = num(r, "routing_mb"), num(r, "peak_rss_mb")
         f.write(f"| {name} | {int(num(r, 'iters')):,} | {num(r, 'train_seconds'):.0f} | {num(r, 'assign_seconds'):.0f} | "
                 f"{int(num(r, 'buckets_after')):,} | {'' if math.isnan(used) else f'{int(used):,}'} | {int(num(r, 'prior_leaves')):,} | "
-                f"{int(num(r, 'prior_splits')):,} | {int(num(r, 'prior_rejected')):,} | {int(num(r, 'signals')):,} | {mis} |\n")
+                f"{int(num(r, 'prior_splits')):,} | {int(num(r, 'prior_rejected')):,} | {int(num(r, 'signals')):,} | {mis} | "
+                f"{'' if math.isnan(rmb) else f'{rmb:.1f}'} | "
+                f"{'' if math.isnan(pmb) else f'{pmb:.0f}'} |\n")
     if missing: f.write("\nMissing runs: " + ", ".join(f"{n} ({d})" for n, d in missing) + "\n")
 print("saved", a.prefix + "_curves.png", a.prefix + ".md")

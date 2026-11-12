@@ -46,6 +46,10 @@
 // child each information set picks at the event (instead of the regret vectors' squared error).
 // --epoch0 E (static schedule: judgments at E * 2^k, default 1000) and --eps-at A (eps schedule: the first judgment and
 // eps at iteration A, default 1000).
+// --direction avg: one stored strategy per split event, the split-time average strategy (rule (a) then gates labels by
+// per-visit regret > --tol); iterates (default) is the K-iterate sum. --leaf-start parent (pp): new prior leaves keep
+// their parent's pointer and no route starts before the newest event, so older events' tables are freed; root
+// (default) routes new leaves from the start of the genealogy (rule (alpha)).
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -113,7 +117,8 @@ enum { PC = 0, UM, UO, UC, HO, AM, PM, PO };
 bool pp_mode = true, split_on = true, measure = false, eager = false, leaf_cache_on = true, pend_cache_on = true, memo_on = true, table_on = true;
 int members_cap = 64, m_samples = 16, min_leaf = 1, kmax = KMAX, rows_per_octave = 2, esd_min_n = 5;
 double zthr = 2.0, inherit_r = 0, inherit_s = 0, prior_ratio = 0;
-bool crossfit = true, resolve_now = false;
+bool crossfit = true, resolve_now = false, direction_avg = false, leaf_start_parent = false;
+double tol = 1e-3;
 string prior_criterion = "regret";
 vector<int> resolve_q;  // --resolve-now: new leaves with samples drawn at the split, finalized at once
 string outlier = "esd", scale = "counterfactual", schedule = "static", prior_split = "immediate", prior_start = "equal", features = "general";
@@ -152,6 +157,16 @@ inline void strategy(int b, int n, double* s) {
     for (int a = 0; a < n; ++a) total += max(Q[(size_t)b * W + a], 0.0);
     for (int a = 0; a < n; ++a) s[a] = total > 0 ? max(Q[(size_t)b * W + a], 0.0) / total : 1.0 / n;
 }
+vector<double> avg_table() {  // every bucket's average strategy (uniform before any average mass)
+    vector<double> t((size_t)B * W, 0.0);
+    for (int b = 0; b < B; ++b) {
+        const int n = bucket_n[b];
+        double tot = 0;
+        for (int a = 0; a < n; ++a) tot += S[(size_t)b * W + a];
+        for (int a = 0; a < n; ++a) t[(size_t)b * W + a] = tot > 0 ? S[(size_t)b * W + a] / tot : 1.0 / n;
+    }
+    return t;
+}
 vector<double> strategy_table() {
     vector<double> t((size_t)B * W, 0.0);
     for (int b = 0; b < B; ++b) strategy(b, bucket_n[b], &t[(size_t)b * W]);
@@ -179,10 +194,13 @@ struct TabView { const double* t; int K, Bl; };
 // over the K stored iterates (R2 = that sum of squares), else none; no bucket statistics
 int label_of(const Split& sp, const double* R, const double* R2, double M, int n, bool restrict_kids) {
     if (outlier == "label") {
+        // --direction avg has one stored strategy, so the z test over iterates is undefined: the gate is then the
+        // per-visit regret R(I,a) / M(I) > --tol (the original rule of pure_aswiss.cpp)
         int best = -1; double bv = -1e300;
         for (int a = 0; a < n; ++a) {
             if (restrict_kids && !sp.kids.count(a)) continue;
-            if (R[a] > zthr * sqrt(max(0.0, R2[a])) && R[a] > bv) { bv = R[a]; best = a; }
+            const bool pass = direction_avg ? (M > 0 && R[a] / M > tol) : R[a] > zthr * sqrt(max(0.0, R2[a]));
+            if (pass && R[a] > bv) { bv = R[a]; best = a; }
         }
         return best;
     }
@@ -608,6 +626,11 @@ void commit_split(int l, const Candidate& cd, int lv, const vector<Row>& rows) {
         kidn[s] = (int)tnodes.size(); tnodes.push_back(t);
         Leaf L; L.node = kidn[s]; L.cell = cell; L.depth = depth + 1; L.pending = true; L.prov = prov;
         L.start_level = 0; L.start_b = cell_constraint[cell]; L.born = cur_t;
+        if (leaf_start_parent) {  // --leaf-start parent: the new leaf keeps its parent's place (no route from the start)
+            const Leaf& P = leaves[l];
+            if (P.pending) { L.start_level = P.start_level; L.start_b = P.start_b; }
+            else { L.pending = false; L.ptr = P.ptr; }
+        }
         leaves.push_back(L);
     }
     tnodes[node].left = kidn[0]; tnodes[node].right = kidn[1];
@@ -615,7 +638,7 @@ void commit_split(int l, const Candidate& cd, int lv, const vector<Row>& rows) {
     ++cell_ver[cell]; ++assign_ver; ++n_prior_splits;
     fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%zu,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(cd.d).c_str(), cd.thr,
             cd.gainA, cd.gainB, nrows, lv, (int)leaves.size() - 2, (int)leaves.size() - 1);
-    if (resolve_now) {  // m samples per new leaf drawn from its rows by counterfactual reach, finalized right away
+    if (resolve_now && !leaf_start_parent) {  // m samples per new leaf drawn from its rows by counterfactual reach, finalized right away
         for (int s = 0; s < 2; ++s) {
             const int nl = (int)leaves.size() - 2 + s;
             vector<const Row*> part; double tw = 0;
@@ -888,7 +911,8 @@ int main(int argc, char** argv) try {
                             {"--rows-per-octave", "2"}, {"--checkpoint-minutes", "10"}, {"--stop-after-rows", "0"},
                             {"--esd-table", (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string()},
                             {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}, {"--resolve-now", "0"}, {"--prior-criterion", "regret"},
-                            {"--epoch0", "1000"}, {"--eps-at", "1000"}};
+                            {"--epoch0", "1000"}, {"--eps-at", "1000"},
+                            {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -899,6 +923,10 @@ int main(int argc, char** argv) try {
     split_on = opt["--split"] == "1";
     prior_ratio = stod(opt["--prior-ratio"]); crossfit = opt["--crossfit"] == "1";
     resolve_now = opt["--resolve-now"] == "1"; prior_criterion = opt["--prior-criterion"];
+    direction_avg = opt["--direction"] == "avg"; leaf_start_parent = opt["--leaf-start"] == "parent"; tol = stod(opt["--tol"]);
+    if (opt["--direction"] != "iterates" && !direction_avg) throw runtime_error("--direction must be iterates or avg");
+    if (opt["--leaf-start"] != "root" && !leaf_start_parent) throw runtime_error("--leaf-start must be root or parent");
+    if (leaf_start_parent && !pp_mode) throw runtime_error("--leaf-start parent is for --mode pp");
     if (prior_criterion != "regret" && prior_criterion != "label") throw runtime_error("--prior-criterion must be regret or label");
     if (!pp_mode && opt["--mode"] != "pure") throw runtime_error("--mode must be pp or pure");
     members_cap = stoi(opt["--members"]); m_samples = stoi(opt["--m"]); min_leaf = stoi(opt["--min-leaf"]);
@@ -981,7 +1009,8 @@ int main(int argc, char** argv) try {
         if (k != "--seconds" && k != "--iters" && k != "--checkpoint-minutes" && k != "--leaf-cache" && k != "--pend-cache" &&
             k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze" &&
             !(k == "--prior-ratio" && v == "0") && !(k == "--crossfit" && v == "1") && !(k == "--resolve-now" && v == "0") &&
-            !(k == "--prior-criterion" && v == "regret") && !(k == "--epoch0" && v == "1000") && !(k == "--eps-at" && v == "1000"))  // defaults of later options: old runs resume
+            !(k == "--prior-criterion" && v == "regret") && !(k == "--epoch0" && v == "1000") && !(k == "--eps-at" && v == "1000") &&
+            !(k == "--direction" && v == "iterates") && !(k == "--leaf-start" && v == "root") && !(k == "--tol" && v == "1e-3"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1089,6 +1118,7 @@ int main(int argc, char** argv) try {
             // through the genealogy from its starting bucket (the pending-leaf rule applied to I), pointer = its
             // leaf's pointer. Writes analysis.json; nothing is trained and no output of the run changes.
             if (!pp_mode) throw runtime_error("--analyze is for --mode pp");
+            if (leaf_start_parent) throw runtime_error("--analyze routes from the start of the genealogy, whose tables --leaf-start parent frees");
             const int nsamp = stoi(opt["--analyze"]);
             vector<int> pool;
             for (int I = 0; I < nI; ++I) if (!leaves[leaf_of(I)].pending) pool.push_back(I);
@@ -1147,7 +1177,7 @@ int main(int argc, char** argv) try {
         draw_samples();
         ofstream(log_path) << "row,iters,epoch,level,buckets,buckets_after,splits,prior_leaves,pending_leaves,prior_splits,"
                               "prior_rejected,finalized,signals,waiting,K,eps_stat,eps,infoset_regret_sum,bucket_regret_sum,"
-                              "regret_sum_gap,table_regret_sum,train_seconds,assign_seconds,directions,gain_rejected,buckets_used\n";
+                              "regret_sum_gap,table_regret_sum,train_seconds,assign_seconds,directions,gain_rejected,buckets_used,routing_mb,peak_rss_mb\n";
         ofstream(ev_path) << "event,iters,bucket,members,outliers,labels,children\n";
         ofstream(pr_path) << "iters,leaf,cell,depth,test,threshold,gain_choose_half,gain_check_half,rows,signal_level,left,right\n";
         if (measure && pp_mode) ofstream(ds_path) << "row,iters,leaf,cell,depth,infosets,visited,visits,rms,max_dev,pending\n";
@@ -1178,7 +1208,9 @@ int main(int argc, char** argv) try {
         for (int b = 0; b < B; ++b) s += vis[b] >= 25 || parent_eps[b] < 0 ? psi(&Q[(size_t)b * W], bucket_n[b]) / max<long long>(1, vis[b]) : parent_eps[b];
         return s;
     };
-    struct RowStats { double irs = NAN, brs = NAN, trs = 0; int used = 0; };  // used: buckets some information set is in now
+    struct RowStats { double irs = NAN, brs = NAN, trs = 0; int used = 0; };
+    auto routing_mb = [&] { size_t b = run.cur_tables.size(); for (const Event& e : events) b += e.tables.size(); return b * 8.0 / 1e6; };
+    auto peak_rss_mb = [] { ifstream f("/proc/self/status"); string k; while (f >> k) { if (k == "VmHWM:") { double v; f >> v; return v / 1024.0; } } return (double)NAN; };  // used: buckets some information set is in now
     auto snapshot = [&](int before) {
         RowStats st;
         excl([&] {
@@ -1238,10 +1270,10 @@ int main(int argc, char** argv) try {
             const double irs = st.irs, brs = st.brs, trs = st.trs;
             int pend = 0, alive = 0;
             for (const Leaf& L : leaves) if (L.node >= 0) { ++alive; pend += L.pending; }
-            fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld,%d\n",
+            fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld,%d,%.3f,%.1f\n",
                     run.rows, run.t, run.k, level_now, before, B, splits, pp_mode ? alive : 0, pp_mode ? pend : 0, n_prior_splits,
                     n_prior_rejected, n_finalize, n_signals, waiting.size(), run.curK, schedule == "eps" ? eps_stat() : NAN,
-                    run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used);
+                    run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used, routing_mb(), peak_rss_mb());
             fflush(logf);
             cerr << "row " << run.rows << " iters " << run.t << " level " << level_now << " buckets " << before << " -> " << B;
             if (pp_mode) cerr << " leaves " << alive << " pending " << pend << " prior splits " << n_prior_splits;
@@ -1319,6 +1351,17 @@ int main(int argc, char** argv) try {
                 }
                 ++assign_ver;
             }
+            if (leaf_start_parent) {
+                // no route ever starts before the newest event: pending leaves restart from their provisional
+                // pointer's place before it, and the strategy tables of older events are freed
+                for (Leaf& L : leaves)
+                    if (L.node >= 0 && L.pending && L.start_level < level_now - 1) { L.start_level = level_now - 1; L.start_b = ancestor(L.prov, level_now - 1); }
+                for (int e2 = 0; e2 + 1 < level_now; ++e2) { vector<double>().swap(events[e2].tables); }
+                vector<int> keep;
+                for (int l : waiting) { if (leaves[l].sig_level >= level_now - 1) keep.push_back(l); else leaves[l].sig_level = -1; }
+                waiting = keep;
+                ++assign_ver;
+            }
             grow_to_ratio();
             drain_resolve();
             leaves_at_event = n_leaves_alive();
@@ -1332,7 +1375,7 @@ int main(int argc, char** argv) try {
     while (run.t < T) {
         ++run.t; cur_t = run.t;
         // store this iterate (static: drawn iterations; eps: reservoir over the epoch's iterations)
-        if (!split_on) {
+        if (!split_on || direction_avg) {  // --direction avg: nothing stored during the epoch
         } else if (schedule == "static") {
             if (run.next_sample < run.samples.size() && run.samples[run.next_sample] == run.t) {
                 const auto tab = strategy_table();
@@ -1361,6 +1404,7 @@ int main(int argc, char** argv) try {
         if (schedule == "static") is_end = run.t == epoch_end_static(run.k);
         else if (run.k == 0) is_end = run.t == eps_at;
         else is_end = run.t - run.epoch_start >= 1000 && run.t % eps_check == 0 && eps_stat() < run.eps;
+        if (is_end && direction_avg && split_on) { run.cur_tables = avg_table(); run.curK = 1; }  // the split-time average strategy
         const bool grid_row = run.t == next_row_t();
         if (grid_row) ++run.next_row_j;
         if (is_end || grid_row || run.t == T) {

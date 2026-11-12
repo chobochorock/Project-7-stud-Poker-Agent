@@ -1908,7 +1908,7 @@ int train(int argc, char** argv) {
                                 {"--log-regret", "0"}, {"--log-splits", "0"}, {"--budget-cpu-seconds", "0"}, {"--freeze-splits-at", "0"},
                                 {"--judge-at", "0"},
                                 // --partition pp (PP_STUD7_DESIGN_KO.md; see pp_model.hpp)
-                                {"--pp-assign", "now"}, {"--leaf-start", "parent"}, {"--pp-particles", "64"},
+                                {"--pp-assign", "now"}, {"--leaf-start", "root"}, {"--pp-particles", "64"},
                                 {"--pp-samples", "64"}, {"--pp-min-samples", "8"}, {"--pp-m", "16"}, {"--pp-rows", "64"},
                                 {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
@@ -2073,7 +2073,7 @@ int train(int argc, char** argv) {
         if (pp_mode) {
             std::ofstream(ppj_path) << "epoch,roots,level,buckets_before,judged_buckets,samples_per_bucket,samples,splits,children,"
                                        "pending_leaves,rows,leaves_fixed_by_rows,leaves_fixed_by_none,fill_leaves_fixed,signals,prior_splits,"
-                                       "leaves_after,buckets_after,steps_posterior,steps_prior,budget_steps,steps_per_sample,pass_roots,"
+                                       "leaves_after,buckets_after,steps_posterior,steps_prior,steps_root_route,budget_steps,steps_per_sample,pass_roots,"
                                        "shards_posterior,shards_prior,pass_seconds,estimate_seconds,judge_seconds,bucket_mb,tree_mb,"
                                        "stored_tables_mb,rss_mb,peak_rss_mb,fill_steps,frozen\n";
             std::ofstream(ppp_path) << "epoch,roots,leaf,street,legal_mask,depth,feature,threshold,gain_a,gain_b,rows,signal,left_leaf,"
@@ -2221,7 +2221,7 @@ int train(int argc, char** argv) {
                 if (judging(s.t) && !D.frozen) {
                     splits = model.pp_judge(std::stoull(o["--seed"]), s.k, s.t, s.t - s.epoch_start, fill_steps, ppj_log, ppp_log);
                 } else {
-                    ppj_log << s.k << ',' << s.t << ',' << D.level << std::string(29, ',') << memory_mb(1) << ',' << peak_rss_mb() << ','
+                    ppj_log << s.k << ',' << s.t << ',' << D.level << std::string(30, ',') << memory_mb(1) << ',' << peak_rss_mb() << ','
                             << fill_steps << ',' << D.frozen << '\n';
                 }
             }

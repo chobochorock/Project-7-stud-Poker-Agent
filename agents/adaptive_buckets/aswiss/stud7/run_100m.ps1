@@ -74,10 +74,10 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     k1024     = @("atom_k1024", "atom", 1024, "k-means 1024 = atoms trained directly", "")
     # prior-posterior ASWISS (PP_STUD7_DESIGN_KO.md): no atlas (K = 0), judgments at 1000 * 2^k roots, particle
     # directions, online LBR on the split schedule (switched on by -OnlineLbrEvery > 0)
-    pp        = @("pp_particle", "pp", 0, "prior-posterior ASWISS (particle directions, general features, no atlas)", "--epoch0 1000 --online-lbr-schedule split")
+    pp        = @("pp_particle", "pp", 0, "prior-posterior ASWISS (particle directions, root start, general features, no atlas)", "--epoch0 1000 --online-lbr-schedule split")
     pp_poker  = @("pp_particle_poker", "pp", 0, "prior-posterior ASWISS, poker features", "--epoch0 1000 --online-lbr-schedule split --features poker")
     pp_fill   = @("pp_particle_fill", "pp", 0, "prior-posterior ASWISS, assign by filling m visits", "--epoch0 1000 --online-lbr-schedule split --pp-assign fill")
-    pp_root   = @("pp_particle_root", "pp", 0, "prior-posterior ASWISS, new leaves from the root", "--epoch0 1000 --online-lbr-schedule split --leaf-start root")
+    pp_parent = @("pp_particle_parent", "pp", 0, "prior-posterior ASWISS, new leaves at the parent leaf's pointer", "--epoch0 1000 --online-lbr-schedule split --leaf-start parent")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
     escher    = @("net_escher", "net", 1024, "ESCHER (neural CFR)", "--algo escher")

@@ -588,7 +588,8 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
         for (size_t b = 0; b < buckets_.size(); ++b) for (int a = 0; a < A; ++a) t[b][a] = static_cast<float>(buckets_[b].s[a]);
     }
     // ---- stages 4-6 (assign now): pass R, pointers, prior splits ----
-    uint64_t rows_total = 0, resolved_rows = 0, resolved_prov = 0, steps4 = 0, prior_before = D.prior_splits, signals_before = D.signals;
+    uint64_t rows_total = 0, resolved_rows = 0, resolved_prov = 0, steps4 = 0, route_steps = 0, prior_before = D.prior_splits,
+             signals_before = D.signals;
     int shards_r = 0;
     if (!O.fill && !pending.empty()) {
         std::set<int32_t> pend(pending.begin(), pending.end());
@@ -630,7 +631,8 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             rows_total += rows.x.size();
             for (const auto& d : rows.d) steps4 += d.steps;
             for (auto& [l, id] : leaf_rows) {
-                pp_resolve(l, rows, id, e, pp_mix(pp_mix(seed, epoch), 0x600 + static_cast<uint64_t>(l)), cap, ratio_target, steps4, &plog, epoch);
+                pp_resolve(l, rows, id, e, pp_mix(pp_mix(seed, epoch), 0x600 + static_cast<uint64_t>(l)), cap, ratio_target, route_steps, &plog,
+                           epoch);
                 ++resolved_rows;
             }
         }
@@ -638,6 +640,8 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             D.leaves[l].ptr = D.leaves[l].prov; D.leaves[l].pending = false; ++resolved_prov;
         }
     }
+    // the cost of one estimate (the budget's planning unit) from the sample and row estimates only: the extra estimates
+    // of --leaf-start root (route_steps) are reported separately and are not part of the plan
     const uint64_t estimates = samples + rows_total;
     if (estimates) D.steps_per_sample = static_cast<double>(steps2 + steps4) / static_cast<double>(estimates);
     D.epoch_nodes = 0;
@@ -646,7 +650,8 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
     jlog << epoch << ',' << roots << ',' << e << ',' << live_before << ',' << judged << ',' << n_used << ',' << samples << ','
          << splits << ',' << children << ',' << pending.size() << ',' << rows_total << ',' << resolved_rows << ',' << resolved_prov << ','
          << fill_left << ',' << (D.signals - signals_before) << ',' << (D.prior_splits - prior_before) << ',' << D.live_leaves() << ','
-         << live2[0] + live2[1] + live2[2] << ',' << steps2 << ',' << steps4 << ',' << budget_total << ',' << D.steps_per_sample << ','
+         << live2[0] + live2[1] + live2[2] << ',' << steps2 << ',' << steps4 << ',' << route_steps << ',' << budget_total << ','
+         << D.steps_per_sample << ','
          << n_pass << ',' << shards_s << ',' << shards_r << ',' << t_pass << ',' << t_est << ',' << secs() << ','
          << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << memory_mb(1) << ',' << memory_mb(0) << ',' << fill_steps << ','
          << D.frozen << '\n';

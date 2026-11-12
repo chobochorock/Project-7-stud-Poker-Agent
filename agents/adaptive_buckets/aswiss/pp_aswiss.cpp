@@ -44,6 +44,8 @@
 // --resolve-now 1 (pp): new leaves get m samples drawn from their information sets (by counterfactual reach) at the
 // split and are finalized at once. --prior-criterion label: prior tests reduce the Gini impurity of the posterior
 // child each information set picks at the event (instead of the regret vectors' squared error).
+// --epoch0 E (static schedule: judgments at E * 2^k, default 1000) and --eps-at A (eps schedule: the first judgment and
+// eps at iteration A, default 1000).
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -885,7 +887,8 @@ int main(int argc, char** argv) try {
                             {"--eager", "0"}, {"--leaf-cache", "1"}, {"--pend-cache", "1"}, {"--memo", "1"}, {"--table", "1"},
                             {"--rows-per-octave", "2"}, {"--checkpoint-minutes", "10"}, {"--stop-after-rows", "0"},
                             {"--esd-table", (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string()},
-                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}, {"--resolve-now", "0"}, {"--prior-criterion", "regret"}};
+                            {"--p0", ""}, {"--split", "1"}, {"--analyze", "0"}, {"--prior-ratio", "0"}, {"--crossfit", "1"}, {"--resolve-now", "0"}, {"--prior-criterion", "regret"},
+                            {"--epoch0", "1000"}, {"--eps-at", "1000"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -978,7 +981,7 @@ int main(int argc, char** argv) try {
         if (k != "--seconds" && k != "--iters" && k != "--checkpoint-minutes" && k != "--leaf-cache" && k != "--pend-cache" &&
             k != "--memo" && k != "--table" && k != "--stop-after-rows" && k != "--esd-table" && k != "--analyze" &&
             !(k == "--prior-ratio" && v == "0") && !(k == "--crossfit" && v == "1") && !(k == "--resolve-now" && v == "0") &&
-            !(k == "--prior-criterion" && v == "regret"))  // defaults of later options: old runs resume
+            !(k == "--prior-criterion" && v == "regret") && !(k == "--epoch0" && v == "1000") && !(k == "--eps-at" && v == "1000"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -988,7 +991,10 @@ int main(int argc, char** argv) try {
     const double cpu0 = cpu_now();
     auto train_secs = [&] { return run.cpu_before + (cpu_now() - cpu0) - excluded; };
     auto excl = [&](auto&& f) { const double x0 = cpu_now(); f(); excluded += cpu_now() - x0; };
-    auto epoch_end_static = [&](int k) { return 1000LL << k; };
+    // --epoch0 E: static judgments at E * 2^k; --eps-at A: the eps rule's first judgment (and eps) at iteration A
+    const long long epoch0 = stoll(opt["--epoch0"]), eps_at = stoll(opt["--eps-at"]);
+    if (epoch0 < 1 || eps_at < 1) throw runtime_error("--epoch0 and --eps-at must be positive");
+    auto epoch_end_static = [&](int k) { return epoch0 << k; };
     auto Kfor = [&](int k) { return min(kmax, 8 * (k + 1)); };
     auto draw_samples = [&] {  // static schedule: K iterations uniformly among the epoch's (distinct, sorted)
         run.Kk = Kfor(run.k); run.curK = 0; run.cur_tables.clear(); run.next_sample = 0; run.samples.clear(); run.res_count = 0;
@@ -1353,7 +1359,7 @@ int main(int argc, char** argv) try {
         if (budget_end) T = run.t;
         bool is_end = false;
         if (schedule == "static") is_end = run.t == epoch_end_static(run.k);
-        else if (run.k == 0) is_end = run.t == 1000;
+        else if (run.k == 0) is_end = run.t == eps_at;
         else is_end = run.t - run.epoch_start >= 1000 && run.t % eps_check == 0 && eps_stat() < run.eps;
         const bool grid_row = run.t == next_row_t();
         if (grid_row) ++run.next_row_j;

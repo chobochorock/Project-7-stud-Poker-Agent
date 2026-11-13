@@ -374,22 +374,24 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
     return made;
 }
 
-// --pp-structure tree: split leaf l (which is its own bucket) by its judged samples idx (into xs / ds): while a leaf's
-// samples carry two or more labels it is split by the best test on them (label criterion; a balanced separating test
-// when no test has a positive gain), largest gain first, until the leaf count reaches the cap. Each new leaf gets a
-// new bucket that restarts (or inherits lambda / mu of the bucket leaf l had at this judgment). Returns the splits made.
-int Model::pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std::vector<pp::Dir>& ds, std::vector<int>& idx,
-                         int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog, uint64_t epoch) {
-    struct Item { int32_t leaf; std::vector<int> idx; double gain; pp::Candidate cand; };
-    const uint32_t source = pp_->ancestor(pp_->leaves[l].ptr, cur_level, parent_);  // the bucket of this judgment's policy
+// --pp-structure tree: split the leaves `starts` (each its own bucket) by their judged samples (indices into xs / ds).
+// A leaf whose samples carry two or more labels is split by the best test on them (label criterion; a balanced
+// separating test when no test has a positive gain). Order: every starting leaf once (largest gain first), then their
+// new leaves, and so on, while the leaf count stays under the cap. Each new leaf gets a new bucket that restarts (or
+// inherits lambda / mu of the bucket its starting leaf had at this judgment). Returns the splits made; *top counts the
+// starting leaves that were split.
+int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>& starts, const std::vector<pp::Sample>& xs,
+                         const std::vector<pp::Dir>& ds, int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog,
+                         uint64_t epoch, uint64_t* top) {
+    struct Item { int round; int32_t leaf; uint32_t source; std::vector<int> idx; double gain; pp::Candidate cand; };
     std::unordered_map<int, pp::Stream> streams;
     auto stream_of = [&](int i) -> const pp::Stream& {
         auto it = streams.find(i);
         if (it == streams.end()) it = streams.emplace(i, pp::make_stream(pp_view_state(xs[i]), xs[i].seat)).first;
         return it->second;
     };
-    auto evaluate = [&](int32_t leaf, std::vector<int> id) {
-        Item it{leaf, std::move(id), 0, {}};
+    auto evaluate = [&](int round, int32_t leaf, uint32_t source, std::vector<int> id) {
+        Item it{round, leaf, source, std::move(id), 0, {}};
         std::set<int> labels;
         for (int i : it.idx) labels.insert(ds[i].label);
         if (labels.size() < 2) return it;
@@ -410,9 +412,13 @@ int Model::pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std
         if (!it.cand.ok) it.cand = pp::balanced_split(rr, pp_->opt);  // labels differ: always split (progress)
         return it;
     };
-    auto cmp = [](const Item& a, const Item& b) { return a.gain != b.gain ? a.gain < b.gain : a.leaf > b.leaf; };
+    auto cmp = [](const Item& a, const Item& b) {  // top of the queue: the earliest round, then the largest gain
+        if (a.round != b.round) return a.round > b.round;
+        if (a.gain != b.gain) return a.gain < b.gain;
+        return a.leaf > b.leaf;
+    };
     std::priority_queue<Item, std::vector<Item>, decltype(cmp)> q(cmp);
-    q.push(evaluate(l, idx));
+    for (const auto& [l, idx] : starts) q.push(evaluate(0, l, pp_->ancestor(pp_->leaves[l].ptr, cur_level, parent_), idx));
     int made = 0;
     while (!q.empty()) {
         Item it = q.top(); q.pop();
@@ -428,8 +434,8 @@ int Model::pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std
         for (int side = 0; side < 2; ++side) {
             const uint32_t kid = new_bucket(parent_bucket);
             for (int a = 0; a < A; ++a) {
-                buckets_[kid].q[a] = pp_->opt.inherit_regret * buckets_[source].q[a];
-                buckets_[kid].s[a] = pp_->opt.inherit_avg * buckets_[source].s[a];
+                buckets_[kid].q[a] = pp_->opt.inherit_regret * buckets_[it.source].q[a];
+                buckets_[kid].s[a] = pp_->opt.inherit_avg * buckets_[it.source].s[a];
             }
             pp::TNode n; n.leaf = static_cast<int32_t>(pp_->leaves.size());
             const int32_t nn = static_cast<int32_t>(pp_->nodes.size());
@@ -441,11 +447,12 @@ int Model::pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std
         }
         pp_->leaves[it.leaf].node = -1;
         ++made; ++pp_->prior_splits;
+        if (it.round == 0 && top) ++*top;
         if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
                         << pp::desc_name(it.cand.d) << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
-        for (int side = 0; side < 2; ++side) q.push(evaluate(nl[side], part[side]));
+        for (int side = 0; side < 2; ++side) q.push(evaluate(it.round + 1, nl[side], it.source, part[side]));
     }
     return made;
 }
@@ -584,6 +591,7 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
     D.split_rows.clear();
     if (!O.root_start) D.tables.clear();
     const int32_t e = D.level;
+    const uint64_t prior_before = D.prior_splits, signals_before = D.signals;
     const auto live0 = live_buckets();
     const size_t live_before = live0[0] + live0[1] + live0[2], leaves0 = D.live_leaves();
     D.leaves_at_judgment = static_cast<int32_t>(leaves0);
@@ -633,6 +641,7 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
         t_est += secs() - e0;
         samples += xs.size();
         for (const auto& d : ds) steps2 += d.steps;
+        std::vector<std::pair<int32_t, std::vector<int>>> tree_starts;
         for (size_t j = 0; j < span.size(); ++j) {
             const uint32_t b = span[j].first;
             const size_t lo = span[j].second, hi = j + 1 < span.size() ? span[j + 1].second : xs.size();
@@ -640,12 +649,10 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             std::set<int> labels;
             for (size_t i = lo; i < hi; ++i) labels.insert(ds[i].label);
             if (labels.size() < 2) continue;
-            if (O.tree) {  // split the leaf itself by tests on its samples (label criterion), its new leaves restart
+            if (O.tree) {  // the leaf itself is split below, with the shard's other leaves whose samples disagree
                 std::vector<int> idx;
                 for (size_t i = lo; i < hi; ++i) idx.push_back(static_cast<int>(i));
-                const int made = pp_tree_split(leaf_of_bucket.at(b), xs, ds, idx, e, 2 * std::max<size_t>(1, leaves0),
-                                               pp_mix(pp_mix(seed, epoch), 0x700 + b), &plog, epoch);
-                if (made) { ++splits; children += static_cast<uint64_t>(made) + 1; }
+                tree_starts.push_back({leaf_of_bucket.at(b), std::move(idx)});
                 continue;
             }
             pp::Split sp;
@@ -668,6 +675,13 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             split_buckets.push_back(b);
             ++splits;
         }
+        if (O.tree && !tree_starts.empty()) {
+            uint64_t top = 0;
+            const int made = pp_tree_split(tree_starts, xs, ds, e, 2 * std::max<size_t>(1, leaves0), pp_mix(pp_mix(seed, epoch), 0x700 + sh),
+                                           &plog, epoch, &top);
+            splits += top;
+            children += 2 * static_cast<uint64_t>(made);
+        }
     }
     if (splits) {
         ++D.level;
@@ -687,8 +701,7 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
         for (size_t b = 0; b < buckets_.size(); ++b) for (int a = 0; a < A; ++a) t[b][a] = static_cast<float>(buckets_[b].s[a]);
     }
     // ---- stages 4-6 (assign now): pass R, pointers, prior splits ----
-    uint64_t rows_total = 0, resolved_rows = 0, resolved_prov = 0, steps4 = 0, route_steps = 0, prior_before = D.prior_splits,
-             signals_before = D.signals;
+    uint64_t rows_total = 0, resolved_rows = 0, resolved_prov = 0, steps4 = 0, route_steps = 0;
     int shards_r = 0;
     if (!O.fill && !pending.empty()) {
         std::set<int32_t> pend(pending.begin(), pending.end());

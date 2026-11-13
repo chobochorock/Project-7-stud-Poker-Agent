@@ -573,8 +573,9 @@ public:
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
     void pp_finalize_fill(int32_t l, bool at_judgment);
-    int pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std::vector<pp::Dir>& ds, std::vector<int>& idx,
-                      int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog, uint64_t epoch);
+    int pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>& starts, const std::vector<pp::Sample>& xs,
+                      const std::vector<pp::Dir>& ds, int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog,
+                      uint64_t epoch, uint64_t* top);
     bool pp_online_due(uint64_t t) const;
     double traverse_pp(State state, int traverser, double weight, std::mt19937_64& rng);
     template <class V> void pp_pass(State s, int traverser, std::mt19937_64& rng, V& visit) const;

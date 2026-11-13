@@ -374,6 +374,82 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
     return made;
 }
 
+// --pp-structure tree: split leaf l (which is its own bucket) by its judged samples idx (into xs / ds): while a leaf's
+// samples carry two or more labels it is split by the best test on them (label criterion; a balanced separating test
+// when no test has a positive gain), largest gain first, until the leaf count reaches the cap. Each new leaf gets a
+// new bucket that restarts (or inherits lambda / mu of the bucket leaf l had at this judgment). Returns the splits made.
+int Model::pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std::vector<pp::Dir>& ds, std::vector<int>& idx,
+                         int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog, uint64_t epoch) {
+    struct Item { int32_t leaf; std::vector<int> idx; double gain; pp::Candidate cand; };
+    const uint32_t source = pp_->ancestor(pp_->leaves[l].ptr, cur_level, parent_);  // the bucket of this judgment's policy
+    std::unordered_map<int, pp::Stream> streams;
+    auto stream_of = [&](int i) -> const pp::Stream& {
+        auto it = streams.find(i);
+        if (it == streams.end()) it = streams.emplace(i, pp::make_stream(pp_view_state(xs[i]), xs[i].seat)).first;
+        return it->second;
+    };
+    auto evaluate = [&](int32_t leaf, std::vector<int> id) {
+        Item it{leaf, std::move(id), 0, {}};
+        std::set<int> labels;
+        for (int i : it.idx) labels.insert(ds[i].label);
+        if (labels.size() < 2) return it;
+        std::vector<pp::Row> rr(it.idx.size());
+        for (size_t k = 0; k < it.idx.size(); ++k) {
+            const int i = it.idx[k];
+            rr[k].s = stream_of(i);
+            for (int a = 0; a < A; ++a) rr[k].x[a] = (ds[i].mask & (1u << a)) ? static_cast<float>(ds[i].r[a]) : 0.f;
+            rr[k].lab = static_cast<uint32_t>(ds[i].label + 1);  // 0: none
+        }
+        std::vector<char> half(rr.size(), 0);
+        if (pp_->opt.crossfit) {
+            std::mt19937_64 hr(pp_mix(salt, 0xc0ffee + static_cast<uint64_t>(leaf)));
+            for (auto& h : half) h = static_cast<char>(hr() & 1);
+        }
+        it.cand = pp::best_split(rr, half, pp_->opt);
+        it.gain = it.cand.ok ? it.cand.gainB : 0;
+        if (!it.cand.ok) it.cand = pp::balanced_split(rr, pp_->opt);  // labels differ: always split (progress)
+        return it;
+    };
+    auto cmp = [](const Item& a, const Item& b) { return a.gain != b.gain ? a.gain < b.gain : a.leaf > b.leaf; };
+    std::priority_queue<Item, std::vector<Item>, decltype(cmp)> q(cmp);
+    q.push(evaluate(l, idx));
+    int made = 0;
+    while (!q.empty()) {
+        Item it = q.top(); q.pop();
+        if (!it.cand.ok) continue;
+        if (pp_->live_leaves() >= cap) break;
+        const int32_t node = pp_->leaves[it.leaf].node;
+        const uint16_t ctx = pp_->leaves[it.leaf].ctx, depth = pp_->leaves[it.leaf].depth;
+        const uint32_t parent_bucket = pp_->leaves[it.leaf].ptr;
+        pp_->nodes[node].d = it.cand.d; pp_->nodes[node].thr = static_cast<float>(it.cand.thr); pp_->nodes[node].leaf = -1;
+        std::array<std::vector<int>, 2> part;
+        for (int i : it.idx) part[pp::feat(stream_of(i), it.cand.d) <= it.cand.thr ? 0 : 1].push_back(i);
+        std::array<int32_t, 2> nl{};
+        for (int side = 0; side < 2; ++side) {
+            const uint32_t kid = new_bucket(parent_bucket);
+            for (int a = 0; a < A; ++a) {
+                buckets_[kid].q[a] = pp_->opt.inherit_regret * buckets_[source].q[a];
+                buckets_[kid].s[a] = pp_->opt.inherit_avg * buckets_[source].s[a];
+            }
+            pp::TNode n; n.leaf = static_cast<int32_t>(pp_->leaves.size());
+            const int32_t nn = static_cast<int32_t>(pp_->nodes.size());
+            pp_->nodes.push_back(n);
+            (side == 0 ? pp_->nodes[node].left : pp_->nodes[node].right) = nn;
+            pp::Leaf L; L.node = nn; L.ctx = ctx; L.depth = static_cast<uint16_t>(depth + 1); L.born = pp_root_now_; L.ptr = kid;
+            pp_->leaves.push_back(L);
+            nl[side] = n.leaf;
+        }
+        pp_->leaves[it.leaf].node = -1;
+        ++made; ++pp_->prior_splits;
+        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
+                        << pp::desc_name(it.cand.d) << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
+                        << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
+                        << pp_->leaves[nl[1]].ptr << '\n';
+        for (int side = 0; side < 2; ++side) q.push(evaluate(nl[side], part[side]));
+    }
+    return made;
+}
+
 // --pp-assign fill: leaf l has its samples (m, or fewer at the next judgment); fix it from them
 void Model::pp_finalize_fill(int32_t l, bool at_judgment) {
     pp::Rows rows;
@@ -512,7 +588,9 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
     const size_t live_before = live0[0] + live0[1] + live0[2], leaves0 = D.live_leaves();
     D.leaves_at_judgment = static_cast<int32_t>(leaves0);
     const double budget_total = std::max(O.budget_min_steps, O.budget * static_cast<double>(D.epoch_nodes));
-    const double budget_stage = budget_total / 2;
+    const double budget_stage = O.tree ? budget_total : budget_total / 2;  // tree: one stage only
+    std::unordered_map<uint32_t, int32_t> leaf_of_bucket;  // tree structure: each live leaf has its own bucket
+    if (O.tree) for (int32_t l = 0; l < static_cast<int32_t>(D.leaves.size()); ++l) if (D.leaves[l].node >= 0) leaf_of_bucket[D.leaves[l].ptr] = l;
     const uint64_t n_pass = std::max<uint64_t>(1000, static_cast<uint64_t>(O.pass_frac * static_cast<double>(epoch_len)));
     const double sample_bytes = sizeof(pp::Sample) + 8 + 16;
     // ---- stage 1-2: pass S and the posterior splits ----
@@ -523,7 +601,10 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
     for (int sh = 0; sh < shards_s; ++sh) {
         const double p0 = secs();
         auto res = pp_collect(n_pass, pp_mix(seed * 1000003ull + epoch, 0x51), static_cast<size_t>(O.n0), sh, shards_s,
-                              [&](uint32_t b, int32_t, uint64_t& key) { if (b == kNone) return false; key = b; return true; });
+                              [&](uint32_t b, int32_t, uint64_t& key) {
+                                  if (b == kNone || (O.tree && D.born[b] > e)) return false;  // tree: not the leaves made just now
+                                  key = b; return true;
+                              });
         t_pass += secs() - p0;
         // plan: n samples per bucket within this shard's share of the budget (deterministic: from step counts)
         std::vector<std::pair<uint64_t, uint32_t>> order;  // (-visits, bucket)
@@ -559,6 +640,14 @@ int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoc
             std::set<int> labels;
             for (size_t i = lo; i < hi; ++i) labels.insert(ds[i].label);
             if (labels.size() < 2) continue;
+            if (O.tree) {  // split the leaf itself by tests on its samples (label criterion), its new leaves restart
+                std::vector<int> idx;
+                for (size_t i = lo; i < hi; ++i) idx.push_back(static_cast<int>(i));
+                const int made = pp_tree_split(leaf_of_bucket.at(b), xs, ds, idx, e, 2 * std::max<size_t>(1, leaves0),
+                                               pp_mix(pp_mix(seed, epoch), 0x700 + b), &plog, epoch);
+                if (made) { ++splits; children += static_cast<uint64_t>(made) + 1; }
+                continue;
+            }
             pp::Split sp;
             sp.level = e;
             sp.kid.fill(kNone);

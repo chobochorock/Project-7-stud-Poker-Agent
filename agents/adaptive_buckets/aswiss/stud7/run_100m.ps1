@@ -78,6 +78,8 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     pp_poker  = @("pp_particle_poker", "pp", 0, "prior-posterior ASWISS, poker features", "--epoch0 1000 --online-lbr-schedule split --features poker")
     pp_fill   = @("pp_particle_fill", "pp", 0, "prior-posterior ASWISS, assign by filling m visits", "--epoch0 1000 --online-lbr-schedule split --pp-assign fill")
     pp_inh    = @("pp_particle_inherit_avg", "pp", 0, "prior-posterior ASWISS, children inherit the average table (regret restarts)", "--epoch0 1000 --online-lbr-schedule split --inherit-regret 0 --inherit-avg 1")
+    pp_tree   = @("pp_tree", "pp", 0, "single tree: strategies on the prior leaves, leaves split by sample labels", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree")
+    pp_tree_inh = @("pp_tree_inherit_avg", "pp", 0, "single tree, new leaves inherit the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 0 --inherit-avg 1")
     pp_parent = @("pp_particle_parent", "pp", 0, "prior-posterior ASWISS, new leaves at the parent leaf's pointer", "--epoch0 1000 --online-lbr-schedule split --leaf-start parent")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

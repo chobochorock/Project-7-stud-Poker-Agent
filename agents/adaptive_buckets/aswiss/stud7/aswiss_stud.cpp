@@ -573,6 +573,8 @@ public:
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
     void pp_finalize_fill(int32_t l, bool at_judgment);
+    int pp_tree_split(int32_t l, const std::vector<pp::Sample>& xs, const std::vector<pp::Dir>& ds, std::vector<int>& idx,
+                      int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog, uint64_t epoch);
     bool pp_online_due(uint64_t t) const;
     double traverse_pp(State state, int traverser, double weight, std::mt19937_64& rng);
     template <class V> void pp_pass(State s, int traverser, std::mt19937_64& rng, V& visit) const;
@@ -1913,7 +1915,8 @@ int train(int argc, char** argv) {
                                 {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
-                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}});
+                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"},
+                                {"--pp-structure", "pp"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
@@ -1965,7 +1968,7 @@ int train(int argc, char** argv) {
         };
         choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
-        choice("--online-lbr-schedule", {"fixed", "split"});
+        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -1976,6 +1979,13 @@ int train(int argc, char** argv) {
         ppo.judge_mem_mb = std::stod(o["--judge-mem-mb"]); ppo.mem_budget_mb = std::stod(o["--mem-budget-mb"]);
         ppo.threads = threads; ppo.online_split = o["--online-lbr-schedule"] == "split";
         ppo.inherit_regret = std::stod(o["--inherit-regret"]); ppo.inherit_avg = std::stod(o["--inherit-avg"]);
+        // --pp-structure tree: strategies live on the prior leaves themselves; a leaf whose judged samples carry two or
+        // more labels is split by tests on those samples. No posterior layer: no pointers, pending leaves or routes.
+        ppo.tree = o["--pp-structure"] == "tree";
+        if (ppo.tree) {
+            if (ppo.fill) throw std::runtime_error("--pp-structure tree has no pending leaves: it does not take --pp-assign fill");
+            ppo.root_start = false;  // nothing is routed
+        }
         if (ppo.inherit_regret < 0 || ppo.inherit_regret > 1 || ppo.inherit_avg < 0 || ppo.inherit_avg > 1)
             throw std::runtime_error("--inherit-regret and --inherit-avg must be in [0, 1] (spec: a child's start may not exceed its parent)");
         if (ppo.particles < 1 || ppo.n0 < 2 || ppo.n_min < 2 || ppo.m < 1 || ppo.rho < ppo.m || ppo.min_leaf < 1)
@@ -2026,7 +2036,8 @@ int train(int argc, char** argv) {
                           ";min_leaf=" + o["--min-leaf"] + ";features=" + o["--features"] + ";mem_budget_mb=" + o["--mem-budget-mb"] +
                           ";online_schedule=" + o["--online-lbr-schedule"] +
                           (ppo.inherit_regret > 0 || ppo.inherit_avg > 0 ? ";inherit_regret=" + o["--inherit-regret"] + ";inherit_avg=" + o["--inherit-avg"]
-                                                                          : std::string()) : std::string());
+                                                                          : std::string()) +
+                          (ppo.tree ? ";pp_structure=tree" : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

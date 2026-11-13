@@ -16,6 +16,7 @@ struct Opts {
     double inherit_regret = 0, inherit_avg = 0;  // weak inheritance: a child starts from lambda x / mu x its parent's tables
     int threads = 1;
     bool online_split = false;   // --online-lbr-schedule split
+    bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)
 };
 
 struct TNode { Desc d; float thr = 0; int32_t left = -1, right = -1, leaf = -1; };
@@ -151,6 +152,27 @@ Candidate best_split(const std::vector<Row>& rows, const std::vector<char>& half
         if (half[i]) { add(pB, rows[i]); add(feat(rows[i].s, best.d) <= best.thr ? lB : rB, rows[i]); }
     best.gainB = imp(pB) - imp(lB) - imp(rB);
     best.ok = best.gainB > 1e-12 * std::max(1.0, imp(pB)) && lB.w > 0 && rB.w > 0;
+    return best;
+}
+
+// A test that separates the rows at all, the most balanced one (rows on the smaller side; ties: the first feature in
+// their order). Used by --pp-structure tree when the rows' labels differ but no test has a positive gain (for example
+// labels in an XOR pattern), so that a leaf whose samples disagree is always split.
+Candidate balanced_split(const std::vector<Row>& rows, const Opts& opt) {
+    Candidate best;
+    int best_min = 0;
+    const std::vector<Desc> ds = candidate_features(rows, opt.poker);
+    std::vector<double> v(rows.size());
+    for (const Desc& d : ds) {
+        for (size_t i = 0; i < rows.size(); ++i) v[i] = feat(rows[i].s, d);
+        std::vector<double> u = v;
+        std::sort(u.begin(), u.end());
+        for (size_t k = 0; k + 1 < u.size(); ++k) {
+            if (u[k] == u[k + 1]) continue;
+            const int m = static_cast<int>(std::min(k + 1, u.size() - k - 1));
+            if (m > best_min) { best_min = m; best.d = d; best.thr = static_cast<float>(0.5 * (u[k] + u[k + 1])); best.ok = true; }
+        }
+    }
     return best;
 }
 

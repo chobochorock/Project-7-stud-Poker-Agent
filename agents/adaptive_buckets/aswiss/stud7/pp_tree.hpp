@@ -14,6 +14,7 @@ struct Opts {
     int particles = 64, n0 = 64, n_min = 8, m = 16, rho = 64, min_leaf = 1;
     double z = 2, ratio = 4, pass_frac = 0.125, budget = 0.25, budget_min_steps = 2e6, judge_mem_mb = 256, mem_budget_mb = 0;
     double inherit_regret = 0, inherit_avg = 0;  // weak inheritance: a child starts from lambda x / mu x its parent's tables
+    bool inherit_share = false;  // --inherit-share 1 (tree): times the child's share of the source leaf's judged samples
     int threads = 1;
     bool online_split = false;   // --online-lbr-schedule split
     bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)

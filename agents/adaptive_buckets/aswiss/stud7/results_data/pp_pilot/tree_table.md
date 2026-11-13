@@ -8,7 +8,9 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 |---|---:|---:|---:|---:|---:|---:|---:|
 | pp, parent start | 63,000 | 189 | 53 | 10.678 ± 1.257 | 3.16 | 5.170 ± 0.815 | 2.06 |
 | pp, root start (default) | 63,000 | 147 | 72 | missing |  | missing |  |
-| pp, root start, inherit avg | 63,000 | 149 | 65 | 8.306 ± 1.030 | 2.46 | 4.867 ± 0.605 | 1.94 |
+| pp, root start, inherit regret 0 + avg 1 | 63,000 | 149 | 65 | 8.306 ± 1.030 | 2.46 | 4.867 ± 0.605 | 1.94 |
+| pp, root start, inherit regret 1 + avg 1 | 63,000 | 148 | 54 | missing |  | missing |  |
+| pp, parent start, inherit regret 1 + avg 1 | 63,000 | 167 | 39 | missing |  | missing |  |
 | pp, assign by filling m | 63,000 | 156 | 46 | 6.419 ± 0.821 | 1.90 | 4.544 ± 0.509 | 1.81 |
 | pp, parent start, z = 3.5 | 63,000 | 151 | 53 | 9.207 ± 1.158 | 2.73 | 7.948 ± 1.083 | 3.16 |
 | tree (default: min-leaf 1) | 63,000 | 288 | 53 | 9.895 ± 1.333 | 2.93 | 7.510 ± 1.085 | 2.99 |
@@ -39,7 +41,9 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | context (no cards) | 63,000 | 146 | 70 | 49.376 ± 4.228 | 14.62 | 52.923 ± 4.267 | 21.07 |
 | pp, parent start | 127,000 | 380 | 99 | 7.705 ± 1.063 | 3.76 | 5.192 ± 0.725 | 2.39 |
 | pp, root start (default) | 127,000 | 268 | 140 | 8.952 ± 1.281 | 4.36 | 9.920 ± 1.183 | 4.57 |
-| pp, root start, inherit avg | 127,000 | 271 | 130 | 6.977 ± 0.986 | 3.40 | 6.658 ± 0.845 | 3.06 |
+| pp, root start, inherit regret 0 + avg 1 | 127,000 | 271 | 130 | 6.977 ± 0.986 | 3.40 | 6.658 ± 0.845 | 3.06 |
+| pp, root start, inherit regret 1 + avg 1 | 127,000 | 222 | 99 | 2.925 ± 0.224 | 1.43 | 2.926 ± 0.207 | 1.35 |
+| pp, parent start, inherit regret 1 + avg 1 | 127,000 | 297 | 62 | 3.685 ± 0.375 | 1.80 | 3.225 ± 0.336 | 1.48 |
 | pp, assign by filling m | 127,000 | 305 | 95 | 9.221 ± 1.076 | 4.50 | 7.413 ± 0.905 | 3.41 |
 | pp, parent start, z = 3.5 | 127,000 | 301 | 104 | 12.598 ± 1.377 | 6.14 | 12.789 ± 1.451 | 5.89 |
 | tree (default: min-leaf 1) | 127,000 | 576 | 100 | 9.211 ± 1.128 | 4.49 | 6.239 ± 0.752 | 2.87 |
@@ -70,7 +74,9 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | context (no cards) | 127,000 | 146 | 150 | 52.881 ± 4.356 | 25.78 | 54.955 ± 4.318 | 25.29 |
 | pp, parent start | 255,000 | 751 | 193 | 10.009 ± 1.233 | 7.51 | 8.301 ± 1.040 | 5.68 |
 | pp, root start (default) | 255,000 | 545 | 292 | 8.111 ± 1.117 | 6.08 | 5.334 ± 0.837 | 3.65 |
-| pp, root start, inherit avg | 255,000 | 511 | 271 | 7.916 ± 1.109 | 5.94 | 5.388 ± 0.856 | 3.69 |
+| pp, root start, inherit regret 0 + avg 1 | 255,000 | 511 | 271 | 7.916 ± 1.109 | 5.94 | 5.388 ± 0.856 | 3.69 |
+| pp, root start, inherit regret 1 + avg 1 | 255,000 | 388 | 195 | 3.019 ± 0.222 | 2.26 | 3.047 ± 0.259 | 2.09 |
+| pp, parent start, inherit regret 1 + avg 1 | 255,000 | 597 | 108 | 3.876 ± 0.346 | 2.91 | 3.237 ± 0.326 | 2.22 |
 | pp, assign by filling m | 255,000 | 615 | 206 | 11.048 ± 1.330 | 8.29 | 10.125 ± 1.077 | 6.93 |
 | pp, parent start, z = 3.5 | 255,000 | 604 | 220 | 12.543 ± 1.379 | 9.41 | 9.076 ± 1.089 | 6.21 |
 | tree (default: min-leaf 1) | 255,000 | 1,152 | 190 | 8.705 ± 1.055 | 6.53 | 6.893 ± 0.827 | 4.72 |
@@ -99,6 +105,9 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | k-means 256, training seed 3 | 255,000 | 35,482 | 137 | 1.837 ± 0.272 | 1.00 | 1.142 ± 0.272 | 1.00 |
 | k-means 256 (baseline) | 255,000 | 35,465 | 158 | 1.333 ± 0.306 | 1.00 | 1.460 ± 0.209 | 1.00 |
 | context (no cards) | 255,000 | 146 | 310 | 58.810 ± 4.281 | 44.10 | 53.721 ± 4.372 | 36.78 |
+| pp, root start (default) | 511,000 | 1,038 | 621 | 10.677 ± 1.287 | 7.05 | 8.873 ± 1.110 | 5.09 |
+| pp, root start, inherit regret 1 + avg 1 | 511,000 | 686 | 410 | 2.822 ± 0.247 | 1.86 | 3.317 ± 0.296 | 1.90 |
+| pp, parent start, inherit regret 1 + avg 1 | 511,000 | 1,196 | 199 | 4.025 ± 0.362 | 2.66 | 3.679 ± 0.367 | 2.11 |
 | tree (default: min-leaf 1) | 511,000 | 2,304 | 392 | 9.319 ± 1.035 | 6.15 | 6.639 ± 0.858 | 3.81 |
 | tree, inherit regret 0 + avg 1 | 511,000 | 2,304 | 338 | 8.449 ± 1.419 | 5.58 | 7.124 ± 1.122 | 4.09 |
 | tree, min-leaf 8 | 511,000 | 2,304 | 428 | 7.048 ± 0.818 | 4.65 | 4.930 ± 0.652 | 2.83 |

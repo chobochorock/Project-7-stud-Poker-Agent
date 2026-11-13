@@ -383,15 +383,16 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
 int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>& starts, const std::vector<pp::Sample>& xs,
                          const std::vector<pp::Dir>& ds, int32_t cur_level, size_t cap, uint64_t salt, std::ostream* plog,
                          uint64_t epoch, uint64_t* top) {
-    struct Item { int round; int32_t leaf; uint32_t source; std::vector<int> idx; double gain; pp::Candidate cand; };
+    // src_n: the judged samples of the leaf this judgment started from (the share of --inherit-share is taken of them)
+    struct Item { int round; int32_t leaf; uint32_t source; std::vector<int> idx; double gain; pp::Candidate cand; size_t src_n; };
     std::unordered_map<int, pp::Stream> streams;
     auto stream_of = [&](int i) -> const pp::Stream& {
         auto it = streams.find(i);
         if (it == streams.end()) it = streams.emplace(i, pp::make_stream(pp_view_state(xs[i]), xs[i].seat)).first;
         return it->second;
     };
-    auto evaluate = [&](int round, int32_t leaf, uint32_t source, std::vector<int> id) {
-        Item it{round, leaf, source, std::move(id), 0, {}};
+    auto evaluate = [&](int round, int32_t leaf, uint32_t source, std::vector<int> id, size_t src_n) {
+        Item it{round, leaf, source, std::move(id), 0, {}, src_n};
         std::set<int> labels;
         for (int i : it.idx) labels.insert(ds[i].label);
         if (labels.size() < 2) return it;
@@ -418,7 +419,7 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
         return a.leaf > b.leaf;
     };
     std::priority_queue<Item, std::vector<Item>, decltype(cmp)> q(cmp);
-    for (const auto& [l, idx] : starts) q.push(evaluate(0, l, pp_->ancestor(pp_->leaves[l].ptr, cur_level, parent_), idx));
+    for (const auto& [l, idx] : starts) q.push(evaluate(0, l, pp_->ancestor(pp_->leaves[l].ptr, cur_level, parent_), idx, idx.size()));
     int made = 0;
     while (!q.empty()) {
         Item it = q.top(); q.pop();
@@ -433,9 +434,12 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
         std::array<int32_t, 2> nl{};
         for (int side = 0; side < 2; ++side) {
             const uint32_t kid = new_bucket(parent_bucket);
+            // --inherit-share: the source leaf's tables are divided among the new leaves in proportion to its judged
+            // samples (visit-distributed), so the leaves of one source inherit its mass once, not once each
+            const double share = pp_->opt.inherit_share ? static_cast<double>(part[side].size()) / static_cast<double>(it.src_n) : 1.0;
             for (int a = 0; a < A; ++a) {
-                buckets_[kid].q[a] = pp_->opt.inherit_regret * buckets_[it.source].q[a];
-                buckets_[kid].s[a] = pp_->opt.inherit_avg * buckets_[it.source].s[a];
+                buckets_[kid].q[a] = pp_->opt.inherit_regret * share * buckets_[it.source].q[a];
+                buckets_[kid].s[a] = pp_->opt.inherit_avg * share * buckets_[it.source].s[a];
             }
             pp::TNode n; n.leaf = static_cast<int32_t>(pp_->leaves.size());
             const int32_t nn = static_cast<int32_t>(pp_->nodes.size());
@@ -452,7 +456,7 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
                         << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
-        for (int side = 0; side < 2; ++side) q.push(evaluate(it.round + 1, nl[side], it.source, part[side]));
+        for (int side = 0; side < 2; ++side) q.push(evaluate(it.round + 1, nl[side], it.source, part[side], it.src_n));
     }
     return made;
 }

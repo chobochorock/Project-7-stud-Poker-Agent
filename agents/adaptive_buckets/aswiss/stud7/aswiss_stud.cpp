@@ -1916,7 +1916,7 @@ int train(int argc, char** argv) {
                                 {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
-                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"},
+                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"},
                                 {"--pp-structure", "pp"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
@@ -1980,6 +1980,7 @@ int train(int argc, char** argv) {
         ppo.judge_mem_mb = std::stod(o["--judge-mem-mb"]); ppo.mem_budget_mb = std::stod(o["--mem-budget-mb"]);
         ppo.threads = threads; ppo.online_split = o["--online-lbr-schedule"] == "split";
         ppo.inherit_regret = std::stod(o["--inherit-regret"]); ppo.inherit_avg = std::stod(o["--inherit-avg"]);
+        ppo.inherit_share = o["--inherit-share"] == "1";
         // --pp-structure tree: strategies live on the prior leaves themselves; a leaf whose judged samples carry two or
         // more labels is split by tests on those samples. No posterior layer: no pointers, pending leaves or routes.
         ppo.tree = o["--pp-structure"] == "tree";
@@ -1987,6 +1988,8 @@ int train(int argc, char** argv) {
             if (ppo.fill) throw std::runtime_error("--pp-structure tree has no pending leaves: it does not take --pp-assign fill");
             ppo.root_start = false;  // nothing is routed
         }
+        if (ppo.inherit_share && (!ppo.tree || (ppo.inherit_regret == 0 && ppo.inherit_avg == 0)))
+            throw std::runtime_error("--inherit-share 1 needs --pp-structure tree and --inherit-regret or --inherit-avg > 0");
         if (ppo.inherit_regret < 0 || ppo.inherit_regret > 1 || ppo.inherit_avg < 0 || ppo.inherit_avg > 1)
             throw std::runtime_error("--inherit-regret and --inherit-avg must be in [0, 1] (spec: a child's start may not exceed its parent)");
         if (ppo.particles < 1 || ppo.n0 < 2 || ppo.n_min < 2 || ppo.m < 1 || ppo.rho < ppo.m || ppo.min_leaf < 1)
@@ -2038,7 +2041,7 @@ int train(int argc, char** argv) {
                           ";online_schedule=" + o["--online-lbr-schedule"] +
                           (ppo.inherit_regret > 0 || ppo.inherit_avg > 0 ? ";inherit_regret=" + o["--inherit-regret"] + ";inherit_avg=" + o["--inherit-avg"]
                                                                           : std::string()) +
-                          (ppo.tree ? ";pp_structure=tree" : "") : std::string());
+                          (ppo.tree ? ";pp_structure=tree" : "") + (ppo.inherit_share ? ";inherit_share=1" : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

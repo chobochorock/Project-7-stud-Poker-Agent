@@ -2,7 +2,8 @@
 
 Usage (from this folder; BINARY is aswiss_stud built from this folder's aswiss_stud.cpp):
   python tree_pilot.py BINARY OUT_DIR [--arms tree k256 ...] [--roots 255000] [--seeds 1 ...] [--workers 4]
-                       [--min-roots 63000] [--pairs 2000] [--particles 64] [--baseline k256]   # start in the background
+                       [--min-roots 63000] [--pairs 2000] [--particles 64] [--baseline k256] [--epoch-growth 2]
+                                                                                      # start in the background
   python tree_pilot.py BINARY OUT_DIR --status   # progress of every run in OUT_DIR
   python tree_pilot.py BINARY OUT_DIR --table    # the table of what has been evaluated so far
   python tree_pilot.py BINARY OUT_DIR --plot     # the figure of the same: OUT_DIR/pilot.png (also written when a run ends)
@@ -17,6 +18,10 @@ Every arm is one process: `BINARY train ARGS --seed S --roots R --out OUT_DIR/AR
 Evaluation is evaluate.py with --kinds epoch: only snapshot_K.bin, which the trainer writes at an epoch end BEFORE
 that epoch's judgment (the partition and tables used during the epoch). The same LBR deals, LBR seed and particles for
 every arm. Snapshot K is at 1000 * (2^(K+1) - 1) roots: 63,000 (K=5), 127,000, 255,000, 511,000, 1,023,000, 2,047,000.
+--epoch-growth G (default 2): every arm's next epoch is G times as long, so the pp arms are judged (split) at
+1000 * (G^(K+1) - 1) / (G - 1) roots and the k-means arms have their snapshots at the same roots. G = 4: 1,000, 5,000,
+21,000, 85,000, 341,000, 1,365,000, 5,461,000, 21,845,000; G = 10: 1,000, 11,000, 111,000, 1,111,000, 11,111,000.
+Use --roots at one of them, and a separate OUT_DIR for each G (a run cannot be resumed with another G).
 The table gives the Policy-LBR of the average and of the current policy (ante, +- standard error) and its ratio to the
 baseline arm of the same training seed at the same roots. LBR is not exploitability.
 The k-means arms use the atlases in atlas/ (K = 8, 32, 64 have about as many tables as the tree at 255,000 /
@@ -46,7 +51,11 @@ ARMS = {
     "tree_frz": ("tree (default), splits frozen after 127,000 roots", "pp", "", TREE + ["--freeze-splits-at", "255000"]),
     "tree_ml8_poker_frz": ("tree, min-leaf 8 + poker, splits frozen after 127,000 roots", "pp", "",
                            TREE + ["--min-leaf", "8", "--features", "poker", "--freeze-splits-at", "255000"]),
-    "pp": ("prior-posterior (root start)", "pp", "", []),
+    "pp": ("prior-posterior (root start, restart)", "pp", "", []),
+    "pp_full": ("prior-posterior (root start), inherit regret 1 + avg 1", "pp", "", ["--inherit-regret", "1", "--inherit-avg", "1"]),
+    "pp_parent": ("prior-posterior (parent start, restart)", "pp", "", ["--leaf-start", "parent"]),
+    "pp_parent_full": ("prior-posterior (parent start), inherit regret 1 + avg 1", "pp", "",
+                       ["--leaf-start", "parent", "--inherit-regret", "1", "--inherit-avg", "1"]),
     "ctx": ("context (no cards)", "context", "", ["--epoch0", "1000"]),
 }
 for _k in (8, 32, 64, 256):
@@ -62,6 +71,7 @@ ap.add_argument("--workers", type=int, default=4)
 ap.add_argument("--min-roots", type=int, default=63000, help="evaluate epoch snapshots from this many roots")
 ap.add_argument("--pairs", type=int, default=2000); ap.add_argument("--particles", type=int, default=64)
 ap.add_argument("--baseline", default="k256")
+ap.add_argument("--epoch-growth", type=int, default=2, help="every arm's next epoch is this many times as long")
 mode = ap.add_mutually_exclusive_group()
 mode.add_argument("--foreground", action="store_true", help="run in this window (the default starts a background process)")
 mode.add_argument("--status", action="store_true"); mode.add_argument("--stop", action="store_true")
@@ -115,6 +125,7 @@ def train(run):
     if any(int(r["roots"]) == a.roots for r in epoch_rows(name)): return f"{name}: already at {a.roots:,} roots"
     _, partition, atlas, extra = ARMS[arm]
     cmd = [a.binary, "train", "--partition", partition] + (["--atlas", atlas] if atlas else []) + extra + \
+          (["--epoch-growth", str(a.epoch_growth)] if a.epoch_growth != 2 else []) + \
           ["--seed", str(seed), "--roots", str(a.roots), "--out", os.path.join(a.out, name), "--curve-every", "5000"]
     with open(os.path.join(a.out, name + ".log"), "a") as log:
         log.write(" ".join(cmd) + "\n"); log.flush()
@@ -153,6 +164,7 @@ STYLE = {"tree": ("#2a78d6", "-"), "tree_frz": ("#eb6834", "-"), "tree_inh11": (
          "tree_poker": ("#e87ba4", "-"), "tree_ml8_poker_b1": ("#008300", "-"), "tree_inh051": ("#6250d6", "-"), "pp": ("#e34948", "-"),
          "tree_cf": ("#2a78d6", ":"), "tree_ml8_poker_frz": ("#eb6834", ":"), "tree_inh01": ("#6250d6", ":"),
          "tree_ml8_poker": ("#eda100", ":"), "ctx": ("#a3a29c", ":"),
+         "pp_full": ("#008300", ":"), "pp_parent": ("#e34948", ":"), "pp_parent_full": ("#e87ba4", ":"),
          "k8": ("#a3a29c", "--"), "k32": ("#7d7c77", "--"), "k64": ("#52514e", "--"), "k256": ("#0b0b0b", "--")}
 
 
@@ -256,7 +268,8 @@ elif not a.foreground:
     if pid: sys.exit(f"a background run is already working in {a.out} (pid {pid}); see --status. If it is not, delete {PID}")
     cmd = [sys.executable, "-u", os.path.abspath(__file__), os.path.abspath(a.binary), a.out, "--foreground",
            "--arms", *(given or ["tree", "k256"]), "--seeds", *map(str, a.seeds or [1]), "--roots", str(a.roots), "--workers", str(a.workers),
-           "--min-roots", str(a.min_roots), "--pairs", str(a.pairs), "--particles", str(a.particles), "--baseline", a.baseline]
+           "--min-roots", str(a.min_roots), "--pairs", str(a.pairs), "--particles", str(a.particles), "--baseline", a.baseline,
+           "--epoch-growth", str(a.epoch_growth)]
     kw = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" \
         else {"start_new_session": True}
     with open(LOG, "a") as log:

@@ -487,10 +487,13 @@ void Model::pp_finalize_fill(int32_t l, bool at_judgment) {
     while (std::getline(in, line)) pp_->split_rows.push_back(line);
 }
 
+// split schedule: every G^i roots after the i-th split event (G = --epoch-growth, 2 by default), so that an epoch of
+// epoch0 * G^k roots has about epoch0 evaluations whatever G is
 bool Model::pp_online_due(uint64_t t) const {
-    const int i = std::min<int>(pp_->level, 62);
     if (t <= pp_->last_split_root) return false;
-    return (t - pp_->last_split_root) % (1ull << i) == 0;
+    uint64_t every = 1;
+    for (int i = 0; i < pp_->level && every <= (1ull << 62) / pp_->opt.epoch_growth; ++i) every *= pp_->opt.epoch_growth;
+    return (t - pp_->last_split_root) % every == 0;
 }
 
 double Model::traverse_pp(State state, int traverser, double weight, std::mt19937_64& rng) {

@@ -17,6 +17,7 @@ struct Opts {
     bool inherit_share = false;  // --inherit-share 1 (tree): times the child's share of the source leaf's judged samples
     int threads = 1;
     bool online_split = false;   // --online-lbr-schedule split
+    uint64_t epoch_growth = 2;   // --epoch-growth G: the next epoch is G times as long (the split schedule's interval is G^i)
     bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)
 };
 

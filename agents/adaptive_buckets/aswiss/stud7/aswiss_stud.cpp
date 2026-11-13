@@ -1916,10 +1916,17 @@ int train(int argc, char** argv) {
                                 {"--pp-pass-frac", "0.125"}, {"--pp-budget", "0.25"}, {"--pp-budget-min-steps", "2000000"},
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
-                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"},
+                                {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"}, {"--epoch-growth", "2"},
                                 {"--pp-structure", "pp"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
+    // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
+    // roots. For pp (fewer, cheaper judgments; tables at most double per judgment) and for atom / context, which have
+    // no judgments (the same snapshot roots as a pp run with that G).
+    const uint64_t epoch_growth = std::stoull(o["--epoch-growth"]);
+    if (epoch_growth < 2 || epoch_growth > 1000) throw std::runtime_error("--epoch-growth must be 2 to 1000");
+    if (epoch_growth != 2 && partition != Partition::PP && partition != Partition::Atom && partition != Partition::Context)
+        throw std::runtime_error("--epoch-growth other than 2 is for --partition pp, atom or context");
     const auto atlas = load_atlas(o["--atlas"], std::stoull(o["--power-cache"]));
     if (o["--h4"] != "heuristic" && o["--h4"] != "learn") throw std::runtime_error("--h4 must be heuristic or learn");
     const bool learn_h4 = o["--h4"] == "learn";
@@ -1979,6 +1986,7 @@ int train(int argc, char** argv) {
         ppo.budget = std::stod(o["--pp-budget"]); ppo.budget_min_steps = std::stod(o["--pp-budget-min-steps"]);
         ppo.judge_mem_mb = std::stod(o["--judge-mem-mb"]); ppo.mem_budget_mb = std::stod(o["--mem-budget-mb"]);
         ppo.threads = threads; ppo.online_split = o["--online-lbr-schedule"] == "split";
+        ppo.epoch_growth = epoch_growth;
         ppo.inherit_regret = std::stod(o["--inherit-regret"]); ppo.inherit_avg = std::stod(o["--inherit-avg"]);
         ppo.inherit_share = o["--inherit-share"] == "1";
         // --pp-structure tree: strategies live on the prior leaves themselves; a leaf whose judged samples carry two or
@@ -2023,7 +2031,7 @@ int train(int argc, char** argv) {
     std::ostringstream cfg;
     cfg << "partition=" << o["--partition"] << ";atlas=" << std::filesystem::path(o["--atlas"]).filename().string() << ":"
         << file_size_or_zero(o["--atlas"]) << ";epoch0=" << epoch0 << ";z=" << o["--z"] << ";inherit=" << o["--inherit"]
-        << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "")
+        << ";seed=" << o["--seed"] << (learn_h4 ? ";h4=learn" : "") << (epoch_growth != 2 ? ";epoch_growth=" + o["--epoch-growth"] : "")
         << (label_rule != "window" ? ";label=" + label_rule + ";avg_frac=" + o["--avg-frac"] : "")
         << (partition == Partition::History ? ";history_cards=" + o["--history-cards"] : "")
         << (label_cap ? ";label_cap=" + o["--label-cap"] : "") << (backward ? ";backward=1;backward_min_visits=" + o["--backward-min-visits"] + ";backward_max_subkeys=" +
@@ -2410,7 +2418,7 @@ int train(int argc, char** argv) {
             std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
                       << " splits=" << splits << (track && !judging(s.t) ? " (splits frozen)" : "") << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
             if (log_regret && !gated) model.iterate_regret_half(true);  // the next epoch's window (gated: reset at judgments)
-            s.epoch_start = s.t; ++s.k; s.L *= 2; epoch_end = schedule_end(std::min(T, s.t + s.L));
+            s.epoch_start = s.t; ++s.k; s.L *= epoch_growth; epoch_end = schedule_end(std::min(T, s.t + s.L));
         }
         if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();
         if (s.t % 1000 == 0 && std::filesystem::exists(stop_file)) g_stop = 1;

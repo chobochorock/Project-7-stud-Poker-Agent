@@ -367,7 +367,7 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
             q.push(evaluate(nl[side], part[side]));
         }
         if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
-                        << pp::desc_name(it.cand.d) << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
+                        << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << it.signal << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
     }
@@ -449,7 +449,7 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
         ++made; ++pp_->prior_splits;
         if (it.round == 0 && top) ++*top;
         if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
-                        << pp::desc_name(it.cand.d) << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
+                        << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
         for (int side = 0; side < 2; ++side) q.push(evaluate(it.round + 1, nl[side], it.source, part[side]));

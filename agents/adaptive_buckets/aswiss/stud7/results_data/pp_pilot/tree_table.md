@@ -26,6 +26,20 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 63,000 | 288 | 47 | missing |  | missing |  |
 | tree, inherit regret 0.5 + avg 1 | 63,000 | 288 | 41 | missing |  | missing |  |
 | tree, inherit regret 1 + avg 1 | 63,000 | 288 | 33 | 3.129 ± 0.314 | 0.93 | 3.438 ± 0.305 | 1.37 |
+| tree, inherit regret 0.5 + avg 0.5 | 63,000 | 288 | 48 | missing |  | missing |  |
+| tree, inherit regret 0.5 + avg 0.5, training seed 2 | 63,000 | 288 | 39 | missing |  | missing |  |
+| tree, inherit by sample share (regret 1, avg 1, --inherit-share 1) | 63,000 | 288 | 46 | missing |  | missing |  |
+| tree, inherit by sample share, training seed 2 | 63,000 | 288 | 35 | missing |  | missing |  |
+| tree, inherit regret 1 + avg 0 | 63,000 | 288 | 36 | missing |  | missing |  |
+| tree, inherit regret 1 + avg 0.5 | 63,000 | 288 | 35 | missing |  | missing |  |
+| tree, full inheritance, splits frozen after 127,000 roots | 63,000 | 288 | 31 | missing |  | missing |  |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 63,000 | 288 | 37 | missing |  | missing |  |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 63,000 | 288 | 31 | missing |  | missing |  |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 63,000 | 288 | 37 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0 | 63,000 | 288 | 35 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 2 | 63,000 | 288 | 41 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 3 | 63,000 | 288 | 50 | missing |  | missing |  |
+| tree, full inheritance, judgment budget 1.0, training seed 2 | 63,000 | 288 | 38 | missing |  | missing |  |
 | tree (default), training seed 2 | 63,000 | 288 | 43 | missing |  | missing |  |
 | tree (default), training seed 3 | 63,000 | 288 | 44 | missing |  | missing |  |
 | tree, min-leaf 8, training seed 2 | 63,000 | 288 | 45 | missing |  | missing |  |
@@ -59,6 +73,20 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 127,000 | 576 | 86 | missing |  | missing |  |
 | tree, inherit regret 0.5 + avg 1 | 127,000 | 576 | 76 | missing |  | missing |  |
 | tree, inherit regret 1 + avg 1 | 127,000 | 576 | 52 | 2.897 ± 0.272 | 1.41 | 2.625 ± 0.264 | 1.21 |
+| tree, inherit regret 0.5 + avg 0.5 | 127,000 | 576 | 91 | missing |  | missing |  |
+| tree, inherit regret 0.5 + avg 0.5, training seed 2 | 127,000 | 576 | 65 | missing |  | missing |  |
+| tree, inherit by sample share (regret 1, avg 1, --inherit-share 1) | 127,000 | 576 | 91 | missing |  | missing |  |
+| tree, inherit by sample share, training seed 2 | 127,000 | 576 | 59 | missing |  | missing |  |
+| tree, inherit regret 1 + avg 0 | 127,000 | 576 | 59 | missing |  | missing |  |
+| tree, inherit regret 1 + avg 0.5 | 127,000 | 576 | 54 | missing |  | missing |  |
+| tree, full inheritance, splits frozen after 127,000 roots | 127,000 | 576 | 48 | missing |  | missing |  |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 127,000 | 576 | 70 | missing |  | missing |  |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 127,000 | 576 | 48 | missing |  | missing |  |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 127,000 | 576 | 70 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0 | 127,000 | 576 | 80 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 2 | 127,000 | 576 | 82 | missing |  | missing |  |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 3 | 127,000 | 576 | 104 | missing |  | missing |  |
+| tree, full inheritance, judgment budget 1.0, training seed 2 | 127,000 | 576 | 73 | missing |  | missing |  |
 | tree (default), training seed 2 | 127,000 | 576 | 76 | missing |  | missing |  |
 | tree (default), training seed 3 | 127,000 | 576 | 78 | missing |  | missing |  |
 | tree, min-leaf 8, training seed 2 | 127,000 | 576 | 80 | missing |  | missing |  |
@@ -92,6 +120,20 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 255,000 | 1,152 | 163 | 7.308 ± 1.073 | 5.48 | 6.806 ± 0.948 | 4.66 |
 | tree, inherit regret 0.5 + avg 1 | 255,000 | 1,152 | 150 | 6.268 ± 0.848 | 4.70 | 5.655 ± 0.723 | 3.87 |
 | tree, inherit regret 1 + avg 1 | 255,000 | 1,152 | 91 | 2.827 ± 0.270 | 2.12 | 2.303 ± 0.250 | 1.58 |
+| tree, inherit regret 0.5 + avg 0.5 | 255,000 | 1,152 | 172 | 9.347 ± 1.140 | 7.01 | 8.704 ± 0.984 | 5.96 |
+| tree, inherit regret 0.5 + avg 0.5, training seed 2 | 255,000 | 1,152 | 123 | 5.120 ± 0.688 | 3.55 | 5.419 ± 0.746 | 3.29 |
+| tree, inherit by sample share (regret 1, avg 1, --inherit-share 1) | 255,000 | 1,152 | 174 | 4.295 ± 0.745 | 3.22 | 6.640 ± 0.939 | 4.55 |
+| tree, inherit by sample share, training seed 2 | 255,000 | 1,152 | 114 | 6.088 ± 0.794 | 4.22 | 5.382 ± 0.681 | 3.27 |
+| tree, inherit regret 1 + avg 0 | 255,000 | 1,152 | 107 | 3.765 ± 0.397 | 2.82 | 3.154 ± 0.320 | 2.16 |
+| tree, inherit regret 1 + avg 0.5 | 255,000 | 1,152 | 92 | 3.913 ± 0.358 | 2.93 | 3.887 ± 0.429 | 2.66 |
+| tree, full inheritance, splits frozen after 127,000 roots | 255,000 | 1,152 | 83 | 2.827 ± 0.270 | 2.12 | 2.303 ± 0.250 | 1.58 |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 255,000 | 1,152 | 129 | 4.902 ± 0.513 | 3.40 | 5.100 ± 0.576 | 3.10 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 255,000 | 1,152 | 84 | 2.827 ± 0.270 | 2.12 | 2.303 ± 0.250 | 1.58 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 255,000 | 1,152 | 130 | 4.902 ± 0.513 | 3.40 | 5.100 ± 0.576 | 3.10 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0 | 255,000 | 1,152 | 194 | 4.079 ± 0.501 | 3.06 | 2.899 ± 0.454 | 1.98 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 2 | 255,000 | 1,152 | 173 | 3.549 ± 0.528 | 2.46 | 4.499 ± 0.436 | 2.73 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 3 | 255,000 | 1,152 | 222 | 5.918 ± 0.817 | 3.22 | 5.308 ± 0.514 | 4.65 |
+| tree, full inheritance, judgment budget 1.0, training seed 2 | 255,000 | 1,152 | 151 | 4.173 ± 0.474 | 2.89 | 5.377 ± 0.693 | 3.26 |
 | tree (default), training seed 2 | 255,000 | 1,152 | 148 | 7.047 ± 1.066 | 4.89 | 6.759 ± 0.757 | 4.10 |
 | tree (default), training seed 3 | 255,000 | 1,152 | 148 | 4.898 ± 0.668 | 2.67 | 4.361 ± 0.518 | 3.82 |
 | tree, min-leaf 8, training seed 2 | 255,000 | 1,152 | 156 | 7.346 ± 0.895 | 5.10 | 5.665 ± 0.653 | 3.44 |
@@ -118,6 +160,20 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 511,000 | 1,152 | 268 | 5.101 ± 0.937 | 3.37 | 5.371 ± 0.856 | 3.08 |
 | tree, inherit regret 0.5 + avg 1 | 511,000 | 2,304 | 291 | 4.939 ± 0.861 | 3.26 | 4.737 ± 0.845 | 2.72 |
 | tree, inherit regret 1 + avg 1 | 511,000 | 2,304 | 168 | 2.869 ± 0.252 | 1.89 | 2.886 ± 0.251 | 1.66 |
+| tree, inherit regret 0.5 + avg 0.5 | 511,000 | 2,304 | 340 | 9.927 ± 1.081 | 6.56 | 9.814 ± 1.043 | 5.63 |
+| tree, inherit regret 0.5 + avg 0.5, training seed 2 | 511,000 | 2,304 | 245 | 4.032 ± 0.575 | 4.99 | 3.494 ± 0.460 | 2.35 |
+| tree, inherit by sample share (regret 1, avg 1, --inherit-share 1) | 511,000 | 2,304 | 353 | 7.333 ± 0.994 | 4.84 | 6.657 ± 0.938 | 3.82 |
+| tree, inherit by sample share, training seed 2 | 511,000 | 2,304 | 226 | 6.677 ± 0.812 | 8.26 | 5.637 ± 0.646 | 3.79 |
+| tree, inherit regret 1 + avg 0 | 511,000 | 2,304 | 204 | 3.264 ± 0.393 | 2.16 | 2.747 ± 0.419 | 1.58 |
+| tree, inherit regret 1 + avg 0.5 | 511,000 | 2,304 | 178 | 3.835 ± 0.376 | 2.53 | 3.316 ± 0.356 | 1.90 |
+| tree, full inheritance, splits frozen after 127,000 roots | 511,000 | 1,152 | 131 | 2.430 ± 0.226 | 1.60 | 2.134 ± 0.217 | 1.22 |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 511,000 | 1,152 | 219 | 5.158 ± 0.496 | 6.38 | 4.456 ± 0.383 | 3.00 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 511,000 | 1,152 | 131 | 2.430 ± 0.226 | 1.60 | 2.134 ± 0.217 | 1.22 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 511,000 | 1,152 | 220 | 5.158 ± 0.496 | 6.38 | 4.456 ± 0.383 | 3.00 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0 | 511,000 | 2,304 | 409 | 3.385 ± 0.376 | 2.24 | 4.124 ± 0.353 | 2.37 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 2 | 511,000 | 2,304 | 362 | 3.480 ± 0.438 | 4.30 | 3.984 ± 0.545 | 2.68 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 3 | 511,000 | 2,304 | 448 | 7.079 ± 0.694 | 7.34 | 4.885 ± 0.683 | 3.12 |
+| tree, full inheritance, judgment budget 1.0, training seed 2 | 511,000 | 2,304 | 310 | 5.463 ± 0.591 | 6.76 | 5.163 ± 0.572 | 3.47 |
 | k-means 8 (matched table count) | 511,000 | 1,166 | 231 | missing |  | missing |  |
 | k-means 32 (matched table count) | 511,000 | 4,627 | 236 | missing |  | missing |  |
 | k-means 64 (matched table count) | 511,000 | 9,200 | 245 | missing |  | missing |  |
@@ -132,6 +188,20 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 1,023,000 | 1,152 | 482 | 6.088 ± 0.841 | 4.66 | 4.366 ± 0.545 | 2.91 |
 | tree, inherit regret 0.5 + avg 1 | 1,023,000 | 4,608 | 609 | 6.646 ± 1.077 | 5.09 | 7.434 ± 0.986 | 4.95 |
 | tree, inherit regret 1 + avg 1 | 1,023,000 | 4,608 | 331 | 2.635 ± 0.253 | 2.02 | 2.267 ± 0.259 | 1.51 |
+| tree, inherit regret 0.5 + avg 0.5 | 1,023,000 | 4,608 | 722 | 8.426 ± 1.035 | 6.45 | 7.644 ± 0.994 | 5.09 |
+| tree, inherit regret 0.5 + avg 0.5, training seed 2 | 1,023,000 | 4,608 | 498 | 4.632 ± 0.592 | 3.55 | 3.613 ± 0.408 | 2.25 |
+| tree, inherit by sample share (regret 1, avg 1, --inherit-share 1) | 1,023,000 | 4,608 | 741 | 6.093 ± 0.927 | 4.67 | 5.383 ± 0.891 | 3.58 |
+| tree, inherit by sample share, training seed 2 | 1,023,000 | 4,608 | 475 | 6.093 ± 0.715 | 4.68 | 6.291 ± 0.704 | 3.92 |
+| tree, inherit regret 1 + avg 0 | 1,023,000 | 4,608 | 418 | 3.983 ± 0.541 | 3.05 | 3.884 ± 0.777 | 2.59 |
+| tree, inherit regret 1 + avg 0.5 | 1,023,000 | 4,608 | 362 | 3.790 ± 0.383 | 2.90 | 3.896 ± 0.381 | 2.59 |
+| tree, full inheritance, splits frozen after 127,000 roots | 1,023,000 | 1,152 | 227 | 2.615 ± 0.239 | 2.00 | 2.632 ± 0.335 | 1.75 |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 1,023,000 | 1,152 | 371 | 5.486 ± 0.556 | 4.21 | 5.789 ± 0.591 | 3.61 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 1,023,000 | 2,304 | 295 | 2.646 ± 0.240 | 2.03 | 2.583 ± 0.236 | 1.72 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 1,023,000 | 2,304 | 501 | 6.669 ± 0.649 | 5.12 | 6.772 ± 0.739 | 4.22 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0 | 1,023,000 | 4,608 | 856 | 4.663 ± 0.453 | 3.57 | 4.786 ± 0.624 | 3.19 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 2 | 1,023,000 | 4,608 | 765 | 3.778 ± 0.489 | 2.90 | 3.803 ± 0.698 | 2.37 |
+| tree, full inheritance, min-leaf 8 + poker, judgment budget 1.0, training seed 3 | 1,023,000 | 4,608 | 906 | 5.698 ± 0.626 | 4.98 | 5.218 ± 0.611 | 2.82 |
+| tree, full inheritance, judgment budget 1.0, training seed 2 | 1,023,000 | 4,608 | 636 | 6.167 ± 0.597 | 4.73 | 6.478 ± 0.811 | 4.04 |
 | k-means 8 (matched table count) | 1,023,000 | 1,167 | 439 | 2.180 ± 0.169 | 1.67 | 2.295 ± 0.178 | 1.53 |
 | k-means 32 (matched table count) | 1,023,000 | 4,643 | 445 | 1.694 ± 0.182 | 1.30 | 1.420 ± 0.135 | 0.95 |
 | k-means 64 (matched table count) | 1,023,000 | 9,246 | 461 | 1.588 ± 0.158 | 1.22 | 1.509 ± 0.194 | 1.01 |
@@ -142,12 +212,16 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | tree, min-leaf 8 + poker, splits frozen after 127,000 roots | 2,047,000 | 1,152 | 822 | 5.617 ± 0.794 | 3.77 | 4.486 ± 0.734 | 2.42 |
 | tree, inherit regret 0.5 + avg 1 | 2,047,000 | 9,216 | 1265 | 6.352 ± 0.834 | 4.26 | 5.513 ± 0.627 | 2.97 |
 | tree, inherit regret 1 + avg 1 | 2,047,000 | 9,216 | 671 | 2.849 ± 0.363 | 1.91 | 2.411 ± 0.300 | 1.30 |
+| tree, full inheritance, splits frozen after 127,000 roots | 2,047,000 | 1,152 | 428 | 2.719 ± 0.339 | 1.82 | 2.225 ± 0.218 | 1.20 |
+| tree, full inheritance, splits frozen after 127,000 roots, training seed 2 | 2,047,000 | 1,152 | 658 | 4.302 ± 0.456 | 2.92 | 3.697 ± 0.415 | 2.33 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000 | 2,047,000 | 2,304 | 508 | 2.782 ± 0.319 | 1.87 | 2.397 ± 0.220 | 1.29 |
+| tree, full inheritance, frozen after 127,000 roots + one judgment at 511,000, training seed 2 | 2,047,000 | 2,304 | 770 | 5.413 ± 0.656 | 3.68 | 3.818 ± 0.424 | 2.41 |
 | k-means 8 (matched table count) | 2,047,000 | 1,168 | 853 | 1.984 ± 0.171 | 1.33 | 2.814 ± 0.306 | 1.52 |
 | k-means 32 (matched table count) | 2,047,000 | 4,653 | 855 | 1.445 ± 0.208 | 0.97 | 1.319 ± 0.277 | 0.71 |
 | k-means 64 (matched table count) | 2,047,000 | 9,278 | 884 | 1.395 ± 0.297 | 0.94 | 1.490 ± 0.272 | 0.80 |
 | k-means 256 (baseline) | 2,047,000 | 36,649 | 1011 | 1.491 ± 0.209 | 1.00 | 1.855 ± 0.260 | 1.00 |
 
-## Training seeds 2 and 3 to 1,023,000 roots (tree_pilot.py)
+## Training seeds 2 and 3 (tree_pilot.py; seed 2 of tree_inh11 and k256 to 2,047,000 roots)
 
 | arm | seed | roots | tables | training CPU s | LBR average policy (+- se) | ratio to k256 | LBR current policy (+- se) | ratio to k256 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -175,3 +249,5 @@ Policy-LBR in ante, 2,000 pairs, 64 particles, the same deals and LBR seed for e
 | k-means 8 | 3 | 1,023,000 | 1,166 | 440 | 2.215 +- 0.193 | 1.94 | 1.779 +- 0.177 | 0.96 |
 | k-means 32 | 3 | 1,023,000 | 4,637 | 445 | 1.466 +- 0.230 | 1.28 | 1.453 +- 0.180 | 0.78 |
 | k-means 256 | 3 | 1,023,000 | 36,370 | 501 | 1.145 +- 0.245 | 1.00 | 1.852 +- 0.235 | 1.00 |
+| tree, inherit regret 1 + avg 1 | 2 | 2,047,000 | 9,216 | 957 | 4.405 +- 0.431 | 2.99 | 3.510 +- 0.349 | 2.21 |
+| k-means 256 | 2 | 2,047,000 | 36,652 | 989 | 1.471 +- 0.203 | 1.00 | 1.586 +- 0.242 | 1.00 |

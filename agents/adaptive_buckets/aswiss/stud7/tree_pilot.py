@@ -5,6 +5,7 @@ Usage (from this folder; BINARY is aswiss_stud built from this folder's aswiss_s
                        [--min-roots 63000] [--pairs 2000] [--particles 64] [--baseline k256]   # start in the background
   python tree_pilot.py BINARY OUT_DIR --status   # progress of every run in OUT_DIR
   python tree_pilot.py BINARY OUT_DIR --table    # the table of what has been evaluated so far
+  python tree_pilot.py BINARY OUT_DIR --plot     # the figure of the same: OUT_DIR/pilot.png (also written when a run ends)
   python tree_pilot.py BINARY OUT_DIR --stop     # training processes save a checkpoint and exit; no evaluation starts
 
 Starting returns at once: the work runs in a background process (no window) that writes OUT_DIR/pilot.log, so the
@@ -20,7 +21,9 @@ The table gives the Policy-LBR of the average and of the current policy (ante, +
 baseline arm of the same training seed at the same roots. LBR is not exploitability.
 The k-means arms use the atlases in atlas/ (K = 8, 32, 64 have about as many tables as the tree at 255,000 /
 1,023,000 / 2,047,000 roots; K = 256 is the standing baseline) and --epoch0 1000, the pp arms' epoch schedule.
---status, --table and --stop cover every run found in OUT_DIR (only the --arms / --seeds given, if any).
+The figure (needs matplotlib) has the LBR against the training roots, log-log, and under it the ratio to the baseline
+of the same seed, for the average and the current policy; a run of another training seed has open markers.
+--status, --table, --plot and --stop cover every run found in OUT_DIR (only the --arms / --seeds given, if any).
 """
 import argparse, csv, json, os, re, subprocess, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -63,13 +66,14 @@ mode = ap.add_mutually_exclusive_group()
 mode.add_argument("--foreground", action="store_true", help="run in this window (the default starts a background process)")
 mode.add_argument("--status", action="store_true"); mode.add_argument("--stop", action="store_true")
 mode.add_argument("--table", "--table-only", action="store_true", dest="table")
+mode.add_argument("--plot", action="store_true")
 a = ap.parse_args()
 given = [x for arm in a.arms or [] for x in arm.split(",") if x]
 for arm in given + [a.baseline]:
     if arm not in ARMS: sys.exit(f"unknown arm {arm}; arms: {' '.join(ARMS)}")
 os.makedirs(a.out, exist_ok=True)
 PID, LOG, STOP = (os.path.join(a.out, f) for f in ("pilot.pid", "pilot.log", "STOP_PILOT"))
-starting = not (a.status or a.stop or a.table)
+starting = not (a.status or a.stop or a.table or a.plot)
 if starting:
     runs = [(arm, s, f"{arm}_s{s}") for s in a.seeds or [1] for arm in given or ["tree", "k256"]]
 else:  # every run in OUT_DIR, narrowed by --arms / --seeds when given
@@ -128,7 +132,10 @@ def table():
     for roots in sorted({int(r["roots"]) for _, _, name in runs for r in epoch_rows(name) if int(r["roots"]) >= a.min_roots}):
         for arm, seed, name in runs:
             row = next((r for r in epoch_rows(name) if int(r["roots"]) == roots), None)
-            if row is None: continue  # this run has not reached these roots
+            if row is None:  # no snapshot at these roots: say so when the run ended before them
+                last = max((int(r["roots"]) for r in epoch_rows(name)), default=0)
+                if last < roots: print(f"| {ARMS[arm][0]} | {seed} | {roots:,} | | | no snapshot (run is at {last:,} roots) | | | |")
+                continue
             cells = []
             for policy in ("average", "current"):
                 e, b = ev[name].get((roots, policy)), ev[f"{a.baseline}_s{seed}"].get((roots, policy))
@@ -139,6 +146,85 @@ def table():
             cpu = row.get("train_cpu_seconds") or row["seconds"]
             print(f"| {ARMS[arm][0]} | {seed} | {roots:,} | {int(row['buckets']):,} | {float(cpu):.0f} | " + " | ".join(cells) + " |")
     sys.stdout.flush()
+
+
+# figure: a fixed colour and line style per arm (the k-means arms are one grey ramp, dashed: reference lines)
+STYLE = {"tree": ("#2a78d6", "-"), "tree_frz": ("#eb6834", "-"), "tree_inh11": ("#1baf7a", "-"), "tree_ml8": ("#eda100", "-"),
+         "tree_poker": ("#e87ba4", "-"), "tree_ml8_poker_b1": ("#008300", "-"), "tree_inh051": ("#6250d6", "-"), "pp": ("#e34948", "-"),
+         "tree_cf": ("#2a78d6", ":"), "tree_ml8_poker_frz": ("#eb6834", ":"), "tree_inh01": ("#6250d6", ":"),
+         "tree_ml8_poker": ("#eda100", ":"), "ctx": ("#a3a29c", ":"),
+         "k8": ("#a3a29c", "--"), "k32": ("#7d7c77", "--"), "k64": ("#52514e", "--"), "k256": ("#0b0b0b", "--")}
+
+
+def plot(path):
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("no figure: matplotlib is not installed (pip install matplotlib)"); return
+    ink, muted, grid, surface = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
+    ev = {name: evals(name) for _, _, name in runs}
+    for s in {s for _, s, _ in runs}: ev.setdefault(f"{a.baseline}_s{s}", evals(f"{a.baseline}_s{s}"))
+    roots_all = sorted({r for e in ev.values() for r, _ in e if r >= a.min_roots})
+    if not roots_all: print("no figure: nothing evaluated yet"); return
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8.2), sharex=True, sharey="row", facecolor=surface)
+    lo = None  # LBR values <= 0 cannot be drawn on a log axis: they are drawn at the bottom edge and marked
+    positive = [e["lbr_ante"] for d in ev.values() for e in d.values() if e["lbr_ante"] > 0]
+    floor = 0.5 * min(positive) if positive else 0.1
+    for col, policy in enumerate(("average", "current")):
+        top, bottom = axes[0][col], axes[1][col]
+        for arm, seed, name in runs:
+            color, style = STYLE.get(arm, ("#52514e", "-"))
+            pts = sorted((r, e["lbr_ante"], e["lbr_se"]) for (r, pol), e in ev[name].items() if pol == policy and r >= a.min_roots)
+            if not pts: continue
+            x = [q[0] for q in pts]; y = [q[1] if q[1] > 0 else floor for q in pts]
+            err = [[min(q[2], v - 0.999 * floor) if q[1] > 0 else 0 for q, v in zip(pts, y)], [q[2] for q in pts]]
+            first = seed == min(s for _, s, _ in runs)
+            kw = dict(color=color, linestyle=style, linewidth=2 if first else 1.2, marker="o", markersize=5.5,
+                      markerfacecolor=color if first else surface, markeredgecolor=surface if first else color,
+                      markeredgewidth=1 if first else 1.3)
+            top.errorbar(x, y, yerr=err, elinewidth=1, capsize=0, zorder=3 if first else 2,
+                         label=ARMS[arm][0] + (f", seed {seed}" if len({s for _, s, _ in runs}) > 1 else ""), **kw)
+            for q in pts:
+                if q[1] <= 0:
+                    lo = floor
+                    top.annotate("<= 0", (q[0], floor), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8, color=muted)
+            if arm == a.baseline: continue
+            base = ev[f"{a.baseline}_s{seed}"]
+            rat = [(r, v / base[(r, policy)]["lbr_ante"]) for r, v, _ in pts
+                   if (r, policy) in base and base[(r, policy)]["lbr_ante"] > 0 and v > 0]
+            if rat: bottom.plot([q[0] for q in rat], [q[1] for q in rat], **kw)
+        bottom.axhline(1, color=ink, linewidth=1, linestyle="--", zorder=1)
+        for ax in (top, bottom):
+            ax.set_facecolor(surface); ax.set_xscale("log"); ax.set_yscale("log")
+            ax.grid(True, which="major", color=grid, linewidth=0.8); ax.set_axisbelow(True)
+            for side in ("top", "right"): ax.spines[side].set_visible(False)
+            for side in ("left", "bottom"): ax.spines[side].set_color(grid)
+            ax.tick_params(colors=muted, length=0, which="both")
+        ticks = []  # a tick at every snapshot, dropping one that would sit on top of the next
+        for r in roots_all:
+            if ticks and r / ticks[-1] < 1.5: ticks.pop()
+            ticks.append(r)
+        bottom.set_xticks(ticks); bottom.minorticks_off()
+        bottom.set_xticklabels([f"{r / 1e6:.2f}M" if r >= 1e6 else f"{r // 1000}k" for r in ticks])
+        top.set_title(f"{policy} policy", color=ink, fontsize=12, loc="left")
+        bottom.set_xlabel("training roots (snapshot taken before that epoch's split)", color=muted)
+    from matplotlib.ticker import FuncFormatter, LogLocator, NullLocator
+    for ax in (axes[0][0], axes[1][0]):  # ticks at 1, 2, 3, 5 of every decade, written plainly
+        ax.yaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 3, 5))); ax.yaxis.set_minor_locator(NullLocator())
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
+    axes[0][0].set_ylabel("Policy-LBR (ante), lower is better", color=muted)
+    axes[1][0].set_ylabel(f"ratio to {ARMS[a.baseline][0]} (same seed)", color=muted)
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=min(4, max(1, len(labels))), frameon=False, fontsize=9.5, labelcolor=ink)
+    fig.suptitle("7-stud pilot: Policy-LBR against training roots, and its ratio to the baseline", color=ink, fontsize=12.5, x=0.01, y=0.985, ha="left")
+    fig.text(0.01, 0.94, f"+- 1 s.e.; the same LBR deals for every run. LBR is not exploitability."
+             + (" A value <= 0 is drawn at the bottom edge." if lo else ""), color=muted, fontsize=9)
+    rows_legend = (len(labels) + 3) // 4
+    fig.subplots_adjust(left=0.065, right=0.99, top=0.89, bottom=0.085 + 0.03 * rows_legend, wspace=0.04, hspace=0.1)
+    fig.savefig(path, dpi=160, facecolor=surface)
+    print("figure:", path)
 
 
 if a.status:
@@ -158,6 +244,8 @@ if a.status:
         print(f"  {name}: {at:,} roots, {tables} tables, {len(snaps)} epoch snapshots, {len(evals(name))} of {want} evaluations")
 elif a.table:
     table()
+elif a.plot:
+    plot(os.path.join(a.out, "pilot.png"))
 elif a.stop:
     open(STOP, "w").close()
     for _, _, name in runs: open(os.path.join(a.out, name, "STOP"), "w").close()
@@ -176,7 +264,8 @@ elif not a.foreground:
         p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **kw)
     here = f"python {os.path.basename(__file__)} {a.binary} {a.out}"
     print(f"started in the background (pid {p.pid}): {', '.join(name for _, _, name in runs)} to {a.roots:,} roots\n"
-          f"  progress: {here} --status\n  table:    {here} --table\n  stop:     {here} --stop\n  log:      {LOG}")
+          f"  progress: {here} --status\n  table:    {here} --table\n  figure:   {here} --plot\n"
+          f"  stop:     {here} --stop\n  log:      {LOG}")
 else:
     with open(PID, "w") as f: f.write(str(os.getpid()))
     if os.path.exists(STOP): os.remove(STOP)
@@ -190,6 +279,8 @@ else:
                         "--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", "2000"],
                        stdin=subprocess.DEVNULL, check=True)
         table()
+        try: plot(os.path.join(a.out, "pilot.png"))
+        except Exception as e: print("no figure:", e)
         print("finished", flush=True)
     finally:
         if os.path.exists(PID): os.remove(PID)

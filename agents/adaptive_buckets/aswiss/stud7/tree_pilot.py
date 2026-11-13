@@ -3,6 +3,7 @@
 Usage (from this folder; BINARY is aswiss_stud built from this folder's aswiss_stud.cpp):
   python tree_pilot.py BINARY OUT_DIR [--arms tree k256 ...] [--roots 255000] [--seeds 1 ...] [--workers 4]
                        [--min-roots 63000] [--pairs 2000] [--particles 64] [--baseline k256] [--epoch-growth 2]
+                       [--pp-extra "--pp-pass-frac 0.03"]
                                                                                       # start in the background
   python tree_pilot.py BINARY OUT_DIR --status   # progress of every run in OUT_DIR
   python tree_pilot.py BINARY OUT_DIR --table    # the table of what has been evaluated so far
@@ -22,6 +23,8 @@ every arm. Snapshot K is at 1000 * (2^(K+1) - 1) roots: 63,000 (K=5), 127,000, 2
 1000 * (G^(K+1) - 1) / (G - 1) roots and the k-means arms have their snapshots at the same roots. G = 4: 1,000, 5,000,
 21,000, 85,000, 341,000, 1,365,000, 5,461,000, 21,845,000; G = 10: 1,000, 11,000, 111,000, 1,111,000, 11,111,000.
 Use --roots at one of them, and a separate OUT_DIR for each G (a run cannot be resumed with another G).
+--pp-extra "OPTIONS": more trainer options for the pp and tree arms (not the k-means arms), e.g. a shorter sample
+pass with a larger G; also a separate OUT_DIR for each choice.
 The table gives the Policy-LBR of the average and of the current policy (ante, +- standard error) and its ratio to the
 baseline arm of the same training seed at the same roots. LBR is not exploitability.
 The k-means arms use the atlases in atlas/ (K = 8, 32, 64 have about as many tables as the tree at 255,000 /
@@ -72,6 +75,7 @@ ap.add_argument("--min-roots", type=int, default=63000, help="evaluate epoch sna
 ap.add_argument("--pairs", type=int, default=2000); ap.add_argument("--particles", type=int, default=64)
 ap.add_argument("--baseline", default="k256")
 ap.add_argument("--epoch-growth", type=int, default=2, help="every arm's next epoch is this many times as long")
+ap.add_argument("--pp-extra", default="", help="more trainer options for the pp / tree arms, in one quoted string")
 mode = ap.add_mutually_exclusive_group()
 mode.add_argument("--foreground", action="store_true", help="run in this window (the default starts a background process)")
 mode.add_argument("--status", action="store_true"); mode.add_argument("--stop", action="store_true")
@@ -126,6 +130,7 @@ def train(run):
     _, partition, atlas, extra = ARMS[arm]
     cmd = [a.binary, "train", "--partition", partition] + (["--atlas", atlas] if atlas else []) + extra + \
           (["--epoch-growth", str(a.epoch_growth)] if a.epoch_growth != 2 else []) + \
+          (a.pp_extra.split() if partition == "pp" else []) + \
           ["--seed", str(seed), "--roots", str(a.roots), "--out", os.path.join(a.out, name), "--curve-every", "5000"]
     with open(os.path.join(a.out, name + ".log"), "a") as log:
         log.write(" ".join(cmd) + "\n"); log.flush()
@@ -269,7 +274,7 @@ elif not a.foreground:
     cmd = [sys.executable, "-u", os.path.abspath(__file__), os.path.abspath(a.binary), a.out, "--foreground",
            "--arms", *(given or ["tree", "k256"]), "--seeds", *map(str, a.seeds or [1]), "--roots", str(a.roots), "--workers", str(a.workers),
            "--min-roots", str(a.min_roots), "--pairs", str(a.pairs), "--particles", str(a.particles), "--baseline", a.baseline,
-           "--epoch-growth", str(a.epoch_growth)]
+           "--epoch-growth", str(a.epoch_growth)] + ([f"--pp-extra={a.pp_extra}"] if a.pp_extra else [])
     kw = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" \
         else {"start_new_session": True}
     with open(LOG, "a") as log:

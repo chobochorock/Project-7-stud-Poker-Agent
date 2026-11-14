@@ -60,6 +60,17 @@
 //   (|u_L - u_R|^2 in 0..4). The leaf splits by its passing candidate of largest squared-error drop (dir: largest
 //   distance); the two new buckets start from --inherit-regret / --inherit-avg x the leaf's tables; other leaves replace
 //   their failed and one-sided candidates. --prior-start equal, --schedule static.
+// --mode ppacc (prior-posterior with accumulated regrets, PP_STUD7_DESIGN_KO.md section 19): prior leaves point to
+//   posterior buckets (the strategy tables). Every prior leaf keeps its own regret sums since its pointer was set. Epoch
+//   ends alternate between a prior phase (even epochs) and a posterior phase (odd epochs).
+//   Prior phase: a leaf that uses its bucket alone, or has >= 50% of the bucket's visits since the pointers were set,
+//   carries the --acc-candidates tests of --mode tree; it splits by its best passing candidate (the same test and
+//   --acc-metric); both new leaves keep the pointer and start from their side's sums. Other leaves drop their candidates.
+//   Posterior phase: in a bucket used by two or more leaves, a leaf diverges when the candidate test of "this leaf"
+//   against "the bucket's other leaves" passes. A bucket with a diverging leaf is split: each leaf whose mean regret is
+//   significantly non-zero (the one-side test of --acc-metric dir) is labelled with its largest-regret action, the others
+//   stay; every label group gets a new bucket starting from --inherit-regret x / --inherit-avg x the bucket's tables, and
+//   the bucket's leaves restart their sums and candidates. Unused buckets are kept (counted as not used).
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -128,8 +139,8 @@ bool pp_mode = true, split_on = true, measure = false, eager = false, leaf_cache
 int members_cap = 64, m_samples = 16, min_leaf = 1, kmax = KMAX, rows_per_octave = 2, esd_min_n = 5;
 double zthr = 2.0, inherit_r = 0, inherit_s = 0, prior_ratio = 0;
 bool crossfit = true, resolve_now = false, direction_avg = false, leaf_start_parent = false;
-// --mode tree
-bool tree_mode = false, acc_dir = false;
+// --mode tree, --mode ppacc
+bool tree_mode = false, ppacc_mode = false, acc_dir = false;
 int acc_k = 8, acc_min = 100, acc_pool = 16;
 double acc_z = 3, acc_dist = 0.5;
 uint64_t tree_salt = 0;
@@ -312,6 +323,7 @@ vector<int> to_finalize;       // leaves that reached m samples in this iteratio
 int leaves_at_event = 0;
 long long n_finalize = 0, n_signals = 0, n_prior_splits = 0, n_prior_rejected = 0;
 FILE* prior_log = nullptr;
+FILE* evf_global = nullptr;  // events.csv (--mode ppacc writes its posterior splits there)
 
 int leaf_of(int I) {
     const int c = cell_of_I[I];
@@ -327,6 +339,9 @@ struct AccCand { Desc d; double thr = 0; double s[2][W] = {}, q[2][W] = {}, n[2]
 struct LeafAcc { vector<AccCand> cand; vector<int32_t> pool; uint64_t seen = 0; uint32_t gen = 0; };
 vector<LeafAcc> lacc;
 long long n_acc_tested = 0;
+struct LeafOwn { double s[W] = {}, q[W] = {}, n = 0; };   // --mode ppacc: a leaf's regret sums since its pointer was set
+vector<LeafOwn> lown;
+long long n_post_splits = 0, n_diverging = 0;
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -500,7 +515,7 @@ int route_from(int I, int level0, int b0) {  // pp: one information set through 
 double assign_cpu = 0;
 
 int train_bucket(int I) {
-    if (tree_mode) return leaves[leaf_of(I)].ptr;
+    if (tree_mode || ppacc_mode) return leaves[leaf_of(I)].ptr;
     if (!pp_mode) return table_on ? bucket_now[I] : route(I, level_now);
     const int l = leaf_of(I);
     const Leaf& L = leaves[l];
@@ -558,7 +573,17 @@ double es(int h, int p) {
         }
         ++vis[b];
         add_member(b, I);
-        if (tree_mode) { double r[W]; for (int a = 0; a < d; ++a) r[a] = v[a] - node; acc_visit(leaf_of(I), I, r, d); }
+        if (tree_mode || ppacc_mode) {
+            double r[W]; for (int a = 0; a < d; ++a) r[a] = v[a] - node;
+            const int l = leaf_of(I);
+            acc_visit(l, I, r, d);
+            if (ppacc_mode) {
+                if ((int)lown.size() <= l) lown.resize(leaves.size());
+                LeafOwn& o = lown[l];
+                for (int a = 0; a < d; ++a) { o.s[a] += r[a]; o.q[a] += r[a] * r[a]; }
+                o.n += 1;
+            }
+        }
         if (pp_mode) {
             const int l = leaf_of(I);
             Leaf& L = leaves[l];
@@ -814,6 +839,125 @@ int tree_epoch_end() {
                 acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
     }
     if (splits) ++level_now;
+    return splits;
+}
+
+// --mode ppacc helpers: is a leaf's mean regret significantly non-zero (the one-side test of --acc-metric dir), and
+// its largest-regret action
+bool own_significant(const LeafOwn& o, int na, int& argmax) {
+    argmax = -1;
+    if (o.n < acc_min) return false;
+    double m2 = 0, mu1 = 0, var1 = 0, best = -1e300;
+    for (int a = 0; a < na; ++a) {
+        const double m = o.s[a] / o.n;
+        const double v = max(0.0, o.q[a] - o.s[a] * m) / max(1.0, o.n - 1);
+        m2 += m * m; mu1 += v / o.n; var1 += 2 * (v / o.n) * (v / o.n);
+        if (m > best) { best = m; argmax = a; }
+    }
+    const double z = var1 > 0 ? (m2 - mu1) / sqrt(var1) : (m2 > 0 ? 1e300 : 0);
+    return z >= acc_z && m2 > 0;
+}
+// --mode ppacc: the judgment at an epoch end, a prior phase (even epochs) or a posterior phase (odd epochs)
+int ppacc_epoch_end(int k) {
+    lacc.resize(leaves.size()); lown.resize(leaves.size());
+    const int nl0 = (int)leaves.size();
+    vector<vector<int>> users(B);
+    vector<double> bvis(B, 0.0);
+    for (int l = 0; l < nl0; ++l) if (leaves[l].node >= 0) { users[leaves[l].ptr].push_back(l); bvis[leaves[l].ptr] += lown[l].n; }
+    int splits = 0;
+    if (k % 2 == 0) {  // ---- prior phase ----
+        for (int l = 0; l < nl0; ++l) {
+            if (leaves[l].node < 0) continue;
+            const int b = leaves[l].ptr;
+            const bool eligible = users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
+            if (!eligible) { lacc[l].cand.clear(); continue; }
+            const int n = counts[cell_members[leaves[l].cell][0]];
+            int best = -1; AccTest bt;
+            vector<AccTest> ts(lacc[l].cand.size());
+            for (size_t c = 0; c < ts.size(); ++c) {
+                ts[c] = acc_test(lacc[l].cand[c], n);
+                n_acc_tested += ts[c].testable;
+                const bool better = acc_dir ? (ts[c].dist > bt.dist || (ts[c].dist == bt.dist && ts[c].gain > bt.gain)) : ts[c].gain > bt.gain;
+                if (ts[c].pass && (best < 0 || better)) { best = (int)c; bt = ts[c]; }
+            }
+            if (best < 0) {
+                vector<AccCand> keep;
+                for (size_t c = 0; c < ts.size(); ++c) {
+                    const AccCand& x = lacc[l].cand[c];
+                    const bool one_sided = x.n[0] + x.n[1] >= 4.0 * acc_min && min(x.n[0], x.n[1]) < acc_min;
+                    if (!(ts[c].testable && !ts[c].pass) && !one_sided) keep.push_back(x);
+                }
+                lacc[l].cand.swap(keep);
+                acc_fill(l);
+                continue;
+            }
+            const AccCand c = lacc[l].cand[best];
+            const vector<int32_t> pool = lacc[l].pool;
+            const int node = leaves[l].node, cell = leaves[l].cell, depth = leaves[l].depth;
+            tnodes[node].d = c.d; tnodes[node].thr = c.thr; tnodes[node].leaf = -1;
+            int kid[2];
+            for (int side = 0; side < 2; ++side) {
+                TNode t; t.leaf = (int)leaves.size();
+                kid[side] = (int)tnodes.size(); tnodes.push_back(t);
+                Leaf L; L.node = kid[side]; L.cell = cell; L.depth = depth + 1; L.pending = false; L.ptr = b; L.born = cur_t;
+                leaves.push_back(L);
+                LeafAcc K;
+                for (int32_t I : pool) if ((feat(I, c.d) <= c.thr) == (side == 0)) K.pool.push_back(I);
+                K.seen = K.pool.size();
+                lacc.push_back(K);
+                LeafOwn o; for (int a = 0; a < W; ++a) { o.s[a] = c.s[side][a]; o.q[a] = c.q[side][a]; } o.n = c.n[side];
+                lown.push_back(o);
+                acc_fill((int)leaves.size() - 1);
+            }
+            tnodes[node].left = kid[0]; tnodes[node].right = kid[1];
+            leaves[l].node = -1; lacc[l] = LeafAcc{}; lown[l] = LeafOwn{};
+            ++cell_ver[cell]; ++n_prior_splits; ++splits;
+            fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%.0f,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(c.d).c_str(), c.thr,
+                    acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
+        }
+        return splits;
+    }
+    // ---- posterior phase ----
+    const int B0 = B;
+    for (int b = 0; b < B0; ++b) {
+        if (users[b].size() < 2) continue;
+        const int n = bucket_n[b];
+        double tot_s[W] = {}, tot_q[W] = {}, tot_n = 0;
+        for (int l : users[b]) { for (int a = 0; a < n; ++a) { tot_s[a] += lown[l].s[a]; tot_q[a] += lown[l].q[a]; } tot_n += lown[l].n; }
+        bool diverging = false;
+        for (int l : users[b]) {
+            AccCand x;  // side 0: this leaf, side 1: the bucket's other leaves
+            for (int a = 0; a < n; ++a) {
+                x.s[0][a] = lown[l].s[a]; x.q[0][a] = lown[l].q[a];
+                x.s[1][a] = tot_s[a] - lown[l].s[a]; x.q[1][a] = tot_q[a] - lown[l].q[a];
+            }
+            x.n[0] = lown[l].n; x.n[1] = tot_n - lown[l].n;
+            if (acc_test(x, n).pass) { diverging = true; ++n_diverging; }
+        }
+        if (!diverging) continue;
+        map<int, vector<int>> groups;  // label (-1: stays) -> leaves
+        for (int l : users[b]) { int am = -1; const bool sig = own_significant(lown[l], n, am); groups[sig ? am : -1].push_back(l); }
+        if (groups.size() < 2) continue;  // every leaf wants the same action: nothing to separate
+        string labs, kids;
+        bool first = true;
+        for (auto& [lab, ls] : groups) {
+            int nb = b;
+            if (!first) {  // the first group (the staying one when there is one) keeps the bucket's id
+                nb = B++;
+                Q.resize((size_t)B * W, 0); S.resize((size_t)B * W, 0); Rtmp.resize((size_t)B * W, 0);
+                bucket_n.push_back(bucket_n[b]); vis.push_back(0); parent_eps.push_back(-1); members.emplace_back(); dirty.push_back(0);
+                for (int a = 0; a < W; ++a) { Q[(size_t)nb * W + a] = inherit_r * Q[(size_t)b * W + a]; S[(size_t)nb * W + a] = inherit_s * S[(size_t)b * W + a]; }
+            }
+            for (int l : ls) leaves[l].ptr = nb;
+            labs += (first ? "" : " ") + to_string(lab); kids += (first ? "" : " ") + to_string(nb);
+            first = false;
+        }
+        for (int a = 0; a < W; ++a) { Q[(size_t)b * W + a] *= inherit_r; S[(size_t)b * W + a] *= inherit_s; }
+        for (int l : users[b]) { lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l); }
+        fprintf(evf_global, "%d,%lld,%d,%zu,,%s,%s\n", level_now, cur_t, b, users[b].size(), labs.c_str(), kids.c_str());
+        ++splits; ++n_post_splits;
+    }
+    if (splits) { ++level_now; fflush(evf_global); }
     return splits;
 }
 bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
@@ -1079,6 +1223,7 @@ int main(int argc, char** argv) try {
     const string dir = opt.at("--tree"), out = opt.at("--out");
     pp_mode = opt["--mode"] == "pp";
     tree_mode = opt["--mode"] == "tree";
+    ppacc_mode = opt["--mode"] == "ppacc";
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
     if (opt["--acc-metric"] != "mse" && !acc_dir) throw runtime_error("--acc-metric must be mse or dir");
@@ -1091,7 +1236,7 @@ int main(int argc, char** argv) try {
     if (opt["--leaf-start"] != "root" && !leaf_start_parent) throw runtime_error("--leaf-start must be root or parent");
     if (leaf_start_parent && !pp_mode) throw runtime_error("--leaf-start parent is for --mode pp");
     if (prior_criterion != "regret" && prior_criterion != "label") throw runtime_error("--prior-criterion must be regret or label");
-    if (!pp_mode && !tree_mode && opt["--mode"] != "pure") throw runtime_error("--mode must be pp, pure or tree");
+    if (!pp_mode && !tree_mode && !ppacc_mode && opt["--mode"] != "pure") throw runtime_error("--mode must be pp, pure, tree or ppacc");
     members_cap = stoi(opt["--members"]); m_samples = stoi(opt["--m"]); min_leaf = stoi(opt["--min-leaf"]);
     kmax = min(KMAX, stoi(opt["--kmax"])); outlier = opt["--outlier"]; scale = opt["--scale"]; zthr = stod(opt["--z"]); esd_min_n = stoi(opt["--esd-min-n"]);
     schedule = opt["--schedule"]; eps_check = stoll(opt["--eps-check"]); prior_split = opt["--prior-split"];
@@ -1101,14 +1246,14 @@ int main(int argc, char** argv) try {
     leaf_cache_on = opt["--leaf-cache"] == "1"; pend_cache_on = opt["--pend-cache"] == "1";
     memo_on = opt["--memo"] == "1"; table_on = opt["--table"] == "1"; rows_per_octave = stoi(opt["--rows-per-octave"]);
     if (outlier != "esd" && outlier != "z" && outlier != "label") throw runtime_error("--outlier must be esd, z or label");
-    if (tree_mode && (opt["--prior-start"] != "equal" || opt["--schedule"] != "static" || !opt["--p0"].empty()))
-        throw runtime_error("--mode tree needs --prior-start equal, --schedule static and no --p0");
+    if ((tree_mode || ppacc_mode) && (opt["--prior-start"] != "equal" || opt["--schedule"] != "static" || !opt["--p0"].empty()))
+        throw runtime_error("--mode tree and ppacc need --prior-start equal, --schedule static and no --p0");
     if (scale != "counterfactual" && scale != "fact-counterfact") throw runtime_error("--scale must be counterfactual or fact-counterfact");
     if (schedule != "static" && schedule != "eps") throw runtime_error("--schedule must be static or eps");
     if (prior_split != "immediate" && prior_split != "epoch") throw runtime_error("--prior-split must be immediate or epoch");
     if (prior_start != "equal" && prior_start != "length" && prior_start != "identity") throw runtime_error("bad --prior-start");
     if (features != "general" && features != "poker") throw runtime_error("--features must be general or poker");
-    if (outlier == "esd" && !tree_mode) {  // the given path, else next to the source, the executable, or in the working directory
+    if (outlier == "esd" && !tree_mode && !ppacc_mode) {  // the given path, else next to the source, the executable, or in the working directory
         string path = opt["--esd-table"];
         for (const string& c : {path, (filesystem::path(__FILE__).parent_path() / "esd_table.csv").string(),
                                 (filesystem::path(argv[0]).parent_path() / "esd_table.csv").string(), string("esd_table.csv")})
@@ -1234,11 +1379,12 @@ int main(int argc, char** argv) try {
         putv(o, Rmeas); putv(o, Rwin); putv(o, vmeas); putv(o, vwin);
         puts_(o, rng_text(rng)); puts_(o, rng_text(iter_rng)); puts_(o, rng_text(split_rng));
         put(o, cnt);
-        if (tree_mode) {
+        if (tree_mode || ppacc_mode) {
             put(o, n_acc_tested);
             uint64_t na = lacc.size(); put(o, na);
             for (const LeafAcc& L : lacc) { putv(o, L.cand); putv(o, L.pool); put(o, L.seen); put(o, L.gen); }
         }
+        if (ppacc_mode) { putv(o, lown); put(o, n_post_splits); put(o, n_diverging); }
         fflush(prior_log);
         log_bytes = fsize(log_path); ev_bytes = fsize(ev_path); pr_bytes = fsize(pr_path); ds_bytes = fsize(ds_path);
         put(o, log_bytes); put(o, ev_bytes); put(o, pr_bytes); put(o, ds_bytes);
@@ -1279,11 +1425,12 @@ int main(int argc, char** argv) try {
         string r1, r2, r3; gets_(in, r1); gets_(in, r2); gets_(in, r3);
         rng_load(rng, r1); rng_load(iter_rng, r2); rng_load(split_rng, r3);
         get(in, cnt);
-        if (tree_mode) {
+        if (tree_mode || ppacc_mode) {
             get(in, n_acc_tested);
             uint64_t na; get(in, na); lacc.assign(na, {});
             for (LeafAcc& L : lacc) { getv(in, L.cand); getv(in, L.pool); get(in, L.seen); get(in, L.gen); }
         }
+        if (ppacc_mode) { getv(in, lown); get(in, n_post_splits); get(in, n_diverging); }
         get(in, log_bytes); get(in, ev_bytes); get(in, pr_bytes); get(in, ds_bytes);
         if (!in) throw runtime_error("truncated state.bin");
         filesystem::resize_file(log_path, log_bytes); filesystem::resize_file(ev_path, ev_bytes);
@@ -1363,7 +1510,7 @@ int main(int argc, char** argv) try {
     prior_log = fopen(pr_path.c_str(), "a");
     Rtmp.assign((size_t)B * W, 0); dirty.assign(B, 0);
     auto rebuild_table = [&] {  // pure: every information set's bucket at level_now (a cache of route)
-        if (pp_mode || tree_mode || !table_on) return;
+        if (pp_mode || tree_mode || ppacc_mode || !table_on) return;
         const double a0 = cpu_now();
         bucket_now.clear();
         vector<int32_t> bn(nI);
@@ -1375,9 +1522,10 @@ int main(int argc, char** argv) try {
     (void)resumed;
     FILE* logf = fopen(log_path.c_str(), "a");
     FILE* evf = fopen(ev_path.c_str(), "a");
+    evf_global = evf;
     FILE* dsf = measure && pp_mode ? fopen(ds_path.c_str(), "a") : nullptr;
     auto current_bucket = [&](int I) {  // measurement and policies: where I is trained now (pending: its own route)
-        if (tree_mode) return leaves[leaf_of(I)].ptr;
+        if (tree_mode || ppacc_mode) return leaves[leaf_of(I)].ptr;
         if (!pp_mode) return table_on ? bucket_now[I] : route(I, level_now);
         const Leaf& L = leaves[leaf_of(I)];
         return L.pending ? route_from(I, L.start_level, L.start_b) : L.ptr;
@@ -1450,12 +1598,13 @@ int main(int argc, char** argv) try {
             int pend = 0, alive = 0;
             for (const Leaf& L : leaves) if (L.node >= 0) { ++alive; pend += L.pending; }
             fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld,%d,%.3f,%.1f\n",
-                    run.rows, run.t, run.k, level_now, before, B, splits, pp_mode || tree_mode ? alive : 0, pp_mode ? pend : 0, n_prior_splits,
+                    run.rows, run.t, run.k, level_now, before, B, splits, pp_mode || tree_mode || ppacc_mode ? alive : 0, pp_mode ? pend : 0, n_prior_splits,
                     n_prior_rejected, n_finalize, n_signals, waiting.size(), run.curK, schedule == "eps" ? eps_stat() : NAN,
                     run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used, routing_mb(), peak_rss_mb());
             fflush(logf);
             cerr << "row " << run.rows << " iters " << run.t << " level " << level_now << " buckets " << before << " -> " << B;
-            if (pp_mode || tree_mode) cerr << " leaves " << alive << " pending " << pend << " prior splits " << n_prior_splits;
+            if (pp_mode || tree_mode || ppacc_mode) cerr << " leaves " << alive << " pending " << pend << " prior splits " << n_prior_splits;
+            if (ppacc_mode) cerr << " posterior splits " << n_post_splits << " used buckets " << st.used;
             cerr << " (" << train_secs() << " s, assign " << assign_cpu << " s)\n";
             ++run.rows;
         });
@@ -1554,7 +1703,7 @@ int main(int argc, char** argv) try {
     while (run.t < T) {
         ++run.t; cur_t = run.t;
         // store this iterate (static: drawn iterations; eps: reservoir over the epoch's iterations)
-        if (!split_on || direction_avg || tree_mode) {  // --direction avg, --mode tree: nothing stored during the epoch
+        if (!split_on || direction_avg || tree_mode || ppacc_mode) {  // --direction avg, --mode tree: nothing stored during the epoch
         } else if (schedule == "static") {
             if (run.next_sample < run.samples.size() && run.samples[run.next_sample] == run.t) {
                 const auto tab = strategy_table();
@@ -1591,8 +1740,8 @@ int main(int argc, char** argv) try {
             int splits = 0;
             if (is_end && run.curK > 0 && schedule == "eps" && run.k == 0) run.eps = eps_stat();
             const RowStats st = snapshot(before);
-            if (is_end && (run.curK > 0 || tree_mode) && split_on) {
-                splits = tree_mode ? tree_epoch_end() : epoch_end();
+            if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
+                splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
                 ++run.k; run.epoch_start = run.t;
                 draw_samples();
             }
@@ -1610,7 +1759,7 @@ int main(int argc, char** argv) try {
         for (int I = 0; I < nI; ++I) fm[I] = current_bucket(I);
         save_vec(out + "/final_bucket_map.bin", fm);
     });
-    if (pp_mode || tree_mode) {
+    if (pp_mode || tree_mode || ppacc_mode) {
         excl([&] {
             ofstream j(out + "/prior_tree.json");
             j << "{\"cells\":" << cell_root.size() << ",\"nodes\":[";

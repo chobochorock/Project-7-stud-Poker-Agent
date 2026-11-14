@@ -19,6 +19,9 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   tree_gate   split only when the abstract game's average regret over the window since the last split is <= --gate
               (--schedule regret --regret-gate G), MSE criterion
   tree_mse    the same tree split at every doubling of iterations (the 900-second runs' tree_mse)
+  ppacc_gate      prior-posterior with accumulated regrets (--mode ppacc, design section 19), alternating prior and
+                  posterior judgments, each waiting for the same gate as tree_gate; MSE criterion, tables restart
+  ppacc_dir_gate  the same with the normalised (direction) criterion
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -45,6 +48,8 @@ ESD = os.path.join(HERE, "esd_table.csv")
 ARMS = {
     "tree_gate": ["--mode", "tree", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "tree_mse": ["--mode", "tree", "--measure", "1"],
+    "ppacc_gate": ["--mode", "ppacc", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
+    "ppacc_dir_gate": ["--mode", "ppacc", "--acc-metric", "dir", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }
@@ -118,22 +123,26 @@ elif a.eval:
     def med(rows, k):
         x = [float(r[k]) for r in rows if r.get(k) not in ("", "nan", None)]
         return statistics.median(x) if x else None
-    print("| arm | iterations | tables | average policy | ratio to " + a.baseline + " | current policy | ratio |")
-    print("|---|---:|---:|---:|---:|---:|---:|")
+    print("| arm | iterations | tables | window regret (gate) | average policy | ratio to " + a.baseline + " | current policy | ratio |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|")
     for arm in by:
         pts = sorted(by[arm])
         show = [it for it in pts if it >= 1_000_000][-12:]  # the last rows from one million iterations on
         for it in show:
             rows = by[arm][it]
             av, cu, tb = med(rows, "expl_bucket_avg"), med(rows, "expl_current"), med(rows, "buckets")
+            wr = med(rows, "eps_stat")  # gated arms: the window's abstract-game average regret at this row (before its judgment)
+            wrs = f"{wr:.4f} ({rows[0].get('eps', '')})" if wr is not None else ""
             base = by.get(a.baseline, {}).get(it)
             bav = med(base, "expl_bucket_avg") if base else None
             bcu = med(base, "expl_current") if base else None
             ra = f"{av / bav:.2f}" if av is not None and bav else ("missing baseline row" if arm != a.baseline else "1.00")
             rc = f"{cu / bcu:.2f}" if cu is not None and bcu else ("missing baseline row" if arm != a.baseline else "1.00")
-            print(f"| {arm} | {it:,} | {tb:,.0f} | {av:.4f} | {ra} | {cu:.4f} | {rc} |" if av is not None and cu is not None and tb is not None
-                  else f"| {arm} | {it:,} | | not evaluated | | | |")
-    print("\nThe arms' rows are on the same iteration grid (1000 * 2^(j/2)); a tree_gate judgment adds rows of its own.")
+            print(f"| {arm} | {it:,} | {tb:,.0f} | {wrs} | {av:.4f} | {ra} | {cu:.4f} | {rc} |" if av is not None and cu is not None and tb is not None
+                  else f"| {arm} | {it:,} | | | not evaluated | | | |")
+    print("\nThe arms' rows are on the same iteration grid (1000 * 2^(j/2)); a gated judgment adds rows of its own. Window regret:")
+    print("the sum over buckets of max(0, max_a (Q_b - Q_b at the last judgment)) / iterations since the last judgment, at that")
+    print("row; the gate in parentheses (a judgment happens when it is <= the gate). Tables: buckets before that row's judgment.")
 else:
     prepare()
     for arm, s, d in runs:

@@ -48,7 +48,8 @@ for i, spec in enumerate(a.arm):
     name, ds = spec.split("=", 1); arms.append((name, ds.split(","), SLOTS[i % len(SLOTS)], False))
 for i, spec in enumerate(a.ref):
     name, ds = spec.split("=", 1)
-    color = SLOTS[3] if a.kmeans and name == a.kmeans else REF_GRAY[i % len(REF_GRAY)]
+    # the k-means baseline: slot 4 while the arms leave it free, else ink (never an arm's colour)
+    color = (SLOTS[3] if len(a.arm) <= 3 else INK) if a.kmeans and name == a.kmeans else REF_GRAY[i % len(REF_GRAY)]
     arms.append((name, ds.split(","), color, True))
 data = {name: [load_run(d) for d in ds] for name, ds, _, _ in arms}
 missing = [(name, d) for name, ds, _, _ in arms for d, rows in zip(ds, data[name]) if not rows]
@@ -109,7 +110,10 @@ for name, ds, color, ref in arms:
     if any(num(r, "prior_leaves") > 0 for r in rows):
         axb.plot(xs, [num(r, "prior_leaves") for r in rows], color=color, ls=":", lw=2, label=f"{name}: prior leaves")
 style(axb, "MCCFR iterations", "count", "(d) posterior buckets and prior leaves (first seed)")
-axb.legend(fontsize=8, frameon=False)
+# colours are named in panel (a); here only the three line styles
+from matplotlib.lines import Line2D
+axb.legend([Line2D([], [], color=MUTED, ls=ls, lw=w) for ls, w in (("-", 2), ("-.", 1.2), (":", 2))],
+           ["posterior buckets (fixed partitions: dashed)", "buckets in use", "prior leaves"], fontsize=8, frameon=False, loc="upper left")
 fig.text(0.01, 0.005, textwrap.fill("mini-stud small (51,114 information sets), pure external-sampling MCCFR, one core per run, "
          "equal CPU budget. Dashed: fixed partitions trained by the same MCCFR (unabstracted; k-means with a pp-equal run's "
          "per-time-step bucket counts, card + previous-street betting features).", 190), fontsize=8, color=MUTED)

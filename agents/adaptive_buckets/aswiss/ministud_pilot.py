@@ -22,6 +22,9 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppacc_gate      prior-posterior with accumulated regrets (--mode ppacc, design section 19), alternating prior and
                   posterior judgments, each waiting for the same gate as tree_gate; MSE criterion, tables restart
   ppacc_dir_gate  the same with the normalised (direction) criterion
+  ppacc_rt        posterior splits in real time (checked every 10,000 iterations) with full inheritance; prior splits
+                  wait for the same condition as tree_gate; MSE criterion
+  ppacc_rt_restart  the same with the new posterior tables restarting
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -49,6 +52,9 @@ ARMS = {
     "tree_gate": ["--mode", "tree", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "tree_mse": ["--mode", "tree", "--measure", "1"],
     "ppacc_gate": ["--mode", "ppacc", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
+    "ppacc_rt": ["--mode", "ppacc", "--schedule", "regret", "--regret-gate", str(a.gate), "--post-realtime", "1",
+                 "--inherit-regret", "1", "--inherit-avg", "1", "--measure", "1"],
+    "ppacc_rt_restart": ["--mode", "ppacc", "--schedule", "regret", "--regret-gate", str(a.gate), "--post-realtime", "1", "--measure", "1"],
     "ppacc_dir_gate": ["--mode", "ppacc", "--acc-metric", "dir", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],

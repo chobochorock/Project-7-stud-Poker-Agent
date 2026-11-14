@@ -80,6 +80,9 @@
 //   significantly non-zero (the one-side test of --acc-metric dir) is labelled with its largest-regret action, the others
 //   stay; every label group gets a new bucket starting from --inherit-regret x / --inherit-avg x the bucket's tables, and
 //   the bucket's leaves restart their sums and candidates. Unused buckets are kept (counted as not used).
+//   --post-realtime 1 (user, 2026-11-14): the posterior phase runs every --gate-check iterations during training (a
+//   bucket splits as soon as one of its leaves diverges; use with --inherit-regret 1 --inherit-avg 1), and every
+//   judgment is a prior phase.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -352,6 +355,7 @@ long long n_acc_tested = 0;
 struct LeafOwn { double s[W] = {}, q[W] = {}, n = 0; };   // --mode ppacc: a leaf's regret sums since its pointer was set
 vector<LeafOwn> lown;
 long long n_post_splits = 0, n_diverging = 0;
+bool post_realtime = false;   // --post-realtime 1 (ppacc): posterior splits checked every --gate-check iterations, not at judgments
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -867,15 +871,18 @@ bool own_significant(const LeafOwn& o, int na, int& argmax) {
     const double z = var1 > 0 ? (m2 - mu1) / sqrt(var1) : (m2 > 0 ? 1e300 : 0);
     return z >= acc_z && m2 > 0;
 }
-// --mode ppacc: the judgment at an epoch end, a prior phase (even epochs) or a posterior phase (odd epochs)
+int ppacc_posterior_pass();
+// --mode ppacc: the judgment at an epoch end, a prior phase (even epochs) or a posterior phase (odd epochs); with
+// --post-realtime 1 every judgment is a prior phase (the posterior splits happen in ppacc_posterior_pass during training)
 int ppacc_epoch_end(int k) {
+    if (k % 2 == 1 && !post_realtime) return ppacc_posterior_pass();
     lacc.resize(leaves.size()); lown.resize(leaves.size());
     const int nl0 = (int)leaves.size();
     vector<vector<int>> users(B);
     vector<double> bvis(B, 0.0);
     for (int l = 0; l < nl0; ++l) if (leaves[l].node >= 0) { users[leaves[l].ptr].push_back(l); bvis[leaves[l].ptr] += lown[l].n; }
     int splits = 0;
-    if (k % 2 == 0) {  // ---- prior phase ----
+    {  // ---- prior phase ----
         for (int l = 0; l < nl0; ++l) {
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
@@ -927,7 +934,14 @@ int ppacc_epoch_end(int k) {
         }
         return splits;
     }
-    // ---- posterior phase ----
+}
+// --mode ppacc: the posterior phase (a bucket with a diverging leaf is split by its leaves' largest-regret actions)
+int ppacc_posterior_pass() {
+    lacc.resize(leaves.size()); lown.resize(leaves.size());
+    const int nl0 = (int)leaves.size();
+    vector<vector<int>> users(B);
+    for (int l = 0; l < nl0; ++l) if (leaves[l].node >= 0) users[leaves[l].ptr].push_back(l);
+    int splits = 0;
     const int B0 = B;
     for (int b = 0; b < B0; ++b) {
         if (users[b].size() < 2) continue;
@@ -957,12 +971,15 @@ int ppacc_epoch_end(int k) {
                 Q.resize((size_t)B * W, 0); S.resize((size_t)B * W, 0); Rtmp.resize((size_t)B * W, 0);
                 bucket_n.push_back(bucket_n[b]); vis.push_back(0); parent_eps.push_back(-1); members.emplace_back(); dirty.push_back(0);
                 for (int a = 0; a < W; ++a) { Q[(size_t)nb * W + a] = inherit_r * Q[(size_t)b * W + a]; S[(size_t)nb * W + a] = inherit_s * S[(size_t)b * W + a]; }
+                // --schedule regret: the new bucket's window starts where its parent's did (scaled as its tables)
+                if (Qwin.size() == (size_t)nb * W) for (int a = 0; a < W; ++a) Qwin.push_back(inherit_r * Qwin[(size_t)b * W + a]);
             }
             for (int l : ls) leaves[l].ptr = nb;
             labs += (first ? "" : " ") + to_string(lab); kids += (first ? "" : " ") + to_string(nb);
             first = false;
         }
         for (int a = 0; a < W; ++a) { Q[(size_t)b * W + a] *= inherit_r; S[(size_t)b * W + a] *= inherit_s; }
+        if (Qwin.size() >= (size_t)(b + 1) * W) for (int a = 0; a < W; ++a) Qwin[(size_t)b * W + a] *= inherit_r;
         for (int l : users[b]) { lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l); }
         fprintf(evf_global, "%d,%lld,%d,%zu,,%s,%s\n", level_now, cur_t, b, users[b].size(), labs.c_str(), kids.c_str());
         ++splits; ++n_post_splits;
@@ -1224,7 +1241,7 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}};
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1234,6 +1251,8 @@ int main(int argc, char** argv) try {
     pp_mode = opt["--mode"] == "pp";
     tree_mode = opt["--mode"] == "tree";
     ppacc_mode = opt["--mode"] == "ppacc";
+    post_realtime = opt["--post-realtime"] == "1";
+    if (post_realtime && !ppacc_mode) throw runtime_error("--post-realtime is for --mode ppacc");
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
     if (opt["--acc-metric"] != "mse" && !acc_dir) throw runtime_error("--acc-metric must be mse or dir");
@@ -1335,7 +1354,7 @@ int main(int argc, char** argv) try {
             !(k == "--acc-candidates" && v == "8") && !(k == "--acc-min-visits" && v == "100") && !(k == "--acc-z" && v == "3") &&
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
-            !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000"))  // defaults of later options: old runs resume
+            !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1755,6 +1774,7 @@ int main(int argc, char** argv) try {
             }
         }
         for (int p = 0; p < 2; ++p) { es(0, p); apply_regrets(); }
+        if (post_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_posterior_pass();
         if (pp_mode && !to_finalize.empty()) {
             const double a0 = cpu_now();
             vector<int> f = move(to_finalize); to_finalize.clear();

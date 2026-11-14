@@ -8,6 +8,9 @@
 #   ppacc_gate      MSE, tables restart, every judgment waits until the window's abstract-game average regret is <= 0.1
 #                   (--schedule regret --regret-gate 0.1; user, 2026-11-14: the same gate as the tree)
 #   ppacc_dir_gate  the same with the direction criterion
+#   ppacc_rt        the user's alternative (2026-11-14): posterior splits in real time (checked every 10,000 iterations)
+#                   with full inheritance; prior splits wait until the window's average regret is <= 0.1; MSE
+#   ppacc_rt_restart  the same with the new posterior tables restarting (a comparison)
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -32,6 +35,8 @@ for s in $SEEDS; do
   echo "ppacc_mse_inh $s --mode ppacc --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
   echo "ppacc_gate $s --mode ppacc --schedule regret --regret-gate 0.1 --measure 1" >> "$jobs"
   echo "ppacc_dir_gate $s --mode ppacc --acc-metric dir --schedule regret --regret-gate 0.1 --measure 1" >> "$jobs"
+  echo "ppacc_rt $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
+  echo "ppacc_rt_restart $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --measure 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 echo "done: ppacc runs in $OUT/runs"

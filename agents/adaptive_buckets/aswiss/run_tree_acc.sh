@@ -8,6 +8,8 @@
 #   tree_mse_inh    the same, new leaves start from the leaf's regrets and average sums (--inherit-regret 1 --inherit-avg 1)
 #   tree_dir        --acc-metric dir: the sides must also differ in the direction of their (unit) mean regret vectors
 #   tree_dir_inh    the same with full inheritance
+#   tree_mse_g4, tree_mse_g10, tree_mse_inh_g10   splits every 4x / 10x of iterations (--epoch-growth): more training
+#                   between splits (user, 2026-11-14: "restart is the right method; the tables were not given enough time")
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -32,12 +34,17 @@ for s in $SEEDS; do
   echo "tree_mse_inh $s --mode tree --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
   echo "tree_dir $s --mode tree --acc-metric dir --measure 1" >> "$jobs"
   echo "tree_dir_inh $s --mode tree --acc-metric dir --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
+  echo "tree_mse_g4 $s --mode tree --epoch-growth 4 --measure 1" >> "$jobs"
+  echo "tree_mse_g10 $s --mode tree --epoch-growth 10 --measure 1" >> "$jobs"
+  echo "tree_mse_inh_g10 $s --mode tree --epoch-growth 10 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
 python3 "$A/plot_pp.py" "$OUT/pp_small_tree_acc" --arm "tree, accumulated MSE, restart=$(arm tree_mse)" \
   --arm "tree, accumulated MSE, full inheritance=$(arm tree_mse_inh)" --arm "tree, accumulated direction, restart=$(arm tree_dir)" \
-  --arm "tree, accumulated direction, full inheritance=$(arm tree_dir_inh)" --arm "pure a, iterates=$(arm pure_a)" \
+  --arm "tree, accumulated direction, full inheritance=$(arm tree_dir_inh)" --arm "tree, accumulated MSE, restart, split every 4x=$(arm tree_mse_g4)" \
+  --arm "tree, accumulated MSE, restart, split every 10x=$(arm tree_mse_g10)" \
+  --arm "tree, accumulated MSE, full inheritance, split every 10x=$(arm tree_mse_inh_g10)" --arm "pure a, iterates=$(arm pure_a)" \
   --arm "pp mix, avg, root=$(arm ppmix_avg_root)" \
   --ref "k-means (rule a counts)=$(arm kmeans_a)" --ref "MCCFR (no abstraction)=$(arm mccfr)" --kmeans "k-means (rule a counts)"
 echo "done: $OUT/pp_small_tree_acc.md"

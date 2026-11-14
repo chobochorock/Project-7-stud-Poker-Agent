@@ -979,6 +979,28 @@ python tree_pilot.py BINARY OUT_DIR --status | --table | --stop
 - 구조상 한계: 잎은 prior 단계마다(두 epoch에 한 번) 최대 한 번 나뉜다. 900초(약 17 epoch) 안에 시작 칸 6개에서 잎은 많아야 6·2^9 ≈ 3천 개 수준이다.
 - 실험: `aswiss/run_ppacc.sh` (방향 기준, MSE 기준, 둘 다 완전 상속; 900초, seed 1–3).
 
+### 19.0 2026-11-14 mini-stud 실험 지도 (이름은 실행 폴더 이름 `runs/<ID>_s<seed>`)
+
+모두 CPU 900초, seed 1–3, 정확한 exploitability(평균 전략, 중앙값). "2배마다"는 판정이 1000·2^k 반복(기본)이라는 뜻이고, 판정 한 번에 잎은 한 번까지 나뉜다.
+
+| ID | 구조 | 분할 기준 | 나뉠 때 새 표 | 분할 일정 | 결과 | 끝의 표 수 |
+|---|---|---|---|---|---:|---:|
+| `tree_mse` | 단일 트리 | 누적 regret MSE | 재시작(0부터) | 2배마다, 끝까지 | 0.093 | 약 2.1만 |
+| `tree_mse_g4` | 단일 트리 | 누적 regret MSE | 재시작 | 4배마다 | 0.597 | 약 800 |
+| `tree_mse_g10` | 단일 트리 | 누적 regret MSE | 재시작 | 10배마다 | 0.735 | 약 110 |
+| `tree_mse_frz` | 단일 트리 | 누적 regret MSE | 재시작 | 2배마다, 1,638만 반복 뒤 멈춤 | 0.107 | 약 1.4만 |
+| `tree_mse_inh` | 단일 트리 | 누적 regret MSE | 통째 상속 | 2배마다, 끝까지 | 0.339 | 약 1.2만 |
+| `tree_mse_inh_g10` | 단일 트리 | 누적 regret MSE | 통째 상속 | 10배마다 | 0.765 | 약 110 |
+| `tree_mse_inh_frz` | 단일 트리 | 누적 regret MSE | 통째 상속 | 2배마다, 1,638만 반복 뒤 멈춤 | 0.352 | 약 0.7만 |
+| `tree_dir` | 단일 트리 | 누적 regret 방향(정규화) | 재시작 | 2배마다, 끝까지 | 0.642 | 약 500 |
+| `tree_dir_inh` | 단일 트리 | 누적 regret 방향 | 통째 상속 | 2배마다, 끝까지 | 0.607 | 약 360 |
+| `ppacc_dir_inh` | pp 누적 (19절) | 누적 regret 방향 | 통째 상속 | prior·posterior 교대 | 0.814 | 38–69 |
+| `ppacc_mse_inh` | pp 누적 (19절) | 누적 regret MSE | 통째 상속 | prior·posterior 교대 | 0.698 | 154–212 |
+| `pure_a` (기존) | pure ASWISS | 판정 시점 방향 라벨(규칙 a) | 재시작 | 2배마다, 끝까지 | 0.0075 | 약 1.8만 |
+| `ppmix_avg_root` (기존) | 기존 pp | 판정 시점 방향 라벨 | 재시작 | 2배마다, 끝까지 | 0.034 | 약 2.1만 |
+| `kmeans_a` (기존) | k-means 고정 분할 | – | – | – | 0.342 | 약 1만 |
+| `mccfr` (기존) | 추상화 없음 | – | – | – | 0.0022 | 51,114 |
+
 ### 19.1 mini-stud 결과 (CPU 900초, seed 1–3, 정확한 exploitability, 2026-11-14)
 
 전체 표: `aswiss/compare/results_data/pp_small/acc_final_table.md`, 곡선: `tree_acc_curves.png`, `ppacc_curves.png`, 실행 기록: `runs_summary_acc.tar.gz`. k-means 기준선의 버킷 수는 pure a 실행을 따른 것이라 이 비교군들과 맞춘 것이 아니다.

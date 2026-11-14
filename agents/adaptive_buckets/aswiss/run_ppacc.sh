@@ -49,4 +49,11 @@ for s in $SEEDS; do
   echo "ppspec_leaves $s $SPEC --post-from-leaves 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
+arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
+# figure: the waiting-condition pp arms with the single tree and pure ASWISS (run_tree_acc.sh, run_pp.sh) as references
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec" --arm "ppacc_gate=$(arm ppacc_gate)" --arm "ppacc_rt=$(arm ppacc_rt)" \
+  --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_rt=$(arm ppspec_rt)" \
+  --arm "ppspec_leaves=$(arm ppspec_leaves)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

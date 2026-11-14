@@ -83,6 +83,13 @@
 //   --post-realtime 1 (user, 2026-11-14): the posterior phase runs every --gate-check iterations during training (a
 //   bucket splits as soon as one of its leaves diverges; use with --inherit-regret 1 --inherit-avg 1), and every
 //   judgment is a prior phase.
+//   The user's specification (2026-11-14): --div-metric dir (the divergence is the distance of normalised regret
+//   vectors; --acc-metric stays the prior candidates' criterion), --div-ref bucket (a leaf against its posterior bucket,
+//   whose record is the sum of its leaves'), --reset-moved-only 1 (only the leaves whose pointer is reassigned restart).
+//   --post-from-leaves 1 (the user's second alternative): a bucket keeps no record of its own; its regrets and average
+//   sums are the sums of its leaves' records (a prior split shares the parent's record out so that the sums do not
+//   change; a posterior split restarts the moved leaves, so the new buckets start from zero and the staying bucket keeps
+//   its staying leaves' records).
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -356,6 +363,12 @@ struct LeafOwn { double s[W] = {}, q[W] = {}, n = 0; };   // --mode ppacc: a lea
 vector<LeafOwn> lown;
 long long n_post_splits = 0, n_diverging = 0;
 bool post_realtime = false;   // --post-realtime 1 (ppacc): posterior splits checked every --gate-check iterations, not at judgments
+// --mode ppacc options of the user's specification (2026-11-14; defaults keep the earlier behaviour)
+int div_metric = -1;          // --div-metric same|mse|dir: the divergence test's criterion (-1: as --acc-metric)
+bool div_ref_bucket = false;  // --div-ref bucket: a leaf against its whole bucket (rest: against the bucket's other leaves)
+bool reset_moved_only = false;  // --reset-moved-only 1: a posterior split restarts the sums of the leaves that moved only
+bool post_from_leaves = false;  // --post-from-leaves 1: a bucket's tables are the sums of its leaves' records
+vector<array<double, W>> lavg;  // --post-from-leaves: each leaf's average-strategy sums since its pointer was set
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -370,7 +383,8 @@ void acc_visit(int l, int I, const double* r, int n) {
     else { const uint64_t j = mix64(tree_salt ^ ((uint64_t)l << 32) ^ L.seen) % L.seen; if (j < (uint64_t)acc_pool) L.pool[j] = I; }
 }
 struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0, dist = 0; };
-AccTest acc_test(const AccCand& c, int n) {
+AccTest acc_test(const AccCand& c, int n, int metric = -1) {  // metric: -1 --acc-metric, 0 mse, 1 dir
+    const bool use_dir = metric < 0 ? acc_dir : metric == 1;
     AccTest t;
     const double nl = c.n[0], nr = c.n[1];
     if (nl < acc_min || nr < acc_min) return t;
@@ -386,7 +400,7 @@ AccTest acc_test(const AccCand& c, int n) {
     t.z = var > 0 ? (t.d2 - mu) / sqrt(var) : (t.d2 > 0 ? 1e300 : 0);
     t.gain = nl * nr / (nl + nr) * t.d2;
     t.pass = t.z >= acc_z;
-    if (acc_dir) {
+    if (use_dir) {
         double u[2][W] = {};
         for (int side = 0; side < 2; ++side) {
             const double m_n = c.n[side];
@@ -609,6 +623,11 @@ double es(int h, int p) {
         return node;
     }
     for (int a = 0; a < d; ++a) S[(size_t)b * W + a] += s[a];
+    if (post_from_leaves) {
+        const int l = leaf_of(I);
+        if ((int)lavg.size() <= l) lavg.resize(leaves.size(), array<double, W>{});
+        for (int a = 0; a < d; ++a) lavg[l][a] += s[a];
+    }
     double x = uniform_real_distribution<double>(0, 1)(rng), acc = 0;
     int k = 0;
     for (; k < d - 1; ++k) { acc += s[k]; if (x < acc) break; }
@@ -877,6 +896,7 @@ int ppacc_posterior_pass();
 int ppacc_epoch_end(int k) {
     if (k % 2 == 1 && !post_realtime) return ppacc_posterior_pass();
     lacc.resize(leaves.size()); lown.resize(leaves.size());
+    if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
     const int nl0 = (int)leaves.size();
     vector<vector<int>> users(B);
     vector<double> bvis(B, 0.0);
@@ -923,11 +943,23 @@ int ppacc_epoch_end(int k) {
                 K.seen = K.pool.size();
                 lacc.push_back(K);
                 LeafOwn o; for (int a = 0; a < W; ++a) { o.s[a] = c.s[side][a]; o.q[a] = c.q[side][a]; } o.n = c.n[side];
+                if (post_from_leaves) {  // the parent's record is split, so that the bucket's sums do not change: each side
+                    // keeps its own sums and a visit share of the part from before the candidate existed
+                    const double share = c.n[0] + c.n[1] > 0 ? c.n[side] / (c.n[0] + c.n[1]) : 0.5;
+                    for (int a = 0; a < W; ++a) {
+                        o.s[a] += share * (lown[l].s[a] - c.s[0][a] - c.s[1][a]);
+                        o.q[a] += share * max(0.0, lown[l].q[a] - c.q[0][a] - c.q[1][a]);
+                    }
+                    o.n += share * max(0.0, lown[l].n - c.n[0] - c.n[1]);
+                    lavg.resize(leaves.size(), array<double, W>{});  // the child was pushed above: its slot is the last
+                    for (int a = 0; a < W; ++a) lavg.back()[a] = share * lavg[l][a];
+                }
                 lown.push_back(o);
                 acc_fill((int)leaves.size() - 1);
             }
             tnodes[node].left = kid[0]; tnodes[node].right = kid[1];
             leaves[l].node = -1; lacc[l] = LeafAcc{}; lown[l] = LeafOwn{};
+            if (post_from_leaves) lavg[l] = array<double, W>{};
             ++cell_ver[cell]; ++n_prior_splits; ++splits;
             fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%.0f,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(c.d).c_str(), c.thr,
                     acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
@@ -938,6 +970,7 @@ int ppacc_epoch_end(int k) {
 // --mode ppacc: the posterior phase (a bucket with a diverging leaf is split by its leaves' largest-regret actions)
 int ppacc_posterior_pass() {
     lacc.resize(leaves.size()); lown.resize(leaves.size());
+    if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
     const int nl0 = (int)leaves.size();
     vector<vector<int>> users(B);
     for (int l = 0; l < nl0; ++l) if (leaves[l].node >= 0) users[leaves[l].ptr].push_back(l);
@@ -950,13 +983,14 @@ int ppacc_posterior_pass() {
         for (int l : users[b]) { for (int a = 0; a < n; ++a) { tot_s[a] += lown[l].s[a]; tot_q[a] += lown[l].q[a]; } tot_n += lown[l].n; }
         bool diverging = false;
         for (int l : users[b]) {
-            AccCand x;  // side 0: this leaf, side 1: the bucket's other leaves
+            AccCand x;  // side 0: this leaf, side 1: the bucket's other leaves (--div-ref bucket: the whole bucket)
+            const double keep = div_ref_bucket ? 0.0 : 1.0;
             for (int a = 0; a < n; ++a) {
                 x.s[0][a] = lown[l].s[a]; x.q[0][a] = lown[l].q[a];
-                x.s[1][a] = tot_s[a] - lown[l].s[a]; x.q[1][a] = tot_q[a] - lown[l].q[a];
+                x.s[1][a] = tot_s[a] - keep * lown[l].s[a]; x.q[1][a] = tot_q[a] - keep * lown[l].q[a];
             }
-            x.n[0] = lown[l].n; x.n[1] = tot_n - lown[l].n;
-            if (acc_test(x, n).pass) { diverging = true; ++n_diverging; }
+            x.n[0] = lown[l].n; x.n[1] = tot_n - keep * lown[l].n;
+            if (acc_test(x, n, div_metric).pass) { diverging = true; ++n_diverging; }
         }
         if (!diverging) continue;
         map<int, vector<int>> groups;  // label (-1: stays) -> leaves
@@ -980,7 +1014,20 @@ int ppacc_posterior_pass() {
         }
         for (int a = 0; a < W; ++a) { Q[(size_t)b * W + a] *= inherit_r; S[(size_t)b * W + a] *= inherit_s; }
         if (Qwin.size() >= (size_t)(b + 1) * W) for (int a = 0; a < W; ++a) Qwin[(size_t)b * W + a] *= inherit_r;
-        for (int l : users[b]) { lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l); }
+        for (int l : users[b]) {
+            if (reset_moved_only && leaves[l].ptr == b) continue;  // a leaf whose pointer was not reassigned keeps its record
+            lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l);
+            if (post_from_leaves) lavg[l] = array<double, W>{};
+        }
+        if (post_from_leaves) {  // every bucket of this split: its tables are the sums of its leaves' records
+            vector<int> touched_b; for (auto& [lab, ls] : groups) touched_b.push_back(leaves[ls[0]].ptr);
+            for (int nb : touched_b) {
+                for (int a = 0; a < W; ++a) { Q[(size_t)nb * W + a] = 0; S[(size_t)nb * W + a] = 0; }
+                for (auto& [lab, ls] : groups) if (leaves[ls[0]].ptr == nb)
+                    for (int l : ls) for (int a = 0; a < W; ++a) { Q[(size_t)nb * W + a] += lown[l].s[a]; S[(size_t)nb * W + a] += lavg[l][a]; }
+                // (the window's snapshot Qwin is set to Q right after every judgment)
+            }
+        }
         fprintf(evf_global, "%d,%lld,%d,%zu,,%s,%s\n", level_now, cur_t, b, users[b].size(), labs.c_str(), kids.c_str());
         ++splits; ++n_post_splits;
     }
@@ -1241,7 +1288,8 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}};
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"},
+                            {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1253,6 +1301,17 @@ int main(int argc, char** argv) try {
     ppacc_mode = opt["--mode"] == "ppacc";
     post_realtime = opt["--post-realtime"] == "1";
     if (post_realtime && !ppacc_mode) throw runtime_error("--post-realtime is for --mode ppacc");
+    {
+        const string dm = opt["--div-metric"], dr = opt["--div-ref"];
+        if (dm != "same" && dm != "mse" && dm != "dir") throw runtime_error("--div-metric must be same, mse or dir");
+        if (dr != "rest" && dr != "bucket") throw runtime_error("--div-ref must be rest or bucket");
+        div_metric = dm == "same" ? -1 : dm == "dir" ? 1 : 0; div_ref_bucket = dr == "bucket";
+        reset_moved_only = opt["--reset-moved-only"] == "1"; post_from_leaves = opt["--post-from-leaves"] == "1";
+        if ((dm != "same" || dr != "rest" || reset_moved_only || post_from_leaves) && !ppacc_mode)
+            throw runtime_error("--div-metric, --div-ref, --reset-moved-only and --post-from-leaves are for --mode ppacc");
+        if (post_from_leaves && !reset_moved_only) throw runtime_error("--post-from-leaves needs --reset-moved-only 1 (the staying leaves keep their records)");
+        if (post_from_leaves && post_realtime) throw runtime_error("--post-from-leaves and --post-realtime are separate alternatives");
+    }
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
     if (opt["--acc-metric"] != "mse" && !acc_dir) throw runtime_error("--acc-metric must be mse or dir");
@@ -1354,7 +1413,9 @@ int main(int argc, char** argv) try {
             !(k == "--acc-candidates" && v == "8") && !(k == "--acc-min-visits" && v == "100") && !(k == "--acc-z" && v == "3") &&
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
-            !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0"))  // defaults of later options: old runs resume
+            !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
+            !(k == "--div-metric" && v == "same") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1422,6 +1483,7 @@ int main(int argc, char** argv) try {
         }
         if (ppacc_mode) { putv(o, lown); put(o, n_post_splits); put(o, n_diverging); }
         if (schedule == "regret") putv(o, Qwin);
+        if (post_from_leaves) putv(o, lavg);
         fflush(prior_log);
         log_bytes = fsize(log_path); ev_bytes = fsize(ev_path); pr_bytes = fsize(pr_path); ds_bytes = fsize(ds_path);
         put(o, log_bytes); put(o, ev_bytes); put(o, pr_bytes); put(o, ds_bytes);
@@ -1469,6 +1531,7 @@ int main(int argc, char** argv) try {
         }
         if (ppacc_mode) { getv(in, lown); get(in, n_post_splits); get(in, n_diverging); }
         if (schedule == "regret") getv(in, Qwin);
+        if (post_from_leaves) getv(in, lavg);
         get(in, log_bytes); get(in, ev_bytes); get(in, pr_bytes); get(in, ds_bytes);
         if (!in) throw runtime_error("truncated state.bin");
         filesystem::resize_file(log_path, log_bytes); filesystem::resize_file(ev_path, ev_bytes);

@@ -11,6 +11,12 @@
 #   ppacc_rt        the user's alternative (2026-11-14): posterior splits in real time (checked every 10,000 iterations)
 #                   with full inheritance; prior splits wait until the window's average regret is <= 0.1; MSE
 #   ppacc_rt_restart  the same with the new posterior tables restarting (a comparison)
+# The user's specification as written (2026-11-14; design section 19.6): prior candidates by MSE, the divergence of a
+# leaf by the distance of normalised regret vectors against its whole posterior bucket, and at a posterior split only the
+# leaves whose pointer is reassigned restart their records; every judgment waits for the window's average regret <= 0.1.
+#   ppspec_gate     alternating prior and posterior judgments, the new posterior tables restart
+#   ppspec_rt       the user's first alternative: posterior splits in real time with full inheritance
+#   ppspec_leaves   the user's second alternative: a bucket's tables are the sums of its leaves' records
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -37,6 +43,10 @@ for s in $SEEDS; do
   echo "ppacc_dir_gate $s --mode ppacc --acc-metric dir --schedule regret --regret-gate 0.1 --measure 1" >> "$jobs"
   echo "ppacc_rt $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
   echo "ppacc_rt_restart $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --measure 1" >> "$jobs"
+  SPEC="--mode ppacc --acc-metric mse --div-metric dir --div-ref bucket --reset-moved-only 1 --schedule regret --regret-gate 0.1 --measure 1"
+  echo "ppspec_gate $s $SPEC" >> "$jobs"
+  echo "ppspec_rt $s $SPEC --post-realtime 1 --inherit-regret 1 --inherit-avg 1" >> "$jobs"
+  echo "ppspec_leaves $s $SPEC --post-from-leaves 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 echo "done: ppacc runs in $OUT/runs"

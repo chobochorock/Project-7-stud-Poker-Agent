@@ -25,6 +25,12 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppacc_rt        posterior splits in real time (checked every 10,000 iterations) with full inheritance; prior splits
                   wait for the same condition as tree_gate; MSE criterion
   ppacc_rt_restart  the same with the new posterior tables restarting
+  The user's specification as written (design section 19.6): prior candidates by MSE; a leaf's divergence is the
+  distance of normalised regret vectors against its whole posterior bucket; at a posterior split only the leaves whose
+  pointer is reassigned restart their records; every judgment waits for the same condition as tree_gate.
+  ppspec_gate     alternating prior and posterior judgments, the new posterior tables restart
+  ppspec_rt       posterior splits in real time with full inheritance (the user's first alternative)
+  ppspec_leaves   a bucket's tables are the sums of its leaves' records (the user's second alternative)
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -48,6 +54,8 @@ OUT = os.path.abspath(a.out)
 TREE = os.path.join(OUT, "tree")
 EXE = os.path.join(OUT, "pp_aswiss.exe" if WIN else "pp_aswiss")
 ESD = os.path.join(HERE, "esd_table.csv")
+SPEC = ["--mode", "ppacc", "--acc-metric", "mse", "--div-metric", "dir", "--div-ref", "bucket", "--reset-moved-only", "1",
+        "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"]
 ARMS = {
     "tree_gate": ["--mode", "tree", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "tree_mse": ["--mode", "tree", "--measure", "1"],
@@ -56,6 +64,9 @@ ARMS = {
                  "--inherit-regret", "1", "--inherit-avg", "1", "--measure", "1"],
     "ppacc_rt_restart": ["--mode", "ppacc", "--schedule", "regret", "--regret-gate", str(a.gate), "--post-realtime", "1", "--measure", "1"],
     "ppacc_dir_gate": ["--mode", "ppacc", "--acc-metric", "dir", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
+    "ppspec_gate": SPEC,
+    "ppspec_rt": SPEC + ["--post-realtime", "1", "--inherit-regret", "1", "--inherit-avg", "1"],
+    "ppspec_leaves": SPEC + ["--post-from-leaves", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }

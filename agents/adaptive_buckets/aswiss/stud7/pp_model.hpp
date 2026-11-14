@@ -242,7 +242,7 @@ uint32_t Model::pp_route_root(const pp::Cell& cell, const std::vector<const pp::
 
 // The training lookup: creates a start cell on its first visit. --pp-assign fill: a traverser visit to a pending leaf is
 // routed by its own direction and kept as one of the leaf's m samples; the m-th fixes the pointer.
-uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser) {
+uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser, int32_t* leaf_out, pp::Stream* stream_out) {
     const uint16_t ctx = static_cast<uint16_t>(s.street << 8 | valid_mask(s, v));
     auto [it, inserted] = pp_->cell_of.try_emplace(ctx, static_cast<int32_t>(pp_->cells.size()));
     if (inserted) {
@@ -257,7 +257,14 @@ uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser) {
         pp_->cells.push_back(c);
     }
     const pp::Cell& c = pp_->cells[it->second];
-    const int32_t l = pp_->nodes[c.root].leaf >= 0 ? pp_->nodes[c.root].leaf : pp_->leaf_of(c.root, pp::make_stream(s, v));
+    int32_t l;
+    if (stream_out) {
+        *stream_out = pp::make_stream(s, v);
+        l = pp_->nodes[c.root].leaf >= 0 ? pp_->nodes[c.root].leaf : pp_->leaf_of(c.root, *stream_out);
+    } else {
+        l = pp_->nodes[c.root].leaf >= 0 ? pp_->nodes[c.root].leaf : pp_->leaf_of(c.root, pp::make_stream(s, v));
+    }
+    if (leaf_out) *leaf_out = l;
     const pp::Leaf& L = pp_->leaves[l];
     if (!L.pending) return L.ptr;
     if (!(pp_->opt.fill && traverser)) return L.prov;
@@ -501,7 +508,11 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
     const int actor = state.actor;
     const uint8_t mask = valid_mask(state, actor);
     ++pp_->epoch_nodes;
-    const uint32_t b = pp_train_bucket(state, actor, actor == traverser);
+    const bool acc = pp_->opt.acc && actor == traverser;
+    int32_t leaf = -1;
+    std::optional<pp::Stream> st;  // only built for --tree-split accum (other modes route as before)
+    if (acc) st.emplace();
+    const uint32_t b = acc ? pp_train_bucket(state, actor, true, &leaf, &*st) : pp_train_bucket(state, actor, actor == traverser);
     const auto sigma = rm_plus(buckets_[b].q, mask);
     if (actor != traverser) {
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) buckets_[b].s[a] += weight * sigma[a];
@@ -520,13 +531,16 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
     Bucket& bucket = buckets_[b];
     if (!bucket.dirty) { bucket.dirty = true; touched_.push_back(b); }
     double best = -std::numeric_limits<double>::infinity();
+    std::array<double, A> rv{};
     for (int a = 0; a < A; ++a) {
         if (!(mask & (1u << a))) continue;
         const double r = v[a] - node;
         bucket.pending[a] += r;
+        rv[a] = r;
         best = std::max(best, r);
     }
     traversal_gap_ += best;
+    if (acc) pp_acc_visit(leaf, *st, state, actor, rv, mask);
     return node;
 }
 
@@ -581,11 +595,157 @@ std::map<uint64_t, pp::Reservoir> Model::pp_collect(uint64_t n, uint64_t seed, s
 }
 
 // One judgment (PP_STUD7_DESIGN_KO.md section 6). Returns the posterior splits; writes one row of pp_judge.csv.
+// ---- --tree-split accum (PP_STUD7_DESIGN_KO.md section 18) ----
+// one traverser visit of leaf l: its per-visit regrets r go to the side of every candidate test that the information
+// state falls on, and the state is offered to the leaf's sample reservoir (Algorithm R with a deterministic draw)
+void Model::pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask) {
+    pp::Data& D = *pp_;
+    if (D.acc.size() <= static_cast<size_t>(l)) D.acc.resize(D.leaves.size());
+    pp::LeafAcc& L = D.acc[l];
+    for (pp::AccCand& c : L.cand) {
+        const int side = pp::feat(st, c.d) <= c.thr ? 0 : 1;
+        c.n[side] += 1;
+        for (int a = 0; a < A; ++a)
+            if (mask & (1u << a)) { c.s[side][a] += r[a]; c.q[side][a] += r[a] * r[a]; }
+    }
+    ++L.seen;
+    const size_t cap = static_cast<size_t>(D.opt.acc_pool);
+    if (L.pool.size() < cap) L.pool.push_back(pp::make_sample(s, v));
+    else {
+        const uint64_t j = pp_mix(pp_mix(pp_seed_, 0xacc0000 + static_cast<uint64_t>(l)), L.seen) % L.seen;
+        if (j < cap) L.pool[j] = pp::make_sample(s, v);
+    }
+}
+
+// fill leaf l up to K candidates: two different reservoir states, a feature of the first whose values differ, the
+// threshold half-way between them (a test that separates at least two visited states); no repeated (feature, threshold)
+void Model::pp_acc_fill(int32_t l) {
+    pp::Data& D = *pp_;
+    if (D.acc.size() <= static_cast<size_t>(l)) D.acc.resize(D.leaves.size());
+    pp::LeafAcc& L = D.acc[l];
+    if (static_cast<int>(L.cand.size()) >= D.opt.acc_k || L.pool.size() < 2) return;
+    std::vector<pp::Stream> ss;
+    ss.reserve(L.pool.size());
+    for (const pp::Sample& x : L.pool) ss.push_back(pp::make_stream(pp_view_state(x), x.seat));
+    std::mt19937_64 rng(pp_mix(pp_mix(pp_seed_, 0xacc1000 + static_cast<uint64_t>(l)), L.gen++));
+    std::vector<pp::Desc> fs;
+    for (int tries = 0; static_cast<int>(L.cand.size()) < D.opt.acc_k && tries < 64 * D.opt.acc_k; ++tries) {
+        const size_t i = rng() % ss.size(), j = rng() % ss.size();
+        if (i == j) continue;
+        fs.clear();
+        pp::features_of(ss[i], D.opt.poker, fs);
+        if (fs.empty()) continue;
+        const pp::Desc d = fs[rng() % fs.size()];
+        const double vi = pp::feat(ss[i], d), vj = pp::feat(ss[j], d);
+        if (vi == vj) continue;
+        const float thr = static_cast<float>(0.5 * (vi + vj));
+        bool dup = false;
+        for (const pp::AccCand& c : L.cand) if (c.d == d && c.thr == thr) { dup = true; break; }
+        if (dup) continue;
+        pp::AccCand c;
+        c.d = d; c.thr = thr;
+        L.cand.push_back(c);
+    }
+}
+
+// the judgment of --tree-split accum: every live leaf whose best passing candidate exists is split by it (one split
+// per leaf); other leaves drop the candidates that were tested and failed, or that stay one-sided, and refill to K.
+// No sample pass, no particle estimate. Writes the same pp_judge.csv / prior_splits.csv columns as pp_judge.
+int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std::ostream& jlog, std::ostream& plog) {
+    pp::Data& D = *pp_;
+    const pp::Opts& O = D.opt;
+    const auto t_start = std::chrono::steady_clock::now();
+    const int32_t e = D.level;
+    const uint64_t prior_before = D.prior_splits, signals_before = D.signals;
+    const auto live0 = live_buckets();
+    const size_t live_before = live0[0] + live0[1] + live0[2], leaves0 = D.live_leaves();
+    D.leaves_at_judgment = static_cast<int32_t>(leaves0);
+    D.acc.resize(D.leaves.size());
+    uint64_t judged = 0, tested = 0, splits = 0;
+    const int32_t nleaves = static_cast<int32_t>(D.leaves.size());
+    for (int32_t l = 0; l < nleaves; ++l) {
+        if (D.leaves[l].node < 0) continue;
+        pp::LeafAcc& LA = D.acc[l];
+        const uint8_t mask = static_cast<uint8_t>(D.leaves[l].ctx & 0xff);
+        int best = -1;
+        pp::AccTest bt;
+        std::vector<pp::AccTest> ts(LA.cand.size());
+        for (size_t k = 0; k < LA.cand.size(); ++k) {
+            ts[k] = pp::acc_test(LA.cand[k], mask, O.acc_min, O.acc_z);
+            tested += ts[k].testable;
+            if (ts[k].pass && (best < 0 || ts[k].gain > bt.gain)) { best = static_cast<int>(k); bt = ts[k]; }
+        }
+        judged += std::any_of(ts.begin(), ts.end(), [](const pp::AccTest& t) { return t.testable; });
+        if (best < 0) {  // drop the failed and the one-sided candidates, refill
+            std::vector<pp::AccCand> keep;
+            for (size_t k = 0; k < LA.cand.size(); ++k) {
+                const pp::AccCand& c = LA.cand[k];
+                const bool one_sided = c.n[0] + c.n[1] >= 4.0 * O.acc_min && std::min(c.n[0], c.n[1]) < O.acc_min;
+                if (!(ts[k].testable && !ts[k].pass) && !one_sided) keep.push_back(c);
+            }
+            LA.cand.swap(keep);
+            pp_acc_fill(l);
+            continue;
+        }
+        // split leaf l by candidate `best`
+        ++D.signals;
+        const pp::AccCand c = LA.cand[best];
+        const int32_t node = D.leaves[l].node;
+        const uint16_t ctx = D.leaves[l].ctx, depth = D.leaves[l].depth;
+        const uint32_t parent_bucket = D.leaves[l].ptr;
+        D.nodes[node].d = c.d; D.nodes[node].thr = c.thr; D.nodes[node].leaf = -1;
+        std::array<std::vector<pp::Sample>, 2> pools;
+        for (const pp::Sample& x : LA.pool)
+            pools[pp::feat(pp::make_stream(pp_view_state(x), x.seat), c.d) <= c.thr ? 0 : 1].push_back(x);
+        std::array<int32_t, 2> nl{};
+        for (int side = 0; side < 2; ++side) {
+            const uint32_t kid = new_bucket(parent_bucket);
+            const double share = O.inherit_share ? c.n[side] / (c.n[0] + c.n[1]) : 1.0;
+            for (int a = 0; a < A; ++a) {
+                buckets_[kid].q[a] = O.inherit_regret * share * buckets_[parent_bucket].q[a];
+                buckets_[kid].s[a] = O.inherit_avg * share * buckets_[parent_bucket].s[a];
+            }
+            pp::TNode n; n.leaf = static_cast<int32_t>(D.leaves.size());
+            const int32_t nn = static_cast<int32_t>(D.nodes.size());
+            D.nodes.push_back(n);
+            (side == 0 ? D.nodes[node].left : D.nodes[node].right) = nn;
+            pp::Leaf L; L.node = nn; L.ctx = ctx; L.depth = static_cast<uint16_t>(depth + 1); L.born = pp_root_now_; L.ptr = kid;
+            D.leaves.push_back(L);
+            nl[side] = n.leaf;
+            pp::LeafAcc kid_acc;
+            kid_acc.pool = pools[side];
+            kid_acc.seen = pools[side].size();
+            D.acc.push_back(std::move(kid_acc));
+            pp_acc_fill(n.leaf);
+        }
+        D.leaves[l].node = -1;
+        D.acc[l] = pp::LeafAcc{};
+        ++splits; ++D.prior_splits;
+        plog << epoch << ',' << roots << ',' << l << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
+             << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << bt.gain << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
+             << nl[0] << ',' << nl[1] << ',' << D.leaves[nl[0]].ptr << ',' << D.leaves[nl[1]].ptr << '\n';
+    }
+    if (splits) { ++D.level; D.last_split_root = roots; }
+    D.epoch_nodes = 0;
+    const auto live2 = live_buckets();
+    const auto mb = table_megabytes();
+    const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count();
+    // pp_judge.csv: judged_buckets = leaves with a tested candidate, samples_per_bucket = K, samples = tested candidates
+    jlog << epoch << ',' << roots << ',' << e << ',' << live_before << ',' << judged << ',' << O.acc_k << ',' << tested << ','
+         << splits << ',' << 2 * splits << ',' << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ',' << (D.signals - signals_before) << ','
+         << (D.prior_splits - prior_before) << ',' << D.live_leaves() << ',' << live2[0] + live2[1] + live2[2] << ','
+         << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ',' << D.steps_per_sample << ',' << 0 << ',' << 0 << ',' << 0 << ',' << 0 << ','
+         << 0 << ',' << secs << ',' << mb[0] << ',' << mb[1] << ',' << mb[2] << ',' << memory_mb(1) << ',' << memory_mb(0) << ','
+         << fill_steps << ',' << D.frozen << '\n';
+    return static_cast<int>(splits);
+}
+
 int Model::pp_judge(uint64_t seed, uint64_t epoch, uint64_t roots, uint64_t epoch_len, uint64_t fill_steps, std::ostream& jlog,
                     std::ostream& plog) {
     pp::Data& D = *pp_;
     const pp::Opts& O = D.opt;
     pp_root_now_ = roots; pp_epoch_ = epoch;
+    if (O.acc) return pp_judge_acc(epoch, roots, fill_steps, jlog, plog);
     const auto t_start = std::chrono::steady_clock::now();
     auto secs = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t_start).count(); };
     for (const auto& r : D.split_rows) plog << r << '\n';  // fill mode: prior splits made during training
@@ -806,6 +966,14 @@ void Model::pp_save(std::ofstream& out, bool full) const {
     put(out, D.prior_splits); put(out, D.signals); put(out, static_cast<uint8_t>(D.frozen)); put(out, D.leaves_at_judgment);
     put(out, static_cast<uint64_t>(D.split_rows.size()));
     for (const auto& r : D.split_rows) put_string(out, r);
+    if (D.opt.acc) {  // --tree-split accum only, so the checkpoints of the other modes are as before
+        put(out, static_cast<uint64_t>(D.acc.size()));
+        for (const pp::LeafAcc& L : D.acc) {
+            put(out, L.seen); put(out, L.gen);
+            put(out, static_cast<uint32_t>(L.pool.size())); for (const auto& x : L.pool) put(out, x);
+            put(out, static_cast<uint32_t>(L.cand.size())); for (const auto& c : L.cand) put(out, c);
+        }
+    }
 }
 
 void Model::pp_load(std::ifstream& in, bool full) {
@@ -848,6 +1016,16 @@ void Model::pp_load(std::ifstream& in, bool full) {
     get(in, n);
     D.split_rows.clear();
     for (uint64_t i = 0; i < n; ++i) D.split_rows.push_back(get_string(in));
+    D.acc.clear();
+    if (D.opt.acc) {
+        get(in, n);
+        D.acc.assign(n, {});
+        for (pp::LeafAcc& L : D.acc) {
+            get(in, L.seen); get(in, L.gen);
+            uint32_t m; get(in, m); L.pool.assign(m, {}); for (auto& x : L.pool) get(in, x);
+            get(in, m); L.cand.assign(m, {}); for (auto& c : L.cand) get(in, c);
+        }
+    }
 }
 
 // ---- pp-test: tests T1, T2, T3 and T7 of PP_STUD7_DESIGN_KO.md section 10 ----
@@ -859,6 +1037,66 @@ void Model::pp_load(std::ifstream& in, bool full) {
 //     from arbitrary unseen cards equals the state's own stream
 // T7  (a) the particle weights equal Policy-LBR's belief (same seed: same effective particle count); (b) the estimate
 //     settles as the particles grow (P = 64, 256, 1024, 4096) on --directions sampled states (needs --snapshot)
+// T10 (--tree-split accum) the candidate test on synthetic per-visit regrets, 5 legal actions, 200 / 300 visits a side:
+//   (a) both sides from the same distribution (normal, and a heavy-tailed mixture): the share passing z >= 3 is small;
+//   (b) the sides' means differ by 0.3 standard deviations in two actions: the test passes in most trials;
+//   (c) the sums of one candidate fed visit by visit give the same statistic as the closed form on the same data.
+bool pp_test_acc(uint64_t seed) {
+    std::mt19937_64 rng(seed ^ 0xacc7e57);
+    std::normal_distribution<double> g(0, 1);
+    std::uniform_real_distribution<double> u(0, 1);
+    const uint8_t mask = 0x1f;
+    auto run = [&](int trials, double shift, bool heavy) {
+        int pass = 0;
+        for (int t = 0; t < trials; ++t) {
+            pp::AccCand c;
+            for (int side = 0; side < 2; ++side) {
+                const int n = side ? 300 : 200;
+                for (int i = 0; i < n; ++i) {
+                    c.n[side] += 1;
+                    const double scale = heavy && u(rng) < 0.05 ? 10.0 : 1.0;  // 5% of the visits 10x larger
+                    for (int a = 0; a < 5; ++a) {
+                        const double r = scale * g(rng) + (side && a < 2 ? shift : 0.0);
+                        c.s[side][a] += r; c.q[side][a] += r * r;
+                    }
+                }
+            }
+            pass += pp::acc_test(c, mask, 100, 3).pass;
+        }
+        return static_cast<double>(pass) / trials;
+    };
+    const double null_normal = run(4000, 0, false), null_heavy = run(4000, 0, true), alt = run(1000, 0.3, false);
+    // (c) closed form on stored values
+    pp::AccCand c;
+    std::vector<std::array<double, 5>> xs[2];
+    for (int side = 0; side < 2; ++side)
+        for (int i = 0; i < 150; ++i) {
+            std::array<double, 5> x{};
+            for (int a = 0; a < 5; ++a) x[a] = g(rng) + (side ? 0.5 * a : 0.0);
+            xs[side].push_back(x);
+            c.n[side] += 1;
+            for (int a = 0; a < 5; ++a) { c.s[side][a] += x[a]; c.q[side][a] += x[a] * x[a]; }
+        }
+    double d2 = 0, mu = 0, var = 0;
+    const double h = 1.0 / 150 + 1.0 / 150;
+    for (int a = 0; a < 5; ++a) {
+        double m[2] = {0, 0}, w = 0;
+        for (int side = 0; side < 2; ++side) { for (const auto& x : xs[side]) m[side] += x[a]; m[side] /= 150; }
+        for (int side = 0; side < 2; ++side) for (const auto& x : xs[side]) w += (x[a] - m[side]) * (x[a] - m[side]);
+        const double v = w / (300 - 2);
+        d2 += (m[0] - m[1]) * (m[0] - m[1]); mu += v * h; var += 2 * v * h * v * h;
+    }
+    const double z_ref = (d2 - mu) / std::sqrt(var);
+    const pp::AccTest t = pp::acc_test(c, mask, 100, 3);
+    const bool closed_ok = std::abs(t.z - z_ref) <= 1e-9 * std::max(1.0, std::abs(z_ref)) &&
+                           std::abs(t.gain - 75.0 * d2) <= 1e-9 * std::max(1.0, 75.0 * d2);
+    const bool ok = null_normal < 0.02 && alt > 0.8 && closed_ok;
+    std::cout << "T10 accumulated-regret test: pass rate with equal sides " << null_normal << " (normal), " << null_heavy
+              << " (5% of visits 10x: reported, not judged); with a 0.3 s.d. shift in 2 of 5 actions " << alt
+              << "; closed form " << (closed_ok ? "equal" : "DIFFERS") << (ok ? "  pass\n" : "  FAIL\n");
+    return !ok;
+}
+
 int pp_test(int argc, char** argv) {
     auto o = parse(argc, argv, {{"--snapshot", ""}, {"--states", "200000"}, {"--seed", "7"}, {"--directions", "20"}});
     std::mt19937_64 rng(std::stoull(o["--seed"]));
@@ -990,5 +1228,6 @@ int pp_test(int argc, char** argv) {
     std::cout << "T7a belief = Policy-LBR's: " << t7a_bad << " mismatches" << (t7a_bad ? "  FAIL\n" : "  pass\n");
     std::cout << "T7b settling: worst max|r64-r4096| " << worst64 << ", worst max|r1024-r4096| " << worst1024
               << (worst1024 < worst64 ? "  (shrinks: pass)\n" : "  (does not shrink: CHECK)\n");
-    return t1_bad || t2_bad || t3_bad || t3_stream_bad || t7a_bad;
+    const bool t10_bad = pp_test_acc(std::stoull(o["--seed"]));
+    return t1_bad || t2_bad || t3_bad || t3_stream_bad || t7a_bad || t10_bad;
 }

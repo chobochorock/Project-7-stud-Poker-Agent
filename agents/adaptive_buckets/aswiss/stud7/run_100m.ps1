@@ -84,6 +84,8 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # full inheritance: a new table starts from its parent's cumulative regrets and average sums (no restart)
     pp_full   = @("pp_particle_inherit_full", "pp", 0, "prior-posterior ASWISS, children inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --inherit-regret 1 --inherit-avg 1")
     pp_parent_full = @("pp_particle_parent_inherit_full", "pp", 0, "prior-posterior ASWISS, parent start, children inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --leaf-start parent --inherit-regret 1 --inherit-avg 1")
+    pp_tree_acc = @("pp_tree_accum", "pp", 0, "single tree split by accumulated regret on candidate tests", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --tree-split accum")
+    pp_tree_acc_full = @("pp_tree_accum_inherit_full", "pp", 0, "single tree split by accumulated regret, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --tree-split accum --inherit-regret 1 --inherit-avg 1")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

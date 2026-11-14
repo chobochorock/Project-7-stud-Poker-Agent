@@ -18,6 +18,11 @@ struct Opts {
     int threads = 1;
     bool online_split = false;   // --online-lbr-schedule split
     uint64_t epoch_growth = 2;   // --epoch-growth G: the next epoch is G times as long (the split schedule's interval is G^i)
+    // --tree-split accum (tree only): leaves split by the regret accumulated during training on the two sides of K
+    // candidate tests (PP_STUD7_DESIGN_KO.md section 18) instead of the particle labels of a judgment
+    bool acc = false;
+    int acc_k = 8, acc_min = 100, acc_pool = 16;
+    double acc_z = 3;
     bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)
 };
 
@@ -38,6 +43,43 @@ struct Cell { uint16_t ctx = 0; int32_t root = -1; uint32_t bucket = 0xffffffffu
 struct Dir { std::array<double, A> r{}, se{}; uint8_t mask = 0; int label = -1; double neff = 0; uint64_t steps = 0; };
 struct Rows { std::vector<Sample> x; std::vector<Dir> d; };              // a judgment's rows with their directions
 struct Reservoir { uint64_t visits = 0; std::vector<Sample> x; std::vector<uint64_t> h; };
+// --tree-split accum: a candidate test of a leaf with the training regrets of its two sides (0: feat <= thr, 1: above):
+// per legal action the sum and the sum of squares of the per-visit regret v(a) - sum_b sigma(b) v(b), and the visits
+struct AccCand {
+    Desc d; float thr = 0;
+    std::array<std::array<double, A>, 2> s{}, q{};
+    std::array<double, 2> n{};
+};
+struct LeafAcc {
+    std::vector<AccCand> cand;
+    std::vector<Sample> pool;    // reservoir of the leaf's traverser visits (candidates are drawn from it)
+    uint64_t seen = 0;           // traverser visits offered to the reservoir
+    uint32_t gen = 0;            // candidate draws so far (seeds the next draw)
+};
+// the test of one candidate: D2 = |mean_L - mean_R|^2 over the legal actions, standardised by its mean and standard
+// deviation when both sides have the same mean (pooled within-side variance, normal approximation); gain = the drop of
+// the squared error of the per-visit regret vectors, n_L n_R / (n_L + n_R) * D2
+struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0; };
+AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min) {
+    AccTest t;
+    const double nl = c.n[0], nr = c.n[1];
+    if (nl < min_visits || nr < min_visits) return t;
+    t.testable = true;
+    const double h = 1 / nl + 1 / nr;
+    double mu = 0, var = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        const double ml = c.s[0][a] / nl, mr = c.s[1][a] / nr;
+        const double within = std::max(0.0, c.q[0][a] - c.s[0][a] * ml) + std::max(0.0, c.q[1][a] - c.s[1][a] * mr);
+        const double v = within / std::max(1.0, nl + nr - 2);
+        t.d2 += (ml - mr) * (ml - mr);
+        mu += v * h; var += 2 * (v * h) * (v * h);
+    }
+    t.z = var > 0 ? (t.d2 - mu) / std::sqrt(var) : (t.d2 > 0 ? 1e300 : 0);
+    t.gain = nl * nr / (nl + nr) * t.d2;
+    t.pass = t.z >= z_min;
+    return t;
+}
 
 struct Data {
     Opts opt;
@@ -56,6 +98,7 @@ struct Data {
     bool frozen = false;                           // --mem-budget-mb reached: no more judgments
     int32_t leaves_at_judgment = 0;
     std::vector<std::string> split_rows;           // prior_splits.csv rows not yet written (fill mode, during training)
+    std::vector<LeafAcc> acc;                      // --tree-split accum: per leaf (index = leaf), grown on demand
 
     uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
         while (b != 0xffffffffu && born[b] > lv) b = parent[b];

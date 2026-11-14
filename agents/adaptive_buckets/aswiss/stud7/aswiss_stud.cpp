@@ -110,6 +110,7 @@ __declspec(dllimport) int __stdcall GetProcessTimes(void* process, AswFileTime* 
 #include <unordered_set>
 #include <numeric>
 #include <queue>
+#include <optional>
 
 namespace {
 
@@ -569,7 +570,11 @@ public:
     uint32_t pp_route_sum(uint32_t b, const std::vector<const pp::Dir*>& ds) const;
     uint32_t pp_route_root(const pp::Cell& cell, const std::vector<const pp::Sample*>& xs, const std::vector<const pp::Dir*>& now,
                            int32_t cur_level, uint64_t salt, uint64_t& steps);
-    uint32_t pp_train_bucket(const State& s, int v, bool traverser);
+    // leaf_out / stream_out (--tree-split accum): the leaf reached and the observation stream it was routed by
+    uint32_t pp_train_bucket(const State& s, int v, bool traverser, int32_t* leaf_out = nullptr, pp::Stream* stream_out = nullptr);
+    void pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask);
+    void pp_acc_fill(int32_t l);
+    int pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std::ostream& jlog, std::ostream& plog);
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
     void pp_finalize_fill(int32_t l, bool at_judgment);
@@ -1917,7 +1922,8 @@ int train(int argc, char** argv) {
                                 {"--judge-mem-mb", "256"}, {"--prior-ratio", "4"}, {"--prior-criterion", "label"},
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
                                 {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"}, {"--epoch-growth", "2"},
-                                {"--pp-structure", "pp"}});
+                                {"--pp-structure", "pp"}, {"--tree-split", "label"}, {"--acc-candidates", "8"},
+                                {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -1976,7 +1982,7 @@ int train(int argc, char** argv) {
         };
         choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
-        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"});
+        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -1992,6 +1998,12 @@ int train(int argc, char** argv) {
         // --pp-structure tree: strategies live on the prior leaves themselves; a leaf whose judged samples carry two or
         // more labels is split by tests on those samples. No posterior layer: no pointers, pending leaves or routes.
         ppo.tree = o["--pp-structure"] == "tree";
+        // --tree-split accum (section 18): split by the regrets accumulated on the sides of K candidate tests
+        ppo.acc = o["--tree-split"] == "accum";
+        ppo.acc_k = std::stoi(o["--acc-candidates"]); ppo.acc_min = std::stoi(o["--acc-min-visits"]);
+        ppo.acc_z = std::stod(o["--acc-z"]); ppo.acc_pool = std::stoi(o["--acc-pool"]);
+        if (ppo.acc && !ppo.tree) throw std::runtime_error("--tree-split accum needs --pp-structure tree");
+        if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
             if (ppo.fill) throw std::runtime_error("--pp-structure tree has no pending leaves: it does not take --pp-assign fill");
             ppo.root_start = false;  // nothing is routed
@@ -2049,7 +2061,9 @@ int train(int argc, char** argv) {
                           ";online_schedule=" + o["--online-lbr-schedule"] +
                           (ppo.inherit_regret > 0 || ppo.inherit_avg > 0 ? ";inherit_regret=" + o["--inherit-regret"] + ";inherit_avg=" + o["--inherit-avg"]
                                                                           : std::string()) +
-                          (ppo.tree ? ";pp_structure=tree" : "") + (ppo.inherit_share ? ";inherit_share=1" : "") : std::string());
+                          (ppo.tree ? ";pp_structure=tree" : "") + (ppo.inherit_share ? ";inherit_share=1" : "") +
+                          (ppo.acc ? ";tree_split=accum;acc_candidates=" + o["--acc-candidates"] + ";acc_min_visits=" + o["--acc-min-visits"] +
+                                         ";acc_z=" + o["--acc-z"] + ";acc_pool=" + o["--acc-pool"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

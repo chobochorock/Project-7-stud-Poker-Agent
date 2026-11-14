@@ -54,6 +54,10 @@ ARMS = {
     "tree_frz": ("tree (default), splits frozen after 127,000 roots", "pp", "", TREE + ["--freeze-splits-at", "255000"]),
     "tree_ml8_poker_frz": ("tree, min-leaf 8 + poker, splits frozen after 127,000 roots", "pp", "",
                            TREE + ["--min-leaf", "8", "--features", "poker", "--freeze-splits-at", "255000"]),
+    # --tree-split accum: leaves split by the regret accumulated on the sides of K candidate tests (design section 18)
+    "tree_acc": ("tree, accumulated-regret split, restart", "pp", "", TREE + ["--tree-split", "accum"]),
+    "tree_acc_inh11": ("tree, accumulated-regret split, inherit regret 1 + avg 1", "pp", "",
+                       TREE + ["--tree-split", "accum", "--inherit-regret", "1", "--inherit-avg", "1"]),
     "pp": ("prior-posterior (root start, restart)", "pp", "", []),
     "pp_full": ("prior-posterior (root start), inherit regret 1 + avg 1", "pp", "", ["--inherit-regret", "1", "--inherit-avg", "1"]),
     "pp_parent": ("prior-posterior (parent start, restart)", "pp", "", ["--leaf-start", "parent"]),
@@ -169,6 +173,7 @@ STYLE = {"tree": ("#2a78d6", "-"), "tree_frz": ("#eb6834", "-"), "tree_inh11": (
          "tree_poker": ("#e87ba4", "-"), "tree_ml8_poker_b1": ("#008300", "-"), "tree_inh051": ("#6250d6", "-"), "pp": ("#e34948", "-"),
          "tree_cf": ("#2a78d6", ":"), "tree_ml8_poker_frz": ("#eb6834", ":"), "tree_inh01": ("#6250d6", ":"),
          "tree_ml8_poker": ("#eda100", ":"), "ctx": ("#a3a29c", ":"),
+         "tree_acc": ("#2a78d6", "--"), "tree_acc_inh11": ("#1baf7a", "--"),
          "pp_full": ("#008300", ":"), "pp_parent": ("#e34948", ":"), "pp_parent_full": ("#e87ba4", ":"),
          "k8": ("#a3a29c", "--"), "k32": ("#7d7c77", "--"), "k64": ("#52514e", "--"), "k256": ("#0b0b0b", "--")}
 

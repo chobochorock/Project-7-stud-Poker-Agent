@@ -16,6 +16,8 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | tree, accumulated direction, full inheritance (2x) | 140M | 0.6073 [0.4987, 0.6462] | 1.77 | 0.682 [0.577, 1.034] | 0.85 | 326–529 | 0.6063 |
 | ppacc, direction, full inheritance | 159M | 0.8142 [0.7039, 0.9185] | 2.38 | 0.901 [0.622, 0.955] | 1.12 | 38–69 | 0.9111 |
 | ppacc, MSE, full inheritance | 147M | 0.6983 [0.6784, 0.7226] | 2.04 | 0.705 [0.703, 0.778] | 0.88 | 154–212 | 0.8083 |
+| ppacc, MSE, tables restart, split when window regret <= 0.1 | 153M | 0.5138 [0.4583, 0.5398] | 1.50 | 0.707 [0.704, 0.710] | 0.88 | 1,512–1,751 | 0.5084 |
+| ppacc, direction, tables restart, split when window regret <= 0.1 | 150M | 0.6056 [0.5610, 0.6672] | 1.77 | 0.551 [0.545, 0.737] | 0.69 | 190–936 | 0.7544 |
 | pure a, iterates (reference) | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 |
 | pp mix, avg, root (reference) | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 |
 | k-means, rule a counts (baseline) | 224M | 0.3424 [0.3202, 0.3524] | 1.00 | 0.802 [0.745, 0.850] | 1.00 | 9,394–10,808 | 0.3366 |

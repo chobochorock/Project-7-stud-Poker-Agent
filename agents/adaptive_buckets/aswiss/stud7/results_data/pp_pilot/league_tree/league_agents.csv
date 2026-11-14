@@ -1,0 +1,8 @@
+agent,kind,partition,snapshot,policy,opponents,deals,mean_vs_field,ci95
+kmeans256_2.05M,snapshot,atom,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/t9/k256/snapshot_10.bin,average,6,10000,0.20507,0.0476216
+kmeans8_2.05M,snapshot,atom,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/t9/k8/snapshot_10.bin,average,6,10000,0.175415,0.0365666
+tree_restart_2.05M,snapshot,pp,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/t9/tree/snapshot_10.bin,average,6,10000,-0.39721,0.0531384
+tree_fullinh_2.05M,snapshot,pp,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/t9/tree_inh11/snapshot_10.bin,average,6,10000,-0.111936,0.0305392
+tree_fullinh_frozen_2.05M,snapshot,pp,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/t9/tree_inh11_frz/snapshot_10.bin,average,6,10000,-0.113845,0.0320507
+pp_g10_fullinh_1.11M,snapshot,pp,/tmp/claude-0/-home-user-Project-7-stud-Poker-Agent/b14be346-5af4-5c12-a577-98f801293c67/scratchpad/pp7/tp_g10/pp_full_s1/snapshot_3.bin,average,6,10000,-0.157115,0.0250403
+heuristic,heuristic,baseline,,average,6,10000,0.399621,0.0466227

@@ -1,0 +1,8 @@
+name,kind,partition,atlas,snapshot,policy
+kmeans256_2.05M,snapshot,atom,stud7/atlas/atlas_power256_heur_eps20_seed37301.bin,SCRATCH/t9/k256/snapshot_10.bin,average
+kmeans8_2.05M,snapshot,atom,stud7/atlas/atlas_power8_heur_eps20_seed37301.bin,SCRATCH/t9/k8/snapshot_10.bin,average
+tree_restart_2.05M,snapshot,pp,,SCRATCH/t9/tree/snapshot_10.bin,average
+tree_fullinh_2.05M,snapshot,pp,,SCRATCH/t9/tree_inh11/snapshot_10.bin,average
+tree_fullinh_frozen_2.05M,snapshot,pp,,SCRATCH/t9/tree_inh11_frz/snapshot_10.bin,average
+pp_g10_fullinh_1.11M,snapshot,pp,,SCRATCH/tp_g10/pp_full_s1/snapshot_3.bin,average
+heuristic,heuristic,baseline,,,

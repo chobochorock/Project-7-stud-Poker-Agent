@@ -1288,7 +1288,7 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"},
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
@@ -1352,6 +1352,12 @@ int main(int argc, char** argv) try {
     const double budget = stod(opt["--seconds"]), ckpt_every = 60.0 * stod(opt["--checkpoint-minutes"]);
     long long T = stoll(opt["--iters"]);
     const int stop_after_rows = stoi(opt["--stop-after-rows"]);
+    // --judgment-rows split: a judgment that splits nothing writes no row (its policy files are removed); grid rows and
+    // the last row are always written. Logging only: training is the same. (A run waiting with few tables can meet the
+    // waiting condition every --gate-check iterations without splitting; "all" then writes a row, ~3 MB, each time.)
+    const string judgment_rows = opt["--judgment-rows"];
+    if (judgment_rows != "all" && judgment_rows != "split") throw runtime_error("--judgment-rows must be all or split");
+    if (judgment_rows == "split" && pp_mode && measure) throw runtime_error("--judgment-rows split is not for --mode pp with --measure 1");
 
     players = load<int32_t>(dir + "/players.bin"); info = load<int32_t>(dir + "/info.bin");
     start = load<int64_t>(dir + "/start.bin"); degree = load<int32_t>(dir + "/degree.bin");
@@ -1414,7 +1420,7 @@ int main(int argc, char** argv) try {
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
-            !(k == "--div-metric" && v == "same") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
@@ -1867,6 +1873,13 @@ int main(int argc, char** argv) try {
                 if (schedule == "regret") Qwin = Q;  // the next window starts here (new tables start from their initial values)
                 ++run.k; run.epoch_start = run.t;
                 draw_samples();
+            }
+            if (judgment_rows == "split" && splits == 0 && !grid_row && run.t != T) {  // nothing changed: no row
+                excl([&] {
+                    remove((out + "/policy_bucket_" + to_string(run.rows) + ".bin").c_str());
+                    remove((out + "/policy_current_" + to_string(run.rows) + ".bin").c_str());
+                });
+                continue;
             }
             emit(st, before, splits);
             excl(save_state);

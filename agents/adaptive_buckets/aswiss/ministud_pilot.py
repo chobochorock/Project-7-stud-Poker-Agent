@@ -70,6 +70,11 @@ ARMS = {
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }
+# every arm that waits for the condition: a judgment that splits nothing writes no row (logging only; training is the
+# same, and a run started without it resumes with it). Without it a run with few tables writes a ~3 MB row every
+# 10,000 iterations.
+for k in ARMS:
+    if "regret" in ARMS[k]: ARMS[k] = ARMS[k] + ["--judgment-rows", "split"]
 for arm in a.arms:
     if arm not in ARMS: sys.exit(f"unknown arm {arm}; arms: {' '.join(ARMS)}")
 os.makedirs(OUT, exist_ok=True)

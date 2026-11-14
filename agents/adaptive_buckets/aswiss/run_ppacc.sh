@@ -14,6 +14,8 @@
 # The user's specification as written (2026-11-14; design section 19.6): prior candidates by MSE, the divergence of a
 # leaf by the distance of normalised regret vectors against its whole posterior bucket, and at a posterior split only the
 # leaves whose pointer is reassigned restart their records; every judgment waits for the window's average regret <= 0.1.
+# --judgment-rows split: a judgment that splits nothing writes no row (with few tables the waiting condition is met
+# every 10,000 iterations, and each row is ~3 MB of policy files).
 #   ppspec_gate     alternating prior and posterior judgments, the new posterior tables restart
 #   ppspec_rt       the user's first alternative: posterior splits in real time with full inheritance
 #   ppspec_leaves   the user's second alternative: a bucket's tables are the sums of its leaves' records
@@ -29,7 +31,7 @@ run() {  # name seed args...
   [ -f "$d/exploitability.csv" ] && return 0
   mkdir -p "$d"
   "$EXE" --tree "$D" --out "$d" --seconds "$SECS" --seed "$seed" "$@" 2>> "$d/stderr.log"
-  python3 "$A/eval.py" "$D" "$d" > /dev/null
+  python3 "$A/eval.py" "$D" "$d" > /dev/null || { echo "eval failed: $d (policy files kept)"; return 1; }
   local last=$(( $(grep -c '^[0-9]' "$d/log.csv") - 1 ))
   find "$d" -name 'policy_*.bin' ! -name "policy_*_$last.bin" -delete
   rm -f "$d/state.bin" "$d/state.bin.tmp"
@@ -43,7 +45,7 @@ for s in $SEEDS; do
   echo "ppacc_dir_gate $s --mode ppacc --acc-metric dir --schedule regret --regret-gate 0.1 --measure 1" >> "$jobs"
   echo "ppacc_rt $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
   echo "ppacc_rt_restart $s --mode ppacc --schedule regret --regret-gate 0.1 --post-realtime 1 --measure 1" >> "$jobs"
-  SPEC="--mode ppacc --acc-metric mse --div-metric dir --div-ref bucket --reset-moved-only 1 --schedule regret --regret-gate 0.1 --measure 1"
+  SPEC="--mode ppacc --acc-metric mse --div-metric dir --div-ref bucket --reset-moved-only 1 --schedule regret --regret-gate 0.1 --measure 1 --judgment-rows split"
   echo "ppspec_gate $s $SPEC" >> "$jobs"
   echo "ppspec_rt $s $SPEC --post-realtime 1 --inherit-regret 1 --inherit-avg 1" >> "$jobs"
   echo "ppspec_leaves $s $SPEC --post-from-leaves 1" >> "$jobs"

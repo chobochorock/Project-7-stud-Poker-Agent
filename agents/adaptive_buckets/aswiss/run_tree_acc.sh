@@ -10,6 +10,8 @@
 #   tree_dir_inh    the same with full inheritance
 #   tree_mse_g4, tree_mse_g10, tree_mse_inh_g10   splits every 4x / 10x of iterations (--epoch-growth): more training
 #                   between splits (user, 2026-11-14: "restart is the right method; the tables were not given enough time")
+#   tree_mse_gate   a split waits until the abstract game's average regret over the window since the last split is
+#                   <= 0.1 (--schedule regret --regret-gate 0.1; user, 2026-11-14)
 #   tree_mse_frz, tree_mse_inh_frz   no split after the judgment at 16,384,000 iterations (--freeze-at): the same
 #                   kind of partition, trained on for the rest of the budget, restart against full inheritance
 set -euo pipefail
@@ -40,6 +42,7 @@ for s in $SEEDS; do
   echo "tree_mse_g10 $s --mode tree --epoch-growth 10 --measure 1" >> "$jobs"
   echo "tree_mse_inh_g10 $s --mode tree --epoch-growth 10 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
   echo "tree_mse_frz $s --mode tree --freeze-at 16384001 --measure 1" >> "$jobs"
+  echo "tree_mse_gate $s --mode tree --schedule regret --regret-gate 0.1 --measure 1" >> "$jobs"
   echo "tree_mse_inh_frz $s --mode tree --freeze-at 16384001 --inherit-regret 1 --inherit-avg 1 --measure 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
@@ -50,7 +53,8 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_tree_acc" --arm "tree, accumulated MSE, r
   --arm "tree, accumulated MSE, restart, split every 10x=$(arm tree_mse_g10)" \
   --arm "tree, accumulated MSE, full inheritance, split every 10x=$(arm tree_mse_inh_g10)" \
   --arm "tree, accumulated MSE, restart, frozen after 16.4M=$(arm tree_mse_frz)" \
-  --arm "tree, accumulated MSE, full inheritance, frozen after 16.4M=$(arm tree_mse_inh_frz)" --arm "pure a, iterates=$(arm pure_a)" \
+  --arm "tree, accumulated MSE, full inheritance, frozen after 16.4M=$(arm tree_mse_inh_frz)" \
+  --arm "tree, accumulated MSE, restart, split when window regret <= 0.1=$(arm tree_mse_gate)" --arm "pure a, iterates=$(arm pure_a)" \
   --arm "pp mix, avg, root=$(arm ppmix_avg_root)" \
   --ref "k-means (rule a counts)=$(arm kmeans_a)" --ref "MCCFR (no abstraction)=$(arm mccfr)" --kmeans "k-means (rule a counts)"
 echo "done: $OUT/pp_small_tree_acc.md"

@@ -44,6 +44,11 @@
 // --resolve-now 1 (pp): new leaves get m samples drawn from their information sets (by counterfactual reach) at the
 // split and are finalized at once. --prior-criterion label: prior tests reduce the Gini impurity of the posterior
 // child each information set picks at the event (instead of the regret vectors' squared error).
+// --schedule regret --regret-gate G (--mode tree / ppacc): a judgment happens at the first multiple of --gate-check
+// iterations (default 10000, at least 1000 iterations after the last judgment) where the abstract game's average regret
+// over the window since the last judgment, sum over buckets of max(0, max_a (Q_b - Q_b at the window's start)) /
+// (iterations in the window), is <= G: every split waits until the current abstraction has converged to G. The
+// statistic and G are logged in the eps_stat / eps columns.
 // --freeze-at T (--mode tree / ppacc, 0 = never): epoch ends at iteration T or later make no splits (the partition reached
 // is trained on); the epoch schedule and the rows go on as before.
 // --epoch-growth G (static schedule, default 2): judgments at E * G^k, so a table born at a judgment trains (G - 1) / G
@@ -175,6 +180,7 @@ void load_esd(const string& path) {
 // ======================= posterior =======================
 int B = 0, level_now = 0;
 vector<double> Q, S, Rtmp;
+vector<double> Qwin;            // --schedule regret: the tables' cumulative regrets at the start of the window
 vector<int32_t> bucket_n;
 vector<long long> vis;          // traverser visits since the bucket's birth (eps rule)
 vector<double> parent_eps;      // the parent's eps value at the split
@@ -1218,7 +1224,7 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}};
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1250,10 +1256,11 @@ int main(int argc, char** argv) try {
     leaf_cache_on = opt["--leaf-cache"] == "1"; pend_cache_on = opt["--pend-cache"] == "1";
     memo_on = opt["--memo"] == "1"; table_on = opt["--table"] == "1"; rows_per_octave = stoi(opt["--rows-per-octave"]);
     if (outlier != "esd" && outlier != "z" && outlier != "label") throw runtime_error("--outlier must be esd, z or label");
-    if ((tree_mode || ppacc_mode) && (opt["--prior-start"] != "equal" || opt["--schedule"] != "static" || !opt["--p0"].empty()))
-        throw runtime_error("--mode tree and ppacc need --prior-start equal, --schedule static and no --p0");
+    if ((tree_mode || ppacc_mode) && (opt["--prior-start"] != "equal" || opt["--schedule"] == "eps" || !opt["--p0"].empty()))
+        throw runtime_error("--mode tree and ppacc need --prior-start equal, --schedule static or regret and no --p0");
     if (scale != "counterfactual" && scale != "fact-counterfact") throw runtime_error("--scale must be counterfactual or fact-counterfact");
-    if (schedule != "static" && schedule != "eps") throw runtime_error("--schedule must be static or eps");
+    if (schedule != "static" && schedule != "eps" && schedule != "regret") throw runtime_error("--schedule must be static, eps or regret");
+    if (schedule == "regret" && !tree_mode && !ppacc_mode) throw runtime_error("--schedule regret is for --mode tree and ppacc");
     if (prior_split != "immediate" && prior_split != "epoch") throw runtime_error("--prior-split must be immediate or epoch");
     if (prior_start != "equal" && prior_start != "length" && prior_start != "identity") throw runtime_error("bad --prior-start");
     if (features != "general" && features != "poker") throw runtime_error("--features must be general or poker");
@@ -1327,7 +1334,8 @@ int main(int argc, char** argv) try {
             !(k == "--direction" && v == "iterates") && !(k == "--leaf-start" && v == "root") && !(k == "--tol" && v == "1e-3") &&
             !(k == "--acc-candidates" && v == "8") && !(k == "--acc-min-visits" && v == "100") && !(k == "--acc-z" && v == "3") &&
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
-            !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0"))  // defaults of later options: old runs resume
+            !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
+            !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1394,6 +1402,7 @@ int main(int argc, char** argv) try {
             for (const LeafAcc& L : lacc) { putv(o, L.cand); putv(o, L.pool); put(o, L.seen); put(o, L.gen); }
         }
         if (ppacc_mode) { putv(o, lown); put(o, n_post_splits); put(o, n_diverging); }
+        if (schedule == "regret") putv(o, Qwin);
         fflush(prior_log);
         log_bytes = fsize(log_path); ev_bytes = fsize(ev_path); pr_bytes = fsize(pr_path); ds_bytes = fsize(ds_path);
         put(o, log_bytes); put(o, ev_bytes); put(o, pr_bytes); put(o, ds_bytes);
@@ -1440,6 +1449,7 @@ int main(int argc, char** argv) try {
             for (LeafAcc& L : lacc) { getv(in, L.cand); getv(in, L.pool); get(in, L.seen); get(in, L.gen); }
         }
         if (ppacc_mode) { getv(in, lown); get(in, n_post_splits); get(in, n_diverging); }
+        if (schedule == "regret") getv(in, Qwin);
         get(in, log_bytes); get(in, ev_bytes); get(in, pr_bytes); get(in, ds_bytes);
         if (!in) throw runtime_error("truncated state.bin");
         filesystem::resize_file(log_path, log_bytes); filesystem::resize_file(ev_path, ev_bytes);
@@ -1539,6 +1549,23 @@ int main(int argc, char** argv) try {
         const Leaf& L = leaves[leaf_of(I)];
         return L.pending ? route_from(I, L.start_level, L.start_b) : L.ptr;
     };
+    // --schedule regret: the tables at the window's start and the window's average regret
+    const double regret_gate = stod(opt["--regret-gate"]);
+    const long long gate_check = stoll(opt["--gate-check"]);
+    if (gate_check < 1) throw runtime_error("--gate-check must be positive");
+    auto window_regret = [&] {
+        double tot = 0;
+        for (int b = 0; b < B; ++b) {
+            double m = 0;
+            for (int a = 0; a < bucket_n[b]; ++a) {
+                const double base = (size_t)b * W + a < Qwin.size() ? Qwin[(size_t)b * W + a] : 0.0;
+                m = max(m, Q[(size_t)b * W + a] - base);
+            }
+            tot += m;
+        }
+        return tot / max<long long>(1, run.t - run.epoch_start);
+    };
+    double row_window_regret = NAN;  // --schedule regret: the window statistic of the row being written (before its judgment)
     auto eps_stat = [&] {
         double s = 0;
         for (int b = 0; b < B; ++b) s += vis[b] >= 25 || parent_eps[b] < 0 ? psi(&Q[(size_t)b * W], bucket_n[b]) / max<long long>(1, vis[b]) : parent_eps[b];
@@ -1608,8 +1635,8 @@ int main(int argc, char** argv) try {
             for (const Leaf& L : leaves) if (L.node >= 0) { ++alive; pend += L.pending; }
             fprintf(logf, "%d,%lld,%d,%d,%d,%d,%d,%d,%d,%lld,%lld,%lld,%lld,%zu,%d,%.6g,%.6g,%.8g,%.8g,%.8g,%.8g,%.3f,%.3f,%lld,%lld,%d,%.3f,%.1f\n",
                     run.rows, run.t, run.k, level_now, before, B, splits, pp_mode || tree_mode || ppacc_mode ? alive : 0, pp_mode ? pend : 0, n_prior_splits,
-                    n_prior_rejected, n_finalize, n_signals, waiting.size(), run.curK, schedule == "eps" ? eps_stat() : NAN,
-                    run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used, routing_mb(), peak_rss_mb());
+                    n_prior_rejected, n_finalize, n_signals, waiting.size(), run.curK,
+                    schedule == "eps" ? eps_stat() : schedule == "regret" ? row_window_regret : NAN, schedule == "regret" ? regret_gate : run.eps, irs, brs, irs - brs, trs, train_secs(), assign_cpu, cnt.directions, n_gain_rejected, st.used, routing_mb(), peak_rss_mb());
             fflush(logf);
             cerr << "row " << run.rows << " iters " << run.t << " level " << level_now << " buckets " << before << " -> " << B;
             if (pp_mode || tree_mode || ppacc_mode) cerr << " leaves " << alive << " pending " << pend << " prior splits " << n_prior_splits;
@@ -1739,19 +1766,22 @@ int main(int argc, char** argv) try {
         if (budget_end) T = run.t;
         bool is_end = false;
         if (schedule == "static") is_end = run.t == epoch_end_static(run.k);
-        else if (run.k == 0) is_end = run.t == eps_at;
+        else if (run.k == 0 && schedule == "eps") is_end = run.t == eps_at;
+        else if (schedule == "regret") is_end = run.t - run.epoch_start >= 1000 && run.t % gate_check == 0 && window_regret() <= regret_gate;
         else is_end = run.t - run.epoch_start >= 1000 && run.t % eps_check == 0 && eps_stat() < run.eps;
         if (is_end && direction_avg && split_on) { run.cur_tables = avg_table(); run.curK = 1; }  // the split-time average strategy
         const bool grid_row = run.t == next_row_t();
         if (grid_row) ++run.next_row_j;
         if (is_end || grid_row || run.t == T) {
             const int before = B;
+            if (schedule == "regret") row_window_regret = window_regret();
             int splits = 0;
             if (is_end && run.curK > 0 && schedule == "eps" && run.k == 0) run.eps = eps_stat();
             const RowStats st = snapshot(before);
             if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
                 const bool frozen = freeze_at > 0 && run.t >= freeze_at;
                 if (!frozen) splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
+                if (schedule == "regret") Qwin = Q;  // the next window starts here (new tables start from their initial values)
                 ++run.k; run.epoch_start = run.t;
                 draw_samples();
             }

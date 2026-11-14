@@ -44,6 +44,8 @@
 // --resolve-now 1 (pp): new leaves get m samples drawn from their information sets (by counterfactual reach) at the
 // split and are finalized at once. --prior-criterion label: prior tests reduce the Gini impurity of the posterior
 // child each information set picks at the event (instead of the regret vectors' squared error).
+// --freeze-at T (--mode tree / ppacc, 0 = never): epoch ends at iteration T or later make no splits (the partition reached
+// is trained on); the epoch schedule and the rows go on as before.
 // --epoch-growth G (static schedule, default 2): judgments at E * G^k, so a table born at a judgment trains (G - 1) / G
 // of the run's iterations before the next one (G = 2: half).
 // --epoch0 E (static schedule: judgments at E * 2^k, default 1000) and --eps-at A (eps schedule: the first judgment and
@@ -1216,7 +1218,7 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}};
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1325,7 +1327,7 @@ int main(int argc, char** argv) try {
             !(k == "--direction" && v == "iterates") && !(k == "--leaf-start" && v == "root") && !(k == "--tol" && v == "1e-3") &&
             !(k == "--acc-candidates" && v == "8") && !(k == "--acc-min-visits" && v == "100") && !(k == "--acc-z" && v == "3") &&
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
-            !(k == "--epoch-growth" && v == "2"))  // defaults of later options: old runs resume
+            !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1338,7 +1340,8 @@ int main(int argc, char** argv) try {
     // --epoch0 E: static judgments at E * 2^k; --eps-at A: the eps rule's first judgment (and eps) at iteration A
     const long long epoch0 = stoll(opt["--epoch0"]), eps_at = stoll(opt["--eps-at"]);
     if (epoch0 < 1 || eps_at < 1) throw runtime_error("--epoch0 and --eps-at must be positive");
-    const long long growth = stoll(opt["--epoch-growth"]);
+    const long long growth = stoll(opt["--epoch-growth"]), freeze_at = stoll(opt["--freeze-at"]);
+    if (freeze_at > 0 && !tree_mode && !ppacc_mode) throw runtime_error("--freeze-at is for --mode tree and ppacc");
     if (growth < 2 || growth > 1000) throw runtime_error("--epoch-growth must be 2 to 1000");
     if (growth != 2 && schedule != "static") throw runtime_error("--epoch-growth is for --schedule static");
     auto epoch_end_static = [&](int k) { long long e = epoch0; for (int i = 0; i < k; ++i) e *= growth; return e; };
@@ -1747,7 +1750,8 @@ int main(int argc, char** argv) try {
             if (is_end && run.curK > 0 && schedule == "eps" && run.k == 0) run.eps = eps_stat();
             const RowStats st = snapshot(before);
             if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
-                splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
+                const bool frozen = freeze_at > 0 && run.t >= freeze_at;
+                if (!frozen) splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
                 ++run.k; run.epoch_start = run.t;
                 draw_samples();
             }

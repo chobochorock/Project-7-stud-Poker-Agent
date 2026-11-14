@@ -8,6 +8,7 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | tree, accumulated MSE, restart, every 4x | 119M | 0.5966 [0.5672, 0.6058] | 1.74 | 0.770 [0.755, 0.793] | 0.96 | 784–810 | 0.7588 |
 | tree, accumulated MSE, restart, every 10x | 143M | 0.7349 [0.6476, 0.7377] | 2.15 | 0.771 [0.694, 0.777] | 0.96 | 91–115 | 0.7740 |
 | tree, accumulated MSE, restart, frozen after 16.4M | 107M | 0.1066 [0.1047, 0.1643] | 0.31 | 0.592 [0.528, 0.757] | 0.74 | 12,507–14,863 | 0.2391 |
+| tree, accumulated MSE, restart, split when window regret <= 0.1 | 128M | 0.1585 [0.1031, 0.2242] | 0.46 | 0.624 [0.518, 0.631] | 0.78 | 17,772–19,848 | 0.3005 |
 | tree, accumulated MSE, full inheritance (2x) | 124M | 0.3394 [0.2935, 0.3905] | 0.99 | 0.790 [0.780, 0.819] | 0.98 | 8,944–12,539 | 0.5225 |
 | tree, accumulated MSE, full inheritance, every 10x | 147M | 0.7650 [0.6776, 0.7673] | 2.23 | 0.826 [0.815, 0.930] | 1.03 | 108–132 | 0.8007 |
 | tree, accumulated MSE, full inheritance, frozen after 16.4M | 114M | 0.3520 [0.3070, 0.3959] | 1.03 | 0.792 [0.718, 0.851] | 0.99 | 4,979–7,593 | 0.5225 |

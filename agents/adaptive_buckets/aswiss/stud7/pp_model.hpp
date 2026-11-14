@@ -671,9 +671,11 @@ int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std
         pp::AccTest bt;
         std::vector<pp::AccTest> ts(LA.cand.size());
         for (size_t k = 0; k < LA.cand.size(); ++k) {
-            ts[k] = pp::acc_test(LA.cand[k], mask, O.acc_min, O.acc_z);
+            ts[k] = pp::acc_test(LA.cand[k], mask, O.acc_min, O.acc_z, O.acc_dir, O.acc_dist);
             tested += ts[k].testable;
-            if (ts[k].pass && (best < 0 || ts[k].gain > bt.gain)) { best = static_cast<int>(k); bt = ts[k]; }
+            // mse: the largest squared-error drop; dir: the largest direction distance (then the squared-error drop)
+            const bool better = O.acc_dir ? (ts[k].dist > bt.dist || (ts[k].dist == bt.dist && ts[k].gain > bt.gain)) : ts[k].gain > bt.gain;
+            if (ts[k].pass && (best < 0 || better)) { best = static_cast<int>(k); bt = ts[k]; }
         }
         judged += std::any_of(ts.begin(), ts.end(), [](const pp::AccTest& t) { return t.testable; });
         if (best < 0) {  // drop the failed and the one-sided candidates, refill
@@ -722,7 +724,7 @@ int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std
         D.acc[l] = pp::LeafAcc{};
         ++splits; ++D.prior_splits;
         plog << epoch << ',' << roots << ',' << l << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
-             << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << bt.gain << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
+             << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << (O.acc_dir ? bt.dist : bt.gain) << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
              << nl[0] << ',' << nl[1] << ',' << D.leaves[nl[0]].ptr << ',' << D.leaves[nl[1]].ptr << '\n';
     }
     if (splits) { ++D.level; D.last_split_root = roots; }
@@ -1090,7 +1092,27 @@ bool pp_test_acc(uint64_t seed) {
     const pp::AccTest t = pp::acc_test(c, mask, 100, 3);
     const bool closed_ok = std::abs(t.z - z_ref) <= 1e-9 * std::max(1.0, std::abs(z_ref)) &&
                            std::abs(t.gain - 75.0 * d2) <= 1e-9 * std::max(1.0, 75.0 * d2);
-    const bool ok = null_normal < 0.02 && alt > 0.8 && closed_ok;
+    // (d) --acc-metric dir: the same direction at 3x the size does not pass; opposite directions and one satisfied side do
+    auto dir_case = [&](double sl, double sr, bool right_zero) {
+        pp::AccCand c2;
+        for (int side = 0; side < 2; ++side)
+            for (int i = 0; i < 400; ++i) {
+                c2.n[side] += 1;
+                for (int a = 0; a < 5; ++a) {
+                    const double mean = side ? (right_zero ? 0.0 : sr * (a == 0 ? 1.0 : a == 1 ? -1.0 : 0.0)) : sl * (a == 0 ? 1.0 : a == 1 ? -1.0 : 0.0);
+                    const double r = g(rng) + mean;
+                    c2.s[side][a] += r; c2.q[side][a] += r * r;
+                }
+            }
+        return pp::acc_test(c2, mask, 100, 3, true, 0.5);
+    };
+    const pp::AccTest same = dir_case(1, 3, false), opposite = dir_case(1, -1, false), satisfied = dir_case(1, 0, true);
+    const bool dir_ok = same.z >= 3 && !same.pass && same.dist < 0.05 && opposite.pass && opposite.dist > 3.9 && satisfied.pass;
+    std::cout << "T10d direction metric: same direction 3x size dist " << same.dist << (same.pass ? " passes" : " does not pass")
+              << " (mse z " << same.z << "); opposite dist " << opposite.dist << (opposite.pass ? " passes" : " does not pass")
+              << "; one side satisfied dist " << satisfied.dist << (satisfied.pass ? " passes" : " does not pass")
+              << (dir_ok ? "  pass\n" : "  FAIL\n");
+    const bool ok = null_normal < 0.02 && alt > 0.8 && closed_ok && dir_ok;
     std::cout << "T10 accumulated-regret test: pass rate with equal sides " << null_normal << " (normal), " << null_heavy
               << " (5% of visits 10x: reported, not judged); with a 0.3 s.d. shift in 2 of 5 actions " << alt
               << "; closed form " << (closed_ok ? "equal" : "DIFFERS") << (ok ? "  pass\n" : "  FAIL\n");

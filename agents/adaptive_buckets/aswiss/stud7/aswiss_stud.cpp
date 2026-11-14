@@ -1923,7 +1923,8 @@ int train(int argc, char** argv) {
                                 {"--crossfit", "0"}, {"--min-leaf", "1"}, {"--features", "general"}, {"--mem-budget-mb", "0"},
                                 {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"}, {"--epoch-growth", "2"},
                                 {"--pp-structure", "pp"}, {"--tree-split", "label"}, {"--acc-candidates", "8"},
-                                {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"}});
+                                {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
+                                {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -1982,7 +1983,7 @@ int train(int argc, char** argv) {
         };
         choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
-        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"});
+        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"}); choice("--acc-metric", {"mse", "dir"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -2002,6 +2003,7 @@ int train(int argc, char** argv) {
         ppo.acc = o["--tree-split"] == "accum";
         ppo.acc_k = std::stoi(o["--acc-candidates"]); ppo.acc_min = std::stoi(o["--acc-min-visits"]);
         ppo.acc_z = std::stod(o["--acc-z"]); ppo.acc_pool = std::stoi(o["--acc-pool"]);
+        ppo.acc_dir = o["--acc-metric"] == "dir"; ppo.acc_dist = std::stod(o["--acc-dist"]);
         if (ppo.acc && !ppo.tree) throw std::runtime_error("--tree-split accum needs --pp-structure tree");
         if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
@@ -2063,7 +2065,8 @@ int train(int argc, char** argv) {
                                                                           : std::string()) +
                           (ppo.tree ? ";pp_structure=tree" : "") + (ppo.inherit_share ? ";inherit_share=1" : "") +
                           (ppo.acc ? ";tree_split=accum;acc_candidates=" + o["--acc-candidates"] + ";acc_min_visits=" + o["--acc-min-visits"] +
-                                         ";acc_z=" + o["--acc-z"] + ";acc_pool=" + o["--acc-pool"] : "") : std::string());
+                                         ";acc_z=" + o["--acc-z"] + ";acc_pool=" + o["--acc-pool"] +
+                                         (ppo.acc_dir ? ";acc_metric=dir;acc_dist=" + o["--acc-dist"] : "") : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

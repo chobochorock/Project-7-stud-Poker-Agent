@@ -23,6 +23,8 @@ struct Opts {
     bool acc = false;
     int acc_k = 8, acc_min = 100, acc_pool = 16;
     double acc_z = 3;
+    bool acc_dir = false;        // --acc-metric dir: the sides must also differ in the direction of their regret vectors
+    double acc_dist = 0.5;       // --acc-dist: least |u_L - u_R|^2 of the unit mean regret vectors (0..4) for dir
     bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)
 };
 
@@ -59,8 +61,12 @@ struct LeafAcc {
 // the test of one candidate: D2 = |mean_L - mean_R|^2 over the legal actions, standardised by its mean and standard
 // deviation when both sides have the same mean (pooled within-side variance, normal approximation); gain = the drop of
 // the squared error of the per-visit regret vectors, n_L n_R / (n_L + n_R) * D2
-struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0; };
-AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min) {
+// --acc-metric dir: u_s = the side's mean regret vector scaled to unit length when it is significantly non-zero (the same
+// standardisation, one side), else 0 (that side has nothing it wants to change); dist = |u_L - u_R|^2 in [0, 4]: 0 when
+// both sides want the same direction (whatever their sizes), 1 when one side is satisfied and the other is not, 4 when
+// they want opposite directions. The candidate passes when z >= z_min (the sides differ) and dist >= dist_min.
+struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0, dist = 0; };
+AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min, bool dir = false, double dist_min = 0) {
     AccTest t;
     const double nl = c.n[0], nr = c.n[1];
     if (nl < min_visits || nr < min_visits) return t;
@@ -78,6 +84,24 @@ AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min
     t.z = var > 0 ? (t.d2 - mu) / std::sqrt(var) : (t.d2 > 0 ? 1e300 : 0);
     t.gain = nl * nr / (nl + nr) * t.d2;
     t.pass = t.z >= z_min;
+    if (dir) {
+        std::array<std::array<double, A>, 2> u{};
+        for (int side = 0; side < 2; ++side) {
+            const double n = c.n[side];
+            double m2 = 0, mu1 = 0, var1 = 0;
+            for (int a = 0; a < A; ++a) {
+                if (!(mask & (1u << a))) continue;
+                const double m = c.s[side][a] / n;
+                const double v = std::max(0.0, c.q[side][a] - c.s[side][a] * m) / std::max(1.0, n - 1);
+                m2 += m * m; mu1 += v / n; var1 += 2 * (v / n) * (v / n);
+            }
+            const double zs = var1 > 0 ? (m2 - mu1) / std::sqrt(var1) : (m2 > 0 ? 1e300 : 0);
+            if (zs >= z_min && m2 > 0)
+                for (int a = 0; a < A; ++a) if (mask & (1u << a)) u[side][a] = c.s[side][a] / n / std::sqrt(m2);
+        }
+        for (int a = 0; a < A; ++a) t.dist += (u[0][a] - u[1][a]) * (u[0][a] - u[1][a]);
+        t.pass = t.pass && t.dist >= dist_min;
+    }
     return t;
 }
 

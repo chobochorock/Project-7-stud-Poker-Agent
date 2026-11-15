@@ -1745,3 +1745,22 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - 상태(`-Action status`, `run_status.py`): 비교군마다 실행 여부, roots, 학습 CPU(예산 대비 %), 표 수, 상주 메모리, 온라인 LBR 마지막 500판 평균(90% 구간), 평가 수와 최신 평가, `ppfast_rt`는 posterior 대기 조건(구간 regret 대 0.1, 판정 수, 마지막 판정 root, 표 수, prior 잎 수, 메모리 상한 도달 여부). `-Watch N`은 N초마다 다시 보여 준다. 파일만 읽는다.
 - 시험(Linux, `run_100m.sh`): `ppfast_rt`와 `k256`을 학습 CPU 150초 예산, 온라인 LBR 64파티클로 돌려 시작, 상태, 예산 도달, `eval`, `plot`(그림 7종 모두에 두 비교군)을 확인했다. Windows에서는 확인하지 못했다.
 
+
+## `runs_fair`에 `ppfast_hid` 추가 (2026-11-15)
+
+숨은 regret 분할 기준(`PP_STUD7_DESIGN_KO.md` 22절)을 `runs_fair`와 같은 조건(학습 CPU 24시간, 온라인 LBR 1,000 roots마다 64파티클, 같은 deal, 평균 정책 평가)으로 같은 폴더에서 돌린다. 다른 비교군이 쓰는 exe를 덮지 않게 exe 이름을 따로 준다.
+
+```
+# 시작 (백그라운드, 창은 바로 돌아온다). ppfast_hid_r100도 돌리려면 -Arms ppfast_hid,ppfast_hid_r100 (코어 하나씩)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid -ExeName aswiss_hid.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 상태 (60초마다, Ctrl+C로 끝)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status -Arms hist_bbf,k256,ppfast_rt,ppfast_hid -BudgetCpuSeconds 86400 -Watch 60 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 예산이 끝난 뒤: epoch 스냅숏(2,000 pair), 예산 스냅숏(20,000 pair), 그림, 묶음
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval -Arms ppfast_hid -AverageOnly -ExeName aswiss_hid.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final -Arms ppfast_hid -AverageOnly -ExeName aswiss_hid.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot -Arms hist_bbf,k256,ppfast_rt,ppfast_hid,mmd,escher,rebel -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+```
+- 비교군 `ppfast_hid`(실행 이름 `pp_ppfast_hid_s1`): `--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000`. prior 후보는 방문 1,000에 한 번 Δ 시험(정규 근사, δ = 0.1, ε = 0)으로 나뉜다. posterior는 대기 조건(구간 regret에서 버킷마다 z_δ × 잡음을 뺀 값의 합 ≤ 0.5 ante per root)에서만 판정하고, 잎의 구간 방향으로 무리를 지어 무리마다 Δ 시험을 한다.
+- `ppfast_hid_r100`(실행 이름 `pp_ppfast_hid_r100_s1`): 위 + `--prior-leaf-ratio 100`(살아 있는 prior 잎 + 1 ≤ 100 × 쓰이는 표).
+- 상태 화면의 posterior 줄: `window regret A (beyond noise B, the condition)`에서 B가 0.5 이하가 되면 판정한다. A는 보정 전 값이다.

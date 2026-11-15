@@ -33,6 +33,16 @@ struct Opts {
                                  // its two sides together reach N visits; it splits its leaf if it passes, else it is replaced
     double post_gate = 0;        // --post-gate G (ante per root): posterior judgments wait for the window regret <= G
     uint64_t post_check = 10000; // --post-check R: the window regret is checked every R roots (window at least 1,000 roots)
+    // The hidden-regret criterion (PP_STUD7_DESIGN_KO.md sections 21-22; user, 2026-11-15): a split of a record X into X1,
+    // X2 has hidden regret D = M(X1) + M(X2) - M(X), M(v) = max(0, max_a v_a); it passes when D >= eps t + noise
+    bool acc_hidden = false;     // --acc-metric hidden: prior candidates by the hidden-regret test (best: largest D / t)
+    bool div_hidden = false;     // --div-metric hidden: a posterior judgment groups each bucket's leaves by their stored
+                                 // window direction and tests each group against the rest of its bucket
+    bool hid_azuma = false;      // --hid-bound azuma: noise L (sqrt(n1 ln(1/d) / 2) + sqrt(n2 ln(1/d) / 2)); normal: z_d (s1 sqrt n1 + s2 sqrt n2)
+    double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // d, eps, L (ante), z_d = Phi^-1(1 - d)
+    bool gate_noise = false;     // --gate-noise normal: the posterior waiting statistic counts only regret beyond z_d x noise
+    bool inherit_cand = false;   // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
+    double prior_leaf_ratio = 0; // --prior-leaf-ratio R: a prior split only while live leaves + 1 <= R x buckets in use
     bool two_layer_acc() const { return acc && !tree; }
 };
 
@@ -118,6 +128,41 @@ AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min
     return t;
 }
 
+// The hidden-regret test of sides 0 and 1 (sums s, sums of squares q, visits n; legal actions in mask). Both sides need
+// min_visits. gain = D / t, z = (D - eps t - noise) / t, d2 = D. The noise of a side is one action's (one-sided):
+// normal, z_d x the side's largest per-visit standard deviation over its legal actions x sqrt(visits); Azuma-Hoeffding,
+// L sqrt(visits ln(1/d) / 2). A split with D = 0 never passes.
+AccTest hid_test(const std::array<double, A>& s0, const std::array<double, A>& q0, double n0,
+                 const std::array<double, A>& s1, const std::array<double, A>& q1, double n1, uint8_t mask, double min_visits, const Opts& O) {
+    AccTest t;
+    if (n0 < min_visits || n1 < min_visits) return t;
+    t.testable = true;
+    double m0 = 0, m1 = 0, mb = 0, sd0 = 0, sd1 = 0;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        m0 = std::max(m0, s0[a]); m1 = std::max(m1, s1[a]); mb = std::max(mb, s0[a] + s1[a]);
+        const double u0 = s0[a] / n0, u1 = s1[a] / n1;
+        sd0 = std::max(sd0, std::sqrt(std::max(0.0, q0[a] / n0 - u0 * u0)));
+        sd1 = std::max(sd1, std::sqrt(std::max(0.0, q1[a] / n1 - u1 * u1)));
+    }
+    const double D = m0 + m1 - mb, tt = n0 + n1;
+    const double noise = O.hid_azuma ? O.hid_range * (std::sqrt(n0 * std::log(1 / O.hid_delta) / 2) + std::sqrt(n1 * std::log(1 / O.hid_delta) / 2))
+                                     : O.hid_zq * (sd0 * std::sqrt(n0) + sd1 * std::sqrt(n1));
+    t.d2 = D; t.gain = D / tt; t.z = (D - O.hid_eps * tt - noise) / tt;
+    t.pass = D > 0 && D >= O.hid_eps * tt + noise;
+    return t;
+}
+// a prior candidate's test: --acc-metric hidden, or acc_test (mse / dir)
+AccTest prior_test(const AccCand& c, uint8_t mask, const Opts& O) {
+    if (O.acc_hidden) return hid_test(c.s[0], c.q[0], c.n[0], c.s[1], c.q[1], c.n[1], mask, O.acc_min, O);
+    return acc_test(c, mask, O.acc_min, O.acc_z, O.acc_dir, O.acc_dist);
+}
+double inv_normal(double p) {  // Phi^-1(p) by bisection on Phi(x) = erfc(-x / sqrt 2) / 2
+    double lo = -40, hi = 40;
+    for (int i = 0; i < 200; ++i) { const double m = 0.5 * (lo + hi); (0.5 * std::erfc(-m / std::sqrt(2.0)) < p ? lo : hi) = m; }
+    return 0.5 * (lo + hi);
+}
+
 // a leaf record's mean regret vector is significantly non-zero (the one-side standardisation of acc_test's dir), and
 // argmax: its legal action of largest mean regret
 bool own_significant(const LeafOwn& o, uint8_t mask, double min_visits, double z_min, int& argmax) {
@@ -158,6 +203,8 @@ struct Data {
     std::vector<char> ready_flag;
     uint64_t post_judgments = 0, post_splits = 0, post_children = 0;  // two-layer accum counters (checkpointed)
     bool prior_frozen = false;  // two-layer accum, --mem-budget-mb reached: no more prior splits, candidates freed (checkpointed)
+    std::vector<LeafOwn> win;   // --div-metric hidden: per leaf, the regret record since the last posterior judgment (checkpointed)
+    uint64_t live_count = 0, used_buckets = 0;  // --prior-leaf-ratio: live leaves and buckets some live leaf points to (recounted)
 
     uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
         while (b != 0xffffffffu && born[b] > lv) b = parent[b];

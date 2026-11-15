@@ -4,7 +4,7 @@ Usage: python run_status.py OUT --runs NAME:LABEL ... [--budget SECONDS] [--watc
 Per arm: whether its process runs (OUT/NAME.pid), training roots, training CPU (and the share of --budget), tables in
 use, resident memory (curve.csv, written every -CurveEvery roots); the online LBR of the average policy, mean of the
 last --last deals with a 90% interval (online_lbr.csv, runs trained with -OnlineLbrEvery); evaluations made
-(eval.jsonl, eval_final.jsonl) with the newest one; and for the two-layer accumulated-regret arm (ppfast_rt) the
+(eval.jsonl, eval_final.jsonl) with the newest one; and for the two-layer accumulated-regret arms (ppfast_rt, ppfast_hid*) the
 posterior waiting condition (pp_post.csv, one row every 10,000 roots: the window regret against the gate, judgments,
 the root of the last one, tables, prior leaves, and whether the prior stopped at the memory budget).
 --watch N repeats every N seconds (Ctrl+C ends it). Only reads files: the training is not touched.
@@ -91,7 +91,8 @@ def show():
                 p = allr[-1]; j = [r for r in allr if r["judged"] == "1"]
                 lastj = f", last at {int(j[-1]['roots']):,} roots" if j else ""
                 frozen = ", prior stopped at the memory budget" if p.get("prior_frozen") == "1" else ""
-                print(f"    posterior: window regret {float(p['window_regret']):.3f} ante (gate {p['gate']}) over "
+                noise = f" (beyond noise {float(p['window_regret_beyond_noise']):.3f}, the condition)" if p.get("window_regret_beyond_noise") else ""
+                print(f"    posterior: window regret {float(p['window_regret']):.3f}{noise} ante (gate {p['gate']}) over "
                       f"{int(p['window_roots']):,} roots; {len(j)} judgments{lastj}; {int(p['buckets_after']):,} tables, "
                       f"{int(p['live_leaves']):,} prior leaves{frozen}")
 

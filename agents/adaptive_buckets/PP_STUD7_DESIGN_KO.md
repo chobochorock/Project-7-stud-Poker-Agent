@@ -1500,3 +1500,60 @@ python agents\adaptive_buckets\aswiss\stud7\tree_pilot.py agents\adaptive_bucket
 - σ²는 참 상한이어야 엄밀하다. 추정값을 넣으면 다시 근사다.
 - δ는 시험 한 번당 확률이다. 후보 수십만 번의 시험 전체에서 잘못된 분할이 하나도 없음을 보장하려면 δ를 시험 수로 나눠야 한다. 보통은 "잘못된 분할의 비율 ≤ δ"로 쓴다.
 
+
+## 22. 합의한 설계: 숨은 regret 분할 기준 (2026-11-15)
+
+사용자 결정 (원문): "정규 근사 (및 보험으로 Azuma-Hoeffding ε=0)", "posterior는 반드시 전체 누적 평균 regret tolerance기준으로 하고, 그 때 각 행동에 대한 leaf가 기준을 충족한다면 분할", "prior leaf 개수가 posterior leaf에 대해서 100(특정 숫자)배 이상넘지 못하게 하는 option", "0.5로 먼저 빠르게 확인", "전체 누적 평균 regret 합산은 실제 regret만 재도록", "각 leaf는 보관했던 업데이트 방향을 통해서 빠르게 할당".
+
+### 22.1 구조
+
+**prior (실시간, 19.9의 `ppfast_rt`와 같은 시점)**: 후보의 두 쪽 방문 합이 1,000이 되면 한 번 시험한다. 쪽 i의 regret 합 R_i(a)(후보가 생긴 뒤), M(X) = max(0, max_a X(a)), Δ = M(R_1) + M(R_2) − M(R_1 + R_2), t = n_1 + n_2.
+- 정규 근사: Δ/t ≥ ε + z_δ·(σ̂_1√n_1 + σ̂_2√n_2)/t, z_δ = Φ⁻¹(1 − δ) (한 행동, 한쪽). σ̂_i는 쪽 i의 행동별 방문당 표준편차 중 가장 큰 것. 부모는 수렴했다고 보고 두 쪽 항만 더한다(사용자 식).
+- 보험(Azuma–Hoeffding, ε = 0): Δ/t ≥ Σ_i L·√(n_i ln(1/δ)/2)/t. L은 방문당 표본 regret의 폭(mini-stud 64, 7-stud 4·(1000+1) = 4,004 ante).
+- 통과한 후보 중 Δ/t가 가장 큰 것으로 나눈다. 실패한 후보는 버리고 새로 채운다(19.9와 같음). 자식은 부모의 포인터를 그대로 가진다(표는 그대로).
+
+**posterior (대기 조건에서만)**: 10,000 반복(7-stud: roots)마다 대기 조건을 본다. 조건은 "실제 regret만" 센 구간 평균 regret이다.
+- 버킷 b, 행동 a마다 W_b(a) = 구간 regret 합, S_b(a) = 구간 표본 regret 제곱합, n_b = 구간 방문 수. 버킷의 값은 max(0, max_a [W_b(a) − z_δ·√(S_b(a) − W_b(a)²/n_b)])이다. 버킷마다 잡음 한계(표준편차×√n)를 빼고 남은 regret만 센다.
+- 통계 = Σ_b 그 값 / 구간 반복 수(7-stud는 두 자리 합, ante per root). 조건: ≤ 0.1(mini-stud), ≤ 0.5(7-stud).
+- 조건을 만족하면 버킷마다:
+  1. 잎마다 저장한 구간 기록(지난 posterior 판정 뒤의 regret 합, 제곱합, 방문)의 argmax 행동 a로 무리 B_a를 정한다(사용자: "보관했던 업데이트 방향을 통해서 빠르게 할당"). 구간 방문이 `--acc-min-visits`(100) 이상이고 최댓값이 양수인 잎만 무리에 든다. 나머지는 남는다.
+  2. 행동마다 "B_a 대 버킷의 나머지"를 prior와 같은 Δ 시험(같은 잡음 항)으로 시험한다.
+  3. 통과한 무리는 저마다 새 버킷으로 간다. 나머지는 b에 남는다.
+- 새 표는 0에서 다시 시작한다(재시작, 기본). 변형 `--inherit-candidate 1`에서는 새 표(남는 b 포함)가 그 무리 잎들의 구간 regret 합에서 시작한다. 7-stud는 RM+이므로 0에서 자른다. 평균 표는 재시작한다.
+- 옮긴 잎은 자기 기록(`own`)과 후보를 초기화한다(원안). 남은 잎은 유지한다. 판정이 끝나면 모든 잎의 구간 기록과 버킷의 구간 합을 0으로 한다.
+
+**prior 잎 상한** `--prior-leaf-ratio R`: 살아 있는 prior 잎 + 1 ≤ R × 쓰이는 버킷 수일 때만 prior 분할을 한다. 상한에서는 시험할 차례가 된 후보가 기다린다(다음 방문에 다시 차례가 되고, 상한이 풀리면 시험한다). 쓰이는 버킷 수는 posterior 판정 뒤와 시작할 때 다시 센다(prior 분할은 포인터를 바꾸지 않는다).
+
+### 22.2 옵션 (두 학습기 같은 이름)
+
+| 옵션 | 뜻 | 기본 |
+|---|---|---|
+| `--acc-metric hidden` | prior 후보를 Δ 시험으로 | mse |
+| `--div-metric hidden` | posterior를 22.1의 무리 시험으로 (mini-stud: `--split-plan separate` 필요) | mini `same`, 7-stud `dir` |
+| `--hid-bound normal\|azuma` | 잡음 항 | normal |
+| `--hid-delta d` / `--hid-eps ε` | δ, ε | 0.1 / 0 |
+| `--hid-range L` | Azuma–Hoeffding의 폭, 0이면 자동(mini 4·max\|u\| = 64, 7-stud 4·(스택+1) = 4,004) | 0 |
+| `--gate-noise normal` | 대기 조건을 잡음 보정 통계로 (z_δ는 `--hid-delta`에서) | none |
+| `--inherit-candidate 1` | posterior 새 표를 무리의 구간 합에서 | 0 |
+| `--prior-leaf-ratio R` | prior 잎 상한 | 0 (없음) |
+
+기본값에서는 두 학습기 모두 이전 커밋과 결과가 비트 단위로 같다(mini-stud: `ppfast_rt`, `ppfast_gate`, `tree_mse`, `ppspec_gate` 40만 반복의 정책 파일, 분할 기록, 사건 기록; 7-stud: `ppfast_rt` 4만 roots의 snapshot, prior 분할 기록, `pp_post.csv`). 중간에 멈췄다 이어도 결과가 같다(mini-stud `hid`, `inh`, 상한 R = 2; 7-stud 대기 조건 0.5, 판정 직전 98,000에서 멈추고 100,000의 판정을 지나는 경우, R = 2).
+
+### 22.3 내가 정한 것
+
+1. σ̂_i: 쪽 i의 행동별 방문당 표준편차 중 최댓값(측정 때와 같은 정의, 21절).
+2. Δ = 0이면 잡음 항이 0이어도 나누지 않는다.
+3. 대기 조건 잡음 보정의 z: prior와 같은 z_δ = Φ⁻¹(1 − 0.1) = 1.2816.
+4. posterior 무리에 드는 잎의 조건: 구간 방문 ≥ 100이고 구간 합의 최댓값 > 0. argmax는 합(평균이 아님)으로 정한다(방문 수가 다른 잎들의 합 ≥ 0 판단과 같은 기준).
+5. 무리 시험의 "나머지"는 버킷의 다른 모든 잎(무리에 들지 못한 잎 포함)이다.
+6. 통과한 무리는 모두 새 버킷으로 간다. 나머지가 비면 b는 쓰이지 않는 버킷이 된다(표는 남고 "쓰이는 버킷"에서 빠진다).
+7. 구간 기록: prior 분할로 생긴 자식의 구간 기록은 0에서 시작한다(부모의 구간 기록은 버린다). 그래서 버킷의 구간 합 ≠ 잎 구간 기록의 합일 수 있고, 무리 시험은 잎 기록의 합만 쓴다.
+8. `--inherit-candidate`: 남는 버킷도 남은 잎 기록의 합에서 시작한다. 7-stud는 0에서 자른다(RM+).
+9. 상한의 대기: 차례 목록은 반복(roots) 사이에 비운다(checkpoint에 들어가지 않게). 차례가 된 후보는 다음 방문에 다시 차례가 된다.
+10. 7-stud `pp_post.csv`: `--gate-noise normal`이면 끝 열 `window_regret_beyond_noise`(조건에 쓰는 값)를 더한다. `window_regret`는 보정 전 값 그대로다. `diverging_leaves` 열은 이 설계에서 "통과한 무리 수"다.
+
+### 22.4 실험 (고정 ID)
+
+mini-stud (CPU 900초, seed 1–3, `run_ppacc.sh`): `ppfast_rt_hid`(정규, δ = 0.1, ε = 0, 대기 0.1 잡음 보정), `ppfast_rt_hid_inh`(+ `--inherit-candidate 1`), `ppfast_rt_hid_ah`(Azuma–Hoeffding ε = 0). `--prior-leaf-ratio 100`은 mini-stud에서 돌리지 않았다. mini-stud에서는 살아 있는 prior 잎이 쓰이는 표의 약 3배라(3M 반복: 잎 2,222 / 표 595, 1e9 반복 `ppfast_rt`: 약 3.3만 / 1.07만) 상한 100이 걸리지 않고 결과가 `ppfast_rt_hid`와 같다(3M 반복에서 확인).
+
+7-stud (`run_100m.ps1`/`.sh`의 `runs_fair` 비교군): `ppfast_hid`(정규, δ = 0.1, ε = 0, 대기 0.5 잡음 보정, `--mem-budget-mb 4000`), `ppfast_hid_r100`(+ `--prior-leaf-ratio 100`).

@@ -579,6 +579,8 @@ public:
     int pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog);  // --prior-visits, after every root
     int pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved);  // two-layer accum posterior judgment
     void pp_freeze_prior();  // two-layer accum: --mem-budget-mb reached
+    void pp_recount_cap();   // --prior-leaf-ratio: live leaves and buckets in use
+    bool pp_cap_ok() const;  // --prior-leaf-ratio: a prior split may happen
     double pp_prior_mb() const;  // two-layer accum: the partition's structures in MB (counted, deterministic)
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
@@ -626,8 +628,27 @@ public:
         double total = 0;
         for (const auto& r : rwin_) total += std::max(0.0, *std::max_element(r.begin(), r.end()));
         const double v = rwin_roots_ ? total / static_cast<double>(rwin_roots_) / 2 : 0;
-        if (reset) { rwin_.assign(rwin_.size(), {}); rwin_roots_ = 0; }
+        if (reset) {
+            rwin_.assign(rwin_.size(), {}); rwin_roots_ = 0;
+            if (gate_z_ > 0) { rwq_.assign(rwq_.size(), {}); rwn_.assign(rwn_.size(), 0.0); }
+        }
         return v;
+    }
+    // --gate-noise normal: the window's per-visit squared regrets and visits per bucket (traverser nodes), kept with rwin_
+    void set_gate_noise(double z) { gate_z_ = z; }
+    // as iterate_regret_half(false), counting per bucket only max(0, max_a (R_B(a) - z sqrt(sum r_a^2 - R_B(a)^2 / n)))
+    double iterate_regret_noise_half() const {
+        double total = 0;
+        for (size_t b = 0; b < rwin_.size(); ++b) {
+            const double n = b < rwn_.size() ? rwn_[b] : 0.0;
+            double m = 0;
+            for (int a = 0; a < A; ++a) {
+                const double w = rwin_[b][a], q = b < rwq_.size() ? rwq_[b][a] : 0.0;
+                m = std::max(m, n > 0 ? w - gate_z_ * std::sqrt(std::max(0.0, q - w * w / n)) : w);
+            }
+            total += m;
+        }
+        return rwin_roots_ ? total / static_cast<double>(rwin_roots_) / 2 : 0;
     }
     bool history_cards_every() const { return hcards_every_; }
     std::array<double, H> h4_strategy(int seat, const std::vector<Card>& cards, bool average, bool* found = nullptr) const {
@@ -1474,6 +1495,9 @@ private:
     }
     std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
     uint64_t rwin_roots_ = 0;
+    double gate_z_ = 0;                        // --gate-noise normal: z_d (0: off)
+    std::vector<std::array<double, A>> rwq_;   // --gate-noise: window sums of squared per-visit regrets per bucket
+    std::vector<double> rwn_;                  // --gate-noise: window traverser visits per bucket
     HMap hatoms_;
     // --partition pp
     std::unique_ptr<pp::Data> pp_;
@@ -1930,7 +1954,9 @@ int train(int argc, char** argv) {
                                 {"--pp-structure", "pp"}, {"--tree-split", "label"}, {"--acc-candidates", "8"},
                                 {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
-                                {"--post-check", "10000"}});
+                                {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
+                                {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
+                                {"--prior-leaf-ratio", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -1989,7 +2015,9 @@ int train(int argc, char** argv) {
         };
         choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
-        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"}); choice("--acc-metric", {"mse", "dir"});
+        choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"}); choice("--acc-metric", {"mse", "dir", "hidden"});
+        choice("--div-metric", {"dir", "hidden"}); choice("--hid-bound", {"normal", "azuma"}); choice("--gate-noise", {"none", "normal"});
+        choice("--inherit-candidate", {"0", "1"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -2010,6 +2038,20 @@ int train(int argc, char** argv) {
         ppo.acc_k = std::stoi(o["--acc-candidates"]); ppo.acc_min = std::stoi(o["--acc-min-visits"]);
         ppo.acc_z = std::stod(o["--acc-z"]); ppo.acc_pool = std::stoi(o["--acc-pool"]);
         ppo.acc_dir = o["--acc-metric"] == "dir"; ppo.acc_dist = std::stod(o["--acc-dist"]);
+        // the hidden-regret criterion (PP_STUD7_DESIGN_KO.md section 22): --acc-metric hidden (prior candidates),
+        // --div-metric hidden (posterior groups by the leaves' window directions), --hid-bound normal|azuma, --hid-delta d,
+        // --hid-eps eps, --hid-range L (0: 4 x (stack + 1) ante, the range of a sampled regret), --gate-noise normal (the
+        // waiting statistic counts only regret beyond z_d x noise), --inherit-candidate 1, --prior-leaf-ratio R
+        ppo.acc_hidden = o["--acc-metric"] == "hidden"; ppo.div_hidden = o["--div-metric"] == "hidden";
+        ppo.hid_azuma = o["--hid-bound"] == "azuma"; ppo.hid_delta = std::stod(o["--hid-delta"]); ppo.hid_eps = std::stod(o["--hid-eps"]);
+        ppo.hid_range = std::stod(o["--hid-range"]);
+        if (!(ppo.hid_delta > 0 && ppo.hid_delta < 1) || ppo.hid_eps < 0 || ppo.hid_range < 0)
+            throw std::runtime_error("--hid-delta in (0, 1), --hid-eps >= 0, --hid-range >= 0");
+        if (ppo.hid_range == 0) ppo.hid_range = 4.0 * (kEffectiveStackAnte + 1);
+        ppo.hid_zq = pp::inv_normal(1 - ppo.hid_delta);
+        ppo.gate_noise = o["--gate-noise"] == "normal"; ppo.inherit_cand = o["--inherit-candidate"] == "1";
+        ppo.prior_leaf_ratio = std::stod(o["--prior-leaf-ratio"]);
+        if (ppo.prior_leaf_ratio < 0) throw std::runtime_error("--prior-leaf-ratio must be >= 0");
         // two layers (--pp-structure pp, section 19.10): prior splits keep the pointer; posterior judgments by the
         // leaves' own records when the window regret (sum_B max(0, max_a R_B(a)) per root, both seats, ante) is at
         // most --post-gate, checked every --post-check roots; --prior-visits N: real-time prior splits
@@ -2022,6 +2064,10 @@ int train(int argc, char** argv) {
         if (ppo.prior_visits > 0 && ppo.prior_visits < 2 * static_cast<uint64_t>(std::stoi(o["--acc-min-visits"])))
             throw std::runtime_error("--prior-visits must be >= 2 x --acc-min-visits");
         if (ppo.post_check < 1) throw std::runtime_error("--post-check must be >= 1");
+        if ((ppo.div_hidden || ppo.gate_noise || ppo.inherit_cand || ppo.prior_leaf_ratio > 0) && !ppo.two_layer_acc())
+            throw std::runtime_error("--div-metric hidden, --gate-noise, --inherit-candidate and --prior-leaf-ratio need --tree-split accum with --pp-structure pp");
+        if (ppo.acc_hidden && !ppo.acc) throw std::runtime_error("--acc-metric hidden needs --tree-split accum");
+        if (ppo.inherit_cand && !ppo.div_hidden) throw std::runtime_error("--inherit-candidate is for --div-metric hidden");
         if (ppo.two_layer_acc() && ppo.fill) throw std::runtime_error("--tree-split accum has no pending leaves: it does not take --pp-assign fill");
         if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
@@ -2051,6 +2097,7 @@ int train(int argc, char** argv) {
     const bool log_splits = o["--log-splits"] == "1" && partition == Partition::History;
     const bool post_acc = pp_mode && ppo.two_layer_acc();  // two-layer accum: the posterior window regret
     model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret || post_acc);
+    if (post_acc && ppo.gate_noise) model.set_gate_noise(ppo.hid_zq);
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -2087,7 +2134,13 @@ int train(int argc, char** argv) {
                                          ";acc_z=" + o["--acc-z"] + ";acc_pool=" + o["--acc-pool"] +
                                          (ppo.acc_dir ? ";acc_metric=dir;acc_dist=" + o["--acc-dist"] : "") : "") +
                           (ppo.two_layer_acc() ? ";two_layer_acc=1;prior_visits=" + o["--prior-visits"] + ";post_gate=" + o["--post-gate"] +
-                                                     ";post_check=" + o["--post-check"] : "") : std::string());
+                                                     ";post_check=" + o["--post-check"] : "") +
+                          (ppo.acc_hidden ? ";acc_metric=hidden" : "") + (ppo.div_hidden ? ";div_metric=hidden" : "") +
+                          (ppo.acc_hidden || ppo.div_hidden ? ";hid_bound=" + o["--hid-bound"] + ";hid_delta=" + o["--hid-delta"] +
+                                                                  ";hid_eps=" + o["--hid-eps"] + ";hid_range=" + o["--hid-range"] : "") +
+                          (ppo.gate_noise ? ";gate_noise=normal;hid_delta=" + o["--hid-delta"] : "") +
+                          (ppo.inherit_cand ? ";inherit_candidate=1" : "") +
+                          (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -2155,7 +2208,8 @@ int train(int argc, char** argv) {
             std::ofstream(ppp_path) << "epoch,roots,leaf,street,legal_mask,depth,feature,threshold,gain_a,gain_b,rows,signal,left_leaf,"
                                        "right_leaf,left_bucket,right_bucket\n";
             if (post_acc) std::ofstream(ppq_path) << "epoch,roots,window_roots,window_regret,gate,judged,buckets_before,buckets_split,"
-                                                       "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb\n";
+                                                       "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb"
+                                                    << (ppo.gate_noise ? ",window_regret_beyond_noise" : "") << '\n';
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2276,7 +2330,9 @@ int train(int argc, char** argv) {
                 }
                 const uint64_t wroots = model.iterate_window_roots();
                 const double wr = 2 * model.iterate_regret_half(false);
-                const bool judge = wroots >= 1000 && wr <= ppo.post_gate;
+                // --gate-noise normal: the condition reads only the regret beyond z_d x the window's noise (per bucket)
+                const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
+                const bool judge = wroots >= 1000 && wn <= ppo.post_gate;
                 const auto live0 = model.live_buckets();
                 uint64_t diverging = 0, moved = 0;
                 int ps = 0;
@@ -2285,7 +2341,9 @@ int train(int argc, char** argv) {
                 ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ',' << judge << ','
                         << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
-                        << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb << '\n';
+                        << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb;
+                if (ppo.gate_noise) ppq_log << ',' << wn;
+                ppq_log << '\n';
                 ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
         }

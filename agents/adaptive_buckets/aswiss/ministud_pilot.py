@@ -40,6 +40,12 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppfast_dist_keep  the same with (가) and (나) of section 19.7
   ppfast_rt       ppfast_gate with real-time prior splits (section 19.9): a candidate is tested once when its two sides
                   together reach 1,000 visits; it splits the leaf if it passes, else it is replaced
+  ppfast_rt_hid   the hidden-regret criterion (design section 22; user, 2026-11-15): ppfast_rt's real-time prior with
+                  each candidate tested once at 1,000 visits by D = M(B1) + M(B2) - M(B) >= z_d (s1 sqrt n1 + s2 sqrt n2)
+                  (normal, d = 0.1, eps = 0); posterior judged only when the window's average regret beyond noise is <= the
+                  gate, leaves grouped by their stored window direction, each group tested against the rest by D
+  ppfast_rt_hid_inh  the same, the new tables start from their leaves' window sums
+  ppfast_rt_hid_ah   the same with the Azuma-Hoeffding noise term (eps = 0)
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -67,6 +73,8 @@ EXE = os.path.join(OUT, "pp_aswiss.exe" if WIN else "pp_aswiss")
 ESD = os.path.join(HERE, "esd_table.csv")
 SPEC = ["--mode", "ppacc", "--acc-metric", "mse", "--div-metric", "dir", "--div-ref", "bucket", "--reset-moved-only", "1",
         "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"]
+HID = ["--mode", "ppacc", "--acc-metric", "hidden", "--div-metric", "hidden", "--schedule", "regret", "--regret-gate", str(a.gate),
+       "--gate-noise", "normal", "--split-plan", "separate", "--prior-eligible", "all", "--prior-visits", "1000", "--measure", "1"]
 ARMS = {
     "tree_gate": ["--mode", "tree", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "tree_mse": ["--mode", "tree", "--measure", "1"],
@@ -84,6 +92,9 @@ ARMS = {
     "ppfast_dist_keep": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--div-test", "dist", "--keep-cands", "1"],
     "ppfast_rt": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--prior-visits", "1000"],
     "ppspec_leaves": SPEC + ["--post-from-leaves", "1"],
+    "ppfast_rt_hid": HID,
+    "ppfast_rt_hid_inh": HID + ["--inherit-candidate", "1"],
+    "ppfast_rt_hid_ah": HID + ["--hid-bound", "azuma"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }

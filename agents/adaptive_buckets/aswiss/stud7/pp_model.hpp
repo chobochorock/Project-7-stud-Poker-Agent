@@ -255,6 +255,7 @@ uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser, int32_t* 
         pp::Leaf L; L.node = c.root; L.ctx = ctx; L.ptr = c.bucket; L.born = pp_root_now_;
         pp_->leaves.push_back(L);
         pp_->cells.push_back(c);
+        ++pp_->live_count; ++pp_->used_buckets;  // --prior-leaf-ratio: a new cell's leaf and its own bucket
     }
     const pp::Cell& c = pp_->cells[it->second];
     int32_t l;
@@ -540,6 +541,11 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
         best = std::max(best, r);
     }
     traversal_gap_ += best;
+    if (gate_z_ > 0 && track_rwin_) {  // --gate-noise: the window's squared regrets and visits of this bucket
+        if (rwn_.size() <= b) { rwn_.resize(buckets_.size(), 0.0); rwq_.resize(buckets_.size()); }
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) rwq_[b][a] += rv[a] * rv[a];
+        rwn_[b] += 1;
+    }
     if (acc) pp_acc_visit(leaf, *st, state, actor, rv, mask);
     return node;
 }
@@ -603,6 +609,9 @@ int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
     pp::Data& D = *pp_;
     const pp::Opts& O = D.opt;
     if (D.ready.empty() || D.prior_frozen) { D.ready.clear(); return 0; }
+    // --prior-leaf-ratio: at the cap the due leaves wait. The list is dropped (it is empty between roots, so a checkpoint
+    // never holds it): a due candidate is marked again at its leaf's next visit and tested once the cap allows.
+    if (!pp_cap_ok()) { for (int32_t l : D.ready) D.ready_flag[l] = 0; D.ready.clear(); return 0; }
     pp_root_now_ = roots;
     D.acc.resize(D.leaves.size()); D.own.resize(D.leaves.size());
     std::vector<int32_t> ready;
@@ -611,6 +620,7 @@ int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
     int splits = 0;
     for (int32_t l : ready) {
         D.ready_flag[l] = 0;
+        if (!pp_cap_ok()) continue;
         if (D.leaves[l].node < 0) continue;
         pp::LeafAcc& LA = D.acc[l];
         const uint8_t mask = static_cast<uint8_t>(D.leaves[l].ctx & 0xff);
@@ -620,7 +630,7 @@ int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
         for (size_t k = 0; k < LA.cand.size(); ++k) {
             if (LA.cand[k].n[0] + LA.cand[k].n[1] < due_at) continue;
             due[k] = 1;
-            const pp::AccTest t = pp::acc_test(LA.cand[k], mask, O.acc_min, O.acc_z, O.acc_dir, O.acc_dist);
+            const pp::AccTest t = pp::prior_test(LA.cand[k], mask, O);
             const bool better = O.acc_dir ? (t.dist > bt.dist || (t.dist == bt.dist && t.gain > bt.gain)) : t.gain > bt.gain;
             if (t.pass && (best < 0 || better)) { best = static_cast<int>(k); bt = t; }
         }
@@ -673,9 +683,64 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
         if (D.leaves[l].node >= 0) users[D.leaves[l].ptr].push_back(l);
     int splits = 0;
     diverging = 0; moved = 0;
+    if (O.div_hidden) D.win.resize(D.leaves.size());
     for (uint32_t b = 0; b < B0; ++b) {
         if (users[b].size() < 2) continue;
         const uint8_t mask = static_cast<uint8_t>(D.leaves[users[b][0]].ctx & 0xff);
+        if (O.div_hidden) {  // --div-metric hidden: groups by the leaves' stored window directions, one test per action
+            // B_a: the leaves whose window record has >= --acc-min-visits visits and a positive largest sum, at action a
+            // (its legal argmax); the others stay. B_a is tested against the rest of the bucket (b minus B_a) by the
+            // hidden-regret test; every passing group moves to a new bucket, the rest keeps b.
+            std::map<int, std::vector<int32_t>> grp;
+            pp::LeafOwn tot;
+            for (int32_t l : users[b]) {
+                const pp::LeafOwn& w = D.win[l];
+                for (int a = 0; a < A; ++a) { tot.s[a] += w.s[a]; tot.q[a] += w.q[a]; }
+                tot.n += w.n;
+                if (w.n < O.acc_min) continue;
+                int am = -1;
+                for (int a = 0; a < A; ++a) if ((mask & (1u << a)) && (am < 0 || w.s[a] > w.s[am])) am = a;
+                if (am >= 0 && w.s[am] > 0) grp[am].push_back(l);
+            }
+            std::vector<std::vector<int32_t>> pass;
+            for (auto& [lab, ls] : grp) {
+                pp::LeafOwn g, rest;
+                for (int32_t l : ls) { for (int a = 0; a < A; ++a) { g.s[a] += D.win[l].s[a]; g.q[a] += D.win[l].q[a]; } g.n += D.win[l].n; }
+                for (int a = 0; a < A; ++a) { rest.s[a] = tot.s[a] - g.s[a]; rest.q[a] = std::max(0.0, tot.q[a] - g.q[a]); }
+                rest.n = tot.n - g.n;
+                if (pp::hid_test(g.s, g.q, g.n, rest.s, rest.q, rest.n, mask, O.acc_min, O).pass) { pass.push_back(ls); ++diverging; }
+            }
+            if (pass.empty()) continue;
+            auto start_tables = [&](uint32_t nb, const std::vector<int32_t>& ls) {  // --inherit-candidate 1 (RM+: clipped at 0)
+                if (!O.inherit_cand) return;
+                std::array<double, A> q{};
+                for (int32_t l : ls) for (int a = 0; a < A; ++a) q[a] += D.win[l].s[a];
+                for (int a = 0; a < A; ++a) buckets_[nb].q[a] = (mask & (1u << a)) ? std::max(0.0, q[a]) : 0.0;
+            };
+            std::vector<char> mv(users[b].size(), 0);
+            for (const auto& ls : pass) {
+                const uint32_t nb = new_bucket(b);
+                for (int a = 0; a < A; ++a) {
+                    buckets_[nb].q[a] = O.inherit_regret * buckets_[b].q[a];
+                    buckets_[nb].s[a] = O.inherit_avg * buckets_[b].s[a];
+                }
+                start_tables(nb, ls);
+                ++D.post_children;
+                for (int32_t l : ls) D.leaves[l].ptr = nb;
+            }
+            for (int a = 0; a < A; ++a) { buckets_[b].q[a] *= O.inherit_regret; buckets_[b].s[a] *= O.inherit_avg; }
+            std::vector<int32_t> stay;
+            for (int32_t l : users[b]) if (D.leaves[l].ptr == b) stay.push_back(l);
+            start_tables(b, stay);
+            for (int32_t l : users[b]) {
+                if (D.leaves[l].ptr == b) continue;  // the staying leaves keep their records
+                D.own[l] = pp::LeafOwn{};
+                if (!D.prior_frozen) { D.acc[l].cand.clear(); pp_acc_fill(l); }
+                ++moved;
+            }
+            ++splits;
+            continue;
+        }
         pp::LeafOwn tot;
         for (int32_t l : users[b]) {
             for (int a = 0; a < A; ++a) { tot.s[a] += D.own[l].s[a]; tot.q[a] += D.own[l].q[a]; }
@@ -721,7 +786,22 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
     }
     ++D.post_judgments;
     if (splits) { ++D.level; D.post_splits += static_cast<uint64_t>(splits); }
+    if (O.div_hidden) D.win.assign(D.leaves.size(), pp::LeafOwn{});  // the next window starts here
+    pp_recount_cap();
     return splits;
+}
+// --prior-leaf-ratio: recount the live leaves and the buckets some live leaf points to (after posterior judgments and
+// at the start; a prior split adds one live leaf and changes no pointer)
+void Model::pp_recount_cap() {
+    pp::Data& D = *pp_;
+    D.live_count = 0; D.used_buckets = 0;
+    std::vector<char> used(buckets_.size(), 0);
+    for (const pp::Leaf& L : D.leaves)
+        if (L.node >= 0) { ++D.live_count; if (L.ptr < used.size() && !used[L.ptr]) { used[L.ptr] = 1; ++D.used_buckets; } }
+}
+bool Model::pp_cap_ok() const {
+    const pp::Data& D = *pp_;
+    return D.opt.prior_leaf_ratio <= 0 || static_cast<double>(D.live_count + 1) <= D.opt.prior_leaf_ratio * static_cast<double>(D.used_buckets);
 }
 // One judgment (PP_STUD7_DESIGN_KO.md section 6). Returns the posterior splits; writes one row of pp_judge.csv.
 // ---- --tree-split accum (PP_STUD7_DESIGN_KO.md section 18) ----
@@ -729,6 +809,12 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
 // state falls on, and the state is offered to the leaf's sample reservoir (Algorithm R with a deterministic draw)
 void Model::pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask) {
     pp::Data& D = *pp_;
+    if (D.opt.div_hidden) {  // --div-metric hidden: the leaf's window record (the posterior groups by its direction)
+        if (D.win.size() <= static_cast<size_t>(l)) D.win.resize(D.leaves.size());
+        pp::LeafOwn& w = D.win[l];
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) { w.s[a] += r[a]; w.q[a] += r[a] * r[a]; }
+        w.n += 1;
+    }
     if (D.prior_frozen) {  // two-layer accum past the memory budget: only the leaf's own record (the posterior reads it)
         if (D.own.size() <= static_cast<size_t>(l)) D.own.resize(D.leaves.size());
         pp::LeafOwn& o = D.own[l];
@@ -847,7 +933,8 @@ void Model::pp_acc_split(int32_t l, int best, const pp::AccTest& bt, uint64_t ep
     D.leaves[l].node = -1;
     D.acc[l] = pp::LeafAcc{};
     if (!O.tree) D.own[l] = pp::LeafOwn{};
-    ++D.prior_splits;
+    if (O.div_hidden && D.win.size() > static_cast<size_t>(l)) D.win[l] = pp::LeafOwn{};  // the children's windows start at 0
+    ++D.prior_splits; ++D.live_count;
     plog << epoch << ',' << roots << ',' << l << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
          << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << (O.acc_dir ? bt.dist : bt.gain) << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
          << nl[0] << ',' << nl[1] << ',' << D.leaves[nl[0]].ptr << ',' << D.leaves[nl[1]].ptr << '\n';
@@ -870,6 +957,7 @@ int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std
     // --prior-visits: no prior judgment here (candidates are tested as they reach the count, see pp_visit_checks)
     const int32_t nleaves = O.prior_visits > 0 ? 0 : static_cast<int32_t>(D.leaves.size());
     for (int32_t l = 0; l < nleaves; ++l) {
+        if (O.two_layer_acc() && !pp_cap_ok()) break;  // --prior-leaf-ratio: at the cap the remaining leaves keep their candidates
         if (D.leaves[l].node < 0) continue;
         pp::LeafAcc& LA = D.acc[l];
         const uint8_t mask = static_cast<uint8_t>(D.leaves[l].ctx & 0xff);
@@ -877,7 +965,7 @@ int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std
         pp::AccTest bt;
         std::vector<pp::AccTest> ts(LA.cand.size());
         for (size_t k = 0; k < LA.cand.size(); ++k) {
-            ts[k] = pp::acc_test(LA.cand[k], mask, O.acc_min, O.acc_z, O.acc_dir, O.acc_dist);
+            ts[k] = pp::prior_test(LA.cand[k], mask, O);
             tested += ts[k].testable;
             // mse: the largest squared-error drop; dir: the largest direction distance (then the squared-error drop)
             const bool better = O.acc_dir ? (ts[k].dist > bt.dist || (ts[k].dist == bt.dist && ts[k].gain > bt.gain)) : ts[k].gain > bt.gain;
@@ -1153,6 +1241,11 @@ void Model::pp_save(std::ofstream& out, bool full) const {
         put(out, D.post_judgments); put(out, D.post_splits); put(out, D.post_children); put(out, static_cast<uint8_t>(D.prior_frozen));
         put(out, rwin_roots_); put(out, static_cast<uint64_t>(rwin_.size()));
         for (const auto& r : rwin_) put(out, r);
+        if (full && D.opt.div_hidden) { put(out, static_cast<uint64_t>(D.win.size())); for (const pp::LeafOwn& w : D.win) put(out, w); }
+        if (full && D.opt.gate_noise) {
+            put(out, static_cast<uint64_t>(rwn_.size()));
+            for (size_t b = 0; b < rwn_.size(); ++b) { put(out, rwq_[b]); put(out, rwn_[b]); }
+        }
     }
 }
 
@@ -1216,6 +1309,13 @@ void Model::pp_load(std::ifstream& in, bool full) {
         get(in, rwin_roots_); get(in, n);
         rwin_.assign(n, {});
         for (auto& r : rwin_) get(in, r);
+        D.win.clear();
+        if (full && D.opt.div_hidden) { get(in, n); D.win.assign(n, {}); for (pp::LeafOwn& w : D.win) get(in, w); }
+        if (full && D.opt.gate_noise) {
+            get(in, n); rwq_.assign(n, {}); rwn_.assign(n, 0.0);
+            for (size_t b = 0; b < n; ++b) { get(in, rwq_[b]); get(in, rwn_[b]); }
+        }
+        pp_recount_cap();
     }
 }
 

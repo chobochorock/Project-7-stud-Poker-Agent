@@ -30,6 +30,18 @@
 #   ppfast_rt         ppfast_gate with real-time prior splits (design section 19.9; user, 2026-11-15): no prior judgments;
 #                     a candidate is tested once when its two sides together reach 1,000 visits, splits the leaf if it
 #                     passes, else it is replaced (--prior-visits 1000)
+# The hidden-regret criterion (design section 22; user, 2026-11-15). ppfast_rt's real-time prior with each candidate
+# tested once at 1,000 visits by D = M(B1) + M(B2) - M(B), M(X) = max(0, max_a R(X, a)): split when
+# D / t >= eps + z_d (s1 sqrt(n1) + s2 sqrt(n2)) / t (normal, one action, d = 0.1, eps = 0). The posterior is judged only
+# when the window's average regret, counting per bucket only what exceeds z_d x the window's noise, is <= 0.1; then in
+# each bucket the leaves are grouped by their stored window direction (argmax action of the regret sum since the last
+# judgment, if positive and the leaf has >= 100 window visits) and each group B_a is tested against the rest of its
+# bucket by the same D test; every passing group moves to a new bucket (the moved leaves restart).
+#   ppfast_rt_hid      as above, tables restart
+#   ppfast_rt_hid_inh  the new tables start from their leaves' window sums (--inherit-candidate 1)
+#   ppfast_rt_hid_ah   the noise term by Azuma-Hoeffding (eps = 0, L = 64): the guaranteed bound
+# (--prior-leaf-ratio 100 is not run here: on mini-stud live prior leaves stay at ~3x the tables in use, so a cap of
+# 100x never binds and the arm would equal ppfast_rt_hid.)
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -66,6 +78,10 @@ for s in $SEEDS; do
   echo "ppfast_gate $s $SPEC --split-plan separate --prior-eligible all" >> "$jobs"
   echo "ppfast_dist_keep $s $SPEC --split-plan separate --prior-eligible all --div-test dist --keep-cands 1" >> "$jobs"
   echo "ppfast_rt $s $SPEC --split-plan separate --prior-eligible all --prior-visits 1000" >> "$jobs"
+  HID="--mode ppacc --acc-metric hidden --div-metric hidden --schedule regret --regret-gate 0.1 --gate-noise normal --split-plan separate --prior-eligible all --prior-visits 1000 --measure 1 --judgment-rows split"
+  echo "ppfast_rt_hid $s $HID" >> "$jobs"
+  echo "ppfast_rt_hid_inh $s $HID --inherit-candidate 1" >> "$jobs"
+  echo "ppfast_rt_hid_ah $s $HID --hid-bound azuma" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
@@ -84,6 +100,9 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast" --arm "ppspec_gate=$(arm ppspec_g
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_rt" --arm "ppfast_gate=$(arm ppfast_gate)" --arm "ppfast_rt=$(arm ppfast_rt)" \
   --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_hid" --arm "ppfast_rt=$(arm ppfast_rt)" --arm "ppfast_rt_hid=$(arm ppfast_rt_hid)" \
+  --arm "ppfast_rt_hid_inh=$(arm ppfast_rt_hid_inh)" --arm "ppfast_rt_hid_ah=$(arm ppfast_rt_hid_ah)" --arm "tree_mse=$(arm tree_mse)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

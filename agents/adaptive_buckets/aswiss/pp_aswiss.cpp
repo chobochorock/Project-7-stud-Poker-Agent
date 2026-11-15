@@ -100,6 +100,18 @@
 //   "분할 후보 (양쪽) 모두가 총 1000번 방문되었을 때 ... 괴리가 크다면 분할 ... 아니라면, 그냥 냅둔다"): no prior judgments at
 //   the doublings; each candidate is tested once, when its two sides together reach N visits (the same MSE test, so each
 //   side still needs --acc-min-visits); the best passing candidate splits the leaf at once, failed ones are replaced.
+//   The hidden-regret criterion (design section 22; user, 2026-11-15). --acc-metric hidden: a prior candidate passes when
+//   D = M(R1) + M(R2) - M(R1 + R2) >= eps t + noise, M(v) = max(0, max_a v_a), R_i its side's regret sums, t = n1 + n2;
+//   --hid-bound normal (default): noise = z_d (s1 sqrt n1 + s2 sqrt n2), z_d = Phi^-1(1 - d), s_i the side's largest per-visit
+//   standard deviation over the actions; azuma: noise = L (sqrt(n1 ln(1/d) / 2) + sqrt(n2 ln(1/d) / 2)), --hid-range L
+//   (0: 4 max |u|). --hid-delta d (0.1), --hid-eps eps (0). The best passing candidate is the one of largest D / t.
+//   --div-metric hidden (--split-plan separate): at a posterior judgment each bucket's leaves are grouped by the argmax
+//   action of their window record (regret sums since the last judgment; >= --acc-min-visits visits and a positive
+//   largest sum, else the leaf stays); each group B_a is tested against the rest of the bucket by the same D test and
+//   every passing group moves to a new bucket (the moved leaves restart their records and candidates).
+//   --inherit-candidate 1: those tables (and the staying one) start from their leaves' window sums.
+//   --gate-noise normal: the waiting statistic counts per bucket max(0, max_a (W_a - z_d sqrt(sum r_a^2 - W_a^2 / n))).
+//   --prior-leaf-ratio R: a prior split only while live leaves + 1 <= R x buckets some live leaf points to.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -385,6 +397,25 @@ bool prior_all = false;       // --prior-eligible all: every leaf may take a pri
 long long prior_visits = 0;   // --prior-visits N (--split-plan separate): a prior candidate is tested once, when its two sides
                               // together reach N visits; it splits its leaf if it passes, else it is replaced
 vector<int> prior_ready; vector<char> prior_ready_flag;  // --prior-visits: leaves with a candidate due, this iteration
+// The hidden-regret criterion (design sections 21-22; user, 2026-11-15). A split of a record X (regret sums since some
+// start) into X1, X2 has hidden regret D = M(X1) + M(X2) - M(X), M(v) = max(0, max_a v_a); it passes when
+// D >= eps t + noise, t = the visits of X1 and X2 together.
+bool acc_hidden = false;      // --acc-metric hidden: prior candidates by the hidden-regret test (best candidate: largest D / t)
+bool div_hidden = false;      // --div-metric hidden: posterior judgments split each bucket's leaves by their window directions
+bool hid_azuma = false;       // --hid-bound azuma: noise = L (sqrt(n1 ln(1/d) / 2) + sqrt(n2 ln(1/d) / 2)); normal: z (s1 sqrt(n1) + s2 sqrt(n2))
+double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // --hid-delta d, --hid-eps eps, --hid-range L; hid_zq = Phi^-1(1 - d)
+bool inherit_cand = false;    // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
+bool gate_noise = false;      // --gate-noise normal: the waiting statistic subtracts z x the window's noise per bucket and action
+double prior_leaf_ratio = 0;  // --prior-leaf-ratio R: a prior split only while live prior leaves + 1 <= R x buckets in use
+vector<LeafOwn> lwin;         // --div-metric hidden: each leaf's regret record since the last posterior judgment
+vector<double> Wq, Wn;        // --gate-noise normal: each bucket's window sums of squared regrets (per action) and visits
+long long n_alive_leaves = 0, n_used_buckets = 0;  // --prior-leaf-ratio: kept up to date by the prior splits and recounts
+inline bool prior_cap_ok() { return prior_leaf_ratio <= 0 || n_alive_leaves + 1 <= prior_leaf_ratio * (double)n_used_buckets; }
+double inv_normal(double p) {  // Phi^-1(p) by bisection on Phi(x) = erfc(-x / sqrt 2) / 2
+    double lo = -40, hi = 40;
+    for (int i = 0; i < 200; ++i) { const double m = 0.5 * (lo + hi); (0.5 * erfc(-m / sqrt(2.0)) < p ? lo : hi) = m; }
+    return 0.5 * (lo + hi);
+}
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -409,7 +440,29 @@ void acc_visit(int l, int I, const double* r, int n) {
     if (prior_visits > 0 && changed && (int)L.cand.size() < acc_k && L.pool.size() >= 2) mark();
 }
 struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0, dist = 0; };
+// The hidden-regret test of sides 0 and 1 (sums s, sums of squares q, visits n over na actions). Both sides need
+// --acc-min-visits. gain = D / t (the best candidate's), z = (D - eps t - noise) / t, d2 = D. The noise of a side is one
+// action's (one-sided): normal, z_d x the side's largest per-visit standard deviation over the actions x sqrt(visits);
+// Azuma-Hoeffding, L sqrt(visits ln(1/d) / 2). A split with D = 0 never passes.
+AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1, const double* q1, double n1, int na) {
+    AccTest t;
+    if (n0 < acc_min || n1 < acc_min) return t;
+    t.testable = true;
+    double m0 = 0, m1 = 0, mb = 0, sd0 = 0, sd1 = 0;
+    for (int a = 0; a < na; ++a) {
+        m0 = max(m0, s0[a]); m1 = max(m1, s1[a]); mb = max(mb, s0[a] + s1[a]);
+        const double u0 = s0[a] / n0, u1 = s1[a] / n1;
+        sd0 = max(sd0, sqrt(max(0.0, q0[a] / n0 - u0 * u0))); sd1 = max(sd1, sqrt(max(0.0, q1[a] / n1 - u1 * u1)));
+    }
+    const double D = m0 + m1 - mb, tt = n0 + n1;
+    const double noise = hid_azuma ? hid_range * (sqrt(n0 * log(1 / hid_delta) / 2) + sqrt(n1 * log(1 / hid_delta) / 2))
+                                   : hid_zq * (sd0 * sqrt(n0) + sd1 * sqrt(n1));
+    t.d2 = D; t.gain = D / tt; t.z = (D - hid_eps * tt - noise) / tt;
+    t.pass = D > 0 && D >= hid_eps * tt + noise;
+    return t;
+}
 AccTest acc_test(const AccCand& c, int n, int metric = -1) {  // metric: -1 --acc-metric, 0 mse, 1 dir
+    if (metric < 0 && acc_hidden) return hid_test(c.s[0], c.q[0], c.n[0], c.s[1], c.q[1], c.n[1], n);
     const bool use_dir = metric < 0 ? acc_dir : metric == 1;
     AccTest t;
     const double nl = c.n[0], nr = c.n[1];
@@ -643,6 +696,11 @@ double es(int h, int p) {
         for (int a = 0; a < d; ++a) { v[a] = es(edges[e + a], p); node += s[a] * v[a]; }
         touch(b);
         for (int a = 0; a < d; ++a) Rtmp[(size_t)b * W + a] += v[a] - node;
+        if (gate_noise) {
+            if ((int)Wn.size() <= b) { Wn.resize(B, 0.0); Wq.resize((size_t)B * W, 0.0); }
+            for (int a = 0; a < d; ++a) Wq[(size_t)b * W + a] += (v[a] - node) * (v[a] - node);
+            Wn[b] += 1;
+        }
         if (measure) {
             for (int a = 0; a < d; ++a) { Rmeas[(size_t)I * W + a] += v[a] - node; Rwin[(size_t)I * W + a] += v[a] - node; }
             ++vmeas[I]; ++vwin[I];
@@ -658,6 +716,12 @@ double es(int h, int p) {
                 LeafOwn& o = lown[l];
                 for (int a = 0; a < d; ++a) { o.s[a] += r[a]; o.q[a] += r[a] * r[a]; }
                 o.n += 1;
+                if (div_hidden) {
+                    if ((int)lwin.size() <= l) lwin.resize(leaves.size());
+                    LeafOwn& w = lwin[l];
+                    for (int a = 0; a < d; ++a) { w.s[a] += r[a]; w.q[a] += r[a] * r[a]; }
+                    w.n += 1;
+                }
             }
         }
         if (pp_mode) {
@@ -860,6 +924,13 @@ void drain_resolve() {  // finalize the leaves queued by --resolve-now (a finali
     while (!resolve_q.empty()) { const int l = resolve_q.back(); resolve_q.pop_back(); if (leaves[l].node >= 0) finalize(l); }
 }
 int n_leaves_alive() { int c = 0; for (const Leaf& L : leaves) c += L.node >= 0; return c; }
+// --prior-leaf-ratio: recount the live prior leaves and the buckets some live leaf points to (after posterior judgments
+// and at the start; a prior split adds one leaf and changes no pointer)
+void recount_cap() {
+    n_alive_leaves = 0; n_used_buckets = 0;
+    vector<char> used(B, 0);
+    for (const Leaf& L : leaves) if (L.node >= 0) { ++n_alive_leaves; if (L.ptr >= 0 && L.ptr < B && !used[L.ptr]) { used[L.ptr] = 1; ++n_used_buckets; } }
+}
 // --mode tree: the judgment at an epoch end (one split per leaf; new leaves are not judged until the next epoch end)
 int tree_epoch_end() {
     lacc.resize(leaves.size());
@@ -953,6 +1024,7 @@ int ppacc_epoch_end(int k) {
     int splits = 0;
     {  // ---- prior phase ----
         for (int l = 0; l < nl0; ++l) {
+            if (!prior_cap_ok()) break;  // --prior-leaf-ratio: at the cap the remaining leaves keep their candidates
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
             const bool eligible = prior_all || users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
@@ -1018,7 +1090,7 @@ void ppacc_split_leaf(int l, int best, const AccTest& bt) {
     tnodes[node].left = kid[0]; tnodes[node].right = kid[1];
     leaves[l].node = -1; lacc[l] = LeafAcc{}; lown[l] = LeafOwn{};
     if (post_from_leaves) lavg[l] = array<double, W>{};
-    ++cell_ver[cell]; ++n_prior_splits;
+    ++cell_ver[cell]; ++n_prior_splits; ++n_alive_leaves;
     fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%.0f,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(c.d).c_str(), c.thr,
             acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
 }
@@ -1028,10 +1100,14 @@ int ppacc_visit_checks() {
     if (prior_ready.empty()) return 0;
     lacc.resize(leaves.size()); lown.resize(leaves.size());
     if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
+    // --prior-leaf-ratio: at the cap the due leaves wait. The list is dropped (it is empty between iterations, so a
+    // checkpoint never holds it): a due candidate is marked again at its leaf's next visit and tested once the cap allows.
     vector<int> ready; ready.swap(prior_ready);
     int splits = 0;
-    for (int l : ready) {
+    for (size_t i = 0; i < ready.size(); ++i) {
+        const int l = ready[i];
         prior_ready_flag[l] = 0;
+        if (!prior_cap_ok()) continue;
         if (leaves[l].node < 0) continue;
         const int n = counts[cell_members[leaves[l].cell][0]];
         int best = -1; AccTest bt;
@@ -1062,9 +1138,60 @@ int ppacc_posterior_pass() {
     for (int l = 0; l < nl0; ++l) if (leaves[l].node >= 0) users[leaves[l].ptr].push_back(l);
     int splits = 0;
     const int B0 = B;
+    if (div_hidden) lwin.resize(leaves.size());
     for (int b = 0; b < B0; ++b) {
         if (users[b].size() < 2) continue;
         const int n = bucket_n[b];
+        if (div_hidden) {  // --div-metric hidden: groups by the leaves' stored window directions, one test per action
+            // B_a: the leaves whose window record has >= --acc-min-visits visits and a positive largest sum, at action a
+            // (its argmax); the others stay. B_a is tested against the rest of the bucket (b minus B_a) with the
+            // hidden-regret test; every passing group moves to a new bucket, the rest keeps b.
+            map<int, vector<int>> grp;
+            double tot_s[W] = {}, tot_q[W] = {}, tot_n = 0;
+            for (int l : users[b]) {
+                const LeafOwn& o = lwin[l];
+                for (int a = 0; a < n; ++a) { tot_s[a] += o.s[a]; tot_q[a] += o.q[a]; }
+                tot_n += o.n;
+                if (o.n < acc_min) continue;
+                int am = 0; for (int a = 1; a < n; ++a) if (o.s[a] > o.s[am]) am = a;
+                if (o.s[am] > 0) grp[am].push_back(l);
+            }
+            vector<pair<int, vector<int>>> pass;
+            for (auto& [lab, ls] : grp) {
+                double gs[W] = {}, gq[W] = {}, gn = 0, rs[W], rq[W];
+                for (int l : ls) { for (int a = 0; a < n; ++a) { gs[a] += lwin[l].s[a]; gq[a] += lwin[l].q[a]; } gn += lwin[l].n; }
+                for (int a = 0; a < n; ++a) { rs[a] = tot_s[a] - gs[a]; rq[a] = max(0.0, tot_q[a] - gq[a]); }
+                const AccTest t = hid_test(gs, gq, gn, rs, rq, tot_n - gn, n);
+                n_acc_tested += t.testable;
+                if (t.pass) { pass.push_back({lab, ls}); ++n_diverging; }
+            }
+            if (pass.empty()) continue;
+            string labs = "-1", kids = to_string(b);  // -1: the staying leaves (b may be left unused)
+            vector<char> moved(leaves.size(), 0);
+            auto start_tables = [&](int nb, const vector<int>& ls) {  // --inherit-candidate 1: the group's window sums
+                if (!inherit_cand) return;
+                for (int a = 0; a < W; ++a) Q[(size_t)nb * W + a] = 0;
+                for (int l : ls) for (int a = 0; a < n; ++a) Q[(size_t)nb * W + a] += lwin[l].s[a];
+            };
+            for (auto& [lab, ls] : pass) {
+                const int nb = B++;
+                Q.resize((size_t)B * W, 0); S.resize((size_t)B * W, 0); Rtmp.resize((size_t)B * W, 0);
+                bucket_n.push_back(bucket_n[b]); vis.push_back(0); parent_eps.push_back(-1); members.emplace_back(); dirty.push_back(0);
+                for (int a = 0; a < W; ++a) { Q[(size_t)nb * W + a] = inherit_r * Q[(size_t)b * W + a]; S[(size_t)nb * W + a] = inherit_s * S[(size_t)b * W + a]; }
+                if (Qwin.size() == (size_t)nb * W) for (int a = 0; a < W; ++a) Qwin.push_back(inherit_r * Qwin[(size_t)b * W + a]);
+                start_tables(nb, ls);
+                for (int l : ls) { leaves[l].ptr = nb; moved[l] = 1; }
+                labs += " " + to_string(lab); kids += " " + to_string(nb);
+            }
+            for (int a = 0; a < W; ++a) { Q[(size_t)b * W + a] *= inherit_r; S[(size_t)b * W + a] *= inherit_s; }
+            if (Qwin.size() >= (size_t)(b + 1) * W) for (int a = 0; a < W; ++a) Qwin[(size_t)b * W + a] *= inherit_r;
+            vector<int> stay; for (int l : users[b]) if (!moved[l]) stay.push_back(l);
+            start_tables(b, stay);
+            for (int l : users[b]) if (moved[l]) { lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l); }  // the moved leaves restart
+            fprintf(evf_global, "%d,%lld,%d,%zu,,%s,%s\n", level_now, cur_t, b, users[b].size(), labs.c_str(), kids.c_str());
+            ++splits; ++n_post_splits;
+            continue;
+        }
         double tot_s[W] = {}, tot_q[W] = {}, tot_n = 0;
         for (int l : users[b]) { for (int a = 0; a < n; ++a) { tot_s[a] += lown[l].s[a]; tot_q[a] += lown[l].q[a]; } tot_n += lown[l].n; }
         bool diverging = false;
@@ -1118,6 +1245,7 @@ int ppacc_posterior_pass() {
         ++splits; ++n_post_splits;
     }
     if (splits) { ++level_now; fflush(evf_global); }
+    if (prior_leaf_ratio > 0) recount_cap();
     return splits;
 }
 bool try_split_now(int l, int lv, int bs) {  // immediate mode: one binary test
@@ -1376,7 +1504,9 @@ int main(int argc, char** argv) try {
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
                             {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"}, {"--div-test", "both"}, {"--keep-cands", "0"},
                             {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
-                            {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
+                            {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"},
+                            {"--hid-bound", "normal"}, {"--hid-delta", "0.1"}, {"--hid-eps", "0"}, {"--hid-range", "0"},
+                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1390,9 +1520,12 @@ int main(int argc, char** argv) try {
     if (post_realtime && !ppacc_mode) throw runtime_error("--post-realtime is for --mode ppacc");
     {
         const string dm = opt["--div-metric"], dr = opt["--div-ref"];
-        if (dm != "same" && dm != "mse" && dm != "dir") throw runtime_error("--div-metric must be same, mse or dir");
+        if (dm != "same" && dm != "mse" && dm != "dir" && dm != "hidden") throw runtime_error("--div-metric must be same, mse, dir or hidden");
         if (dr != "rest" && dr != "bucket") throw runtime_error("--div-ref must be rest or bucket");
-        div_metric = dm == "same" ? -1 : dm == "dir" ? 1 : 0; div_ref_bucket = dr == "bucket";
+        div_metric = dm == "same" || dm == "hidden" ? -1 : dm == "dir" ? 1 : 0; div_ref_bucket = dr == "bucket";
+        div_hidden = dm == "hidden";
+        if (div_hidden && (dr != "rest" || opt["--reset-moved-only"] == "1" || opt["--post-from-leaves"] == "1" || post_realtime))
+            throw runtime_error("--div-metric hidden has its own groups and resets (moved leaves only): no --div-ref, --reset-moved-only, --post-from-leaves or --post-realtime");
         reset_moved_only = opt["--reset-moved-only"] == "1"; post_from_leaves = opt["--post-from-leaves"] == "1";
         if ((dm != "same" || dr != "rest" || reset_moved_only || post_from_leaves) && !ppacc_mode)
             throw runtime_error("--div-metric, --div-ref, --reset-moved-only and --post-from-leaves are for --mode ppacc");
@@ -1410,7 +1543,22 @@ int main(int argc, char** argv) try {
     }
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
-    if (opt["--acc-metric"] != "mse" && !acc_dir) throw runtime_error("--acc-metric must be mse or dir");
+    acc_hidden = opt["--acc-metric"] == "hidden";
+    if (opt["--acc-metric"] != "mse" && !acc_dir && !acc_hidden) throw runtime_error("--acc-metric must be mse, dir or hidden");
+    {
+        const string hb = opt["--hid-bound"], gn = opt["--gate-noise"];
+        if (hb != "normal" && hb != "azuma") throw runtime_error("--hid-bound must be normal or azuma");
+        hid_azuma = hb == "azuma"; hid_delta = stod(opt["--hid-delta"]); hid_eps = stod(opt["--hid-eps"]); hid_range = stod(opt["--hid-range"]);
+        if (!(hid_delta > 0 && hid_delta < 1) || hid_eps < 0 || hid_range < 0) throw runtime_error("--hid-delta in (0, 1), --hid-eps >= 0, --hid-range >= 0");
+        hid_zq = inv_normal(1 - hid_delta);
+        if (gn != "none" && gn != "normal") throw runtime_error("--gate-noise must be none or normal");
+        gate_noise = gn == "normal";
+        inherit_cand = opt["--inherit-candidate"] == "1";
+        if (inherit_cand && !div_hidden) throw runtime_error("--inherit-candidate is for --div-metric hidden");
+        prior_leaf_ratio = stod(opt["--prior-leaf-ratio"]);
+        if (prior_leaf_ratio < 0) throw runtime_error("--prior-leaf-ratio must be >= 0");
+        if (prior_leaf_ratio > 0 && !ppacc_mode) throw runtime_error("--prior-leaf-ratio is for --mode ppacc");
+    }
     if (acc_k < 1 || acc_min < 2 || acc_pool < 2) throw runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
     split_on = opt["--split"] == "1";
     prior_ratio = stod(opt["--prior-ratio"]); crossfit = opt["--crossfit"] == "1";
@@ -1435,6 +1583,7 @@ int main(int argc, char** argv) try {
     if (scale != "counterfactual" && scale != "fact-counterfact") throw runtime_error("--scale must be counterfactual or fact-counterfact");
     if (schedule != "static" && schedule != "eps" && schedule != "regret") throw runtime_error("--schedule must be static, eps or regret");
     if (schedule == "regret" && !tree_mode && !ppacc_mode) throw runtime_error("--schedule regret is for --mode tree and ppacc");
+    if (gate_noise && schedule != "regret") throw runtime_error("--gate-noise is for --schedule regret");
     if (prior_split != "immediate" && prior_split != "epoch") throw runtime_error("--prior-split must be immediate or epoch");
     if (prior_start != "equal" && prior_start != "length" && prior_start != "identity") throw runtime_error("bad --prior-start");
     if (features != "general" && features != "poker") throw runtime_error("--features must be general or poker");
@@ -1459,6 +1608,10 @@ int main(int argc, char** argv) try {
     start = load<int64_t>(dir + "/start.bin"); degree = load<int32_t>(dir + "/degree.bin");
     edges = load<int32_t>(dir + "/edges.bin"); prob = load<double>(dir + "/prob.bin");
     util = load<double>(dir + "/util.bin"); counts = load<int32_t>(dir + "/counts.bin");
+    if (hid_range == 0) {  // --hid-range 0: L = 4 max |u| (values in [-max|u|, max|u|], so a sampled regret in [-2 max|u|, 2 max|u|])
+        double U = 0; for (double u : util) U = max(U, fabs(u));
+        hid_range = 4 * U;
+    }
     constraint_of = load<int32_t>(dir + "/constraint.bin"); seat_of = load<int32_t>(dir + "/seat.bin");
     obs = load<int32_t>(dir + "/obs.bin"); obs_start = load<int64_t>(dir + "/obs_start.bin");
     nI = (int)counts.size(); N = (int)players.size();
@@ -1518,7 +1671,9 @@ int main(int argc, char** argv) try {
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
             !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-test" && v == "both") &&
             !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-visits" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
-            !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
+            !(k == "--post-from-leaves" && v == "0") && !(k == "--hid-bound" && v == "normal") && !(k == "--hid-delta" && v == "0.1") &&
+            !(k == "--hid-eps" && v == "0") && !(k == "--hid-range" && v == "0") && !(k == "--gate-noise" && v == "none") &&
+            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1537,6 +1692,7 @@ int main(int argc, char** argv) try {
     const bool split_separate = split_plan == "separate";
     if (split_separate && (!ppacc_mode || schedule != "regret" || post_realtime))
         throw runtime_error("--split-plan separate needs --mode ppacc and --schedule regret (posterior waiting), without --post-realtime");
+    if (div_hidden && !split_separate) throw runtime_error("--div-metric hidden needs --split-plan separate (posterior judgments at the waiting condition)");
     prior_visits = stoll(opt["--prior-visits"]);
     if (prior_visits < 0) throw runtime_error("--prior-visits must be >= 0");
     if (prior_visits > 0 && (!split_separate || !prior_all))
@@ -1599,6 +1755,8 @@ int main(int argc, char** argv) try {
         if (ppacc_mode) { putv(o, lown); put(o, n_post_splits); put(o, n_diverging); }
         if (schedule == "regret") putv(o, Qwin);
         if (post_from_leaves) putv(o, lavg);
+        if (div_hidden) putv(o, lwin);
+        if (gate_noise) { putv(o, Wq); putv(o, Wn); }
         fflush(prior_log);
         log_bytes = fsize(log_path); ev_bytes = fsize(ev_path); pr_bytes = fsize(pr_path); ds_bytes = fsize(ds_path);
         put(o, log_bytes); put(o, ev_bytes); put(o, pr_bytes); put(o, ds_bytes);
@@ -1647,6 +1805,8 @@ int main(int argc, char** argv) try {
         if (ppacc_mode) { getv(in, lown); get(in, n_post_splits); get(in, n_diverging); }
         if (schedule == "regret") getv(in, Qwin);
         if (post_from_leaves) getv(in, lavg);
+        if (div_hidden) getv(in, lwin);
+        if (gate_noise) { getv(in, Wq); getv(in, Wn); }
         get(in, log_bytes); get(in, ev_bytes); get(in, pr_bytes); get(in, ds_bytes);
         if (!in) throw runtime_error("truncated state.bin");
         filesystem::resize_file(log_path, log_bytes); filesystem::resize_file(ev_path, ev_bytes);
@@ -1750,17 +1910,31 @@ int main(int argc, char** argv) try {
     const double regret_gate = stod(opt["--regret-gate"]);
     const long long gate_check = stoll(opt["--gate-check"]);
     if (gate_check < 1) throw runtime_error("--gate-check must be positive");
+    // --gate-noise normal: a bucket counts max(0, max_a (W_a - z sqrt(sum r_a^2 - W_a^2 / n))), W_a its window regret
+    // sum, n its window visits, z = Phi^-1(1 - --hid-delta): only regret beyond the window's sampling noise
     auto window_regret = [&] {
         double tot = 0;
         for (int b = 0; b < B; ++b) {
             double m = 0;
             for (int a = 0; a < bucket_n[b]; ++a) {
                 const double base = (size_t)b * W + a < Qwin.size() ? Qwin[(size_t)b * W + a] : 0.0;
-                m = max(m, Q[(size_t)b * W + a] - base);
+                double w = Q[(size_t)b * W + a] - base;
+                if (gate_noise) {
+                    const double nb = (size_t)b < Wn.size() ? Wn[b] : 0.0;
+                    const double sq = (size_t)b * W + a < Wq.size() ? Wq[(size_t)b * W + a] : 0.0;
+                    w -= nb > 0 ? hid_zq * sqrt(max(0.0, sq - w * w / nb)) : 0.0;
+                }
+                m = max(m, w);
             }
             tot += m;
         }
         return tot / max<long long>(1, run.t - run.epoch_start);
+    };
+    // the window's start: the tables' snapshot, and the window records of --gate-noise and --div-metric hidden
+    auto window_start = [&] {
+        Qwin = Q;
+        if (gate_noise) { Wq.assign((size_t)B * W, 0.0); Wn.assign(B, 0.0); }
+        if (div_hidden) lwin.assign(leaves.size(), LeafOwn{});
     };
     double row_window_regret = NAN;  // --schedule regret: the window statistic of the row being written (before its judgment)
     auto eps_stat = [&] {
@@ -1933,6 +2107,7 @@ int main(int argc, char** argv) try {
     };
     auto next_row_t = [&] { return (long long)llround(1000.0 * pow(2.0, (double)run.next_row_j / rows_per_octave)); };
     double last_ckpt = cpu_now();
+    if (prior_leaf_ratio > 0) recount_cap();
     while (run.t < T) {
         ++run.t; cur_t = run.t;
         // store this iterate (static: drawn iterations; eps: reservoir over the epoch's iterations)
@@ -1985,12 +2160,12 @@ int main(int argc, char** argv) try {
                 if (prior_end) { if (!frozen) splits += ppacc_epoch_end(0); ++run.k; }  // prior: tables unchanged
                 if (is_end) {
                     if (!frozen) splits += ppacc_posterior_pass();
-                    Qwin = Q; run.epoch_start = run.t;  // the next posterior window starts here
+                    window_start(); run.epoch_start = run.t;  // the next posterior window starts here
                 }
             } else if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
                 const bool frozen = freeze_at > 0 && run.t >= freeze_at;
                 if (!frozen) splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
-                if (schedule == "regret") Qwin = Q;  // the next window starts here (new tables start from their initial values)
+                if (schedule == "regret") window_start();  // the next window starts here (new tables start from their initial values)
                 ++run.k; run.epoch_start = run.t;
                 draw_samples();
             }

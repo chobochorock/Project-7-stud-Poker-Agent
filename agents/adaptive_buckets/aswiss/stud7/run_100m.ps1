@@ -93,6 +93,13 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # schedule (10,000 x 2^k) only places the epoch snapshots, the same roots as the other arms'. --mem-budget-mb 4000:
     # when the partition's counted structures reach 4,000 MB the prior stops growing (posterior judgments go on)
     ppfast_rt = @("pp_ppfast_rt", "pp", 0, "prior-posterior ASWISS, accumulated regret: real-time prior, posterior when window regret <= 0.1", "--tree-split accum --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000")
+    # the hidden-regret criterion (PP_STUD7_DESIGN_KO.md 22; user, 2026-11-15): a prior candidate is tested once at 1,000
+    # visits by D = M(B1) + M(B2) - M(B) >= z_d (s1 sqrt n1 + s2 sqrt n2) (normal, d = 0.1, eps = 0); the posterior is judged
+    # only when the window regret counting per bucket only what exceeds z_d x its noise is <= 0.5 ante per root; then
+    # each bucket's leaves are grouped by their stored window direction and each group tested against the rest by D.
+    # ppfast_hid_r100: also --prior-leaf-ratio 100 (a prior split only while live leaves + 1 <= 100 x tables in use)
+    ppfast_hid = @("pp_ppfast_hid", "pp", 0, "prior-posterior ASWISS, hidden-regret splits: real-time prior, posterior when window regret beyond noise <= 0.5", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000")
+    ppfast_hid_r100 = @("pp_ppfast_hid_r100", "pp", 0, "ppfast_hid with live prior leaves at most 100 x the tables in use", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --prior-leaf-ratio 100")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

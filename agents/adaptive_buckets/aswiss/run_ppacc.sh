@@ -23,6 +23,10 @@
 #   ppspec_dist       (가) the divergence test is the normalised distance alone (--div-test dist; no MSE z test)
 #   ppspec_keep       (나) prior candidates are kept when they fail or their leaf is not eligible (--keep-cands 1)
 #   ppspec_dist_keep  both
+# Prior leaves fast and fine, the posterior slowly (design section 19.8; user, 2026-11-15):
+#   ppfast_gate       prior judgments at every doubling for every leaf (as tree_mse), posterior judgments when the
+#                     window's average regret is <= 0.1, by the leaves' accumulated-regret directions
+#   ppfast_dist_keep  the same with (가) and (나)
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -56,6 +60,8 @@ for s in $SEEDS; do
   echo "ppspec_dist $s $SPEC --div-test dist" >> "$jobs"
   echo "ppspec_keep $s $SPEC --keep-cands 1" >> "$jobs"
   echo "ppspec_dist_keep $s $SPEC --div-test dist --keep-cands 1" >> "$jobs"
+  echo "ppfast_gate $s $SPEC --split-plan separate --prior-eligible all" >> "$jobs"
+  echo "ppfast_dist_keep $s $SPEC --split-plan separate --prior-eligible all --div-test dist --keep-cands 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
@@ -67,6 +73,10 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec" --arm "ppacc_gate=$(arm ppacc_gat
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec2" --arm "ppacc_gate=$(arm ppacc_gate)" --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" \
   --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_dist=$(arm ppspec_dist)" --arm "ppspec_keep=$(arm ppspec_keep)" \
   --arm "ppspec_dist_keep=$(arm ppspec_dist_keep)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast" --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_dist_keep=$(arm ppspec_dist_keep)" \
+  --arm "ppfast_gate=$(arm ppfast_gate)" --arm "ppfast_dist_keep=$(arm ppfast_dist_keep)" --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" \
+  --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

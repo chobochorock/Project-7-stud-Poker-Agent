@@ -23,6 +23,11 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | `ppspec_gate` | ppspec (user's specification), alternating judgments, tables restart | 3 | 232M | 0.7296 [0.5452, 0.8196] | 2.13 | 0.715 [0.573, 0.856] | 0.89 | 32–964 | 0.7366 | 0.180 [0.120, 0.184] |
 | `ppspec_rt` | ppspec, posterior splits in real time, full inheritance (alternative 1) | 3 | 181M | 0.9721 [0.7536, 1.0532] | 2.84 | 0.995 [0.704, 1.119] | 1.24 | 17–43 | 0.9728 | 0.274 [0.118, 0.280] |
 | `ppspec_leaves` | ppspec, tables are the sums of the leaves' records (alternative 2) | 3 | 222M | 0.8393 [0.6645, 0.8780] | 2.45 | 0.857 [0.637, 1.225] | 1.07 | 10–61 | 1.0121 | 0.336 [0.145, 1.094] |
+| `ppspec_dist` | ppspec_gate, divergence by the normalised distance alone | 3 | 189M | 0.7276 [0.6937, 0.7654] | 2.12 | 0.714 [0.694, 0.782] | 0.89 | 43–431 | 0.6710 | 0.111 [0.041, 0.181] |
+| `ppspec_keep` | ppspec_gate, failed and ineligible candidates kept | 3 | 146M | 0.8255 [0.6498, 0.8822] | 2.41 | 0.820 [0.664, 0.880] | 1.02 | 55–247 | 0.8317 | 0.171 [0.100, 0.182] |
+| `ppspec_dist_keep` | ppspec_gate, both | 3 | 147M | 0.8355 [0.6685, 0.8823] | 2.44 | 0.747 [0.681, 0.880] | 0.93 | 76–308 | 0.8183 | 0.188 [0.098, 0.238] |
+| `ppfast_gate` | ppfast: prior every doubling (all leaves), posterior when window regret <= 0.1 | 3 | 126M | 0.3696 [0.3249, 0.4912] | 1.08 | 0.816 [0.747, 0.841] | 1.02 | 4,324–5,505 | 0.6328 | 0.327 [0.138, 1.201] |
+| `ppfast_dist_keep` | ppfast with distance-only divergence and kept candidates | 3 | 128M | 0.3583 [0.3353, 0.3907] | 1.05 | 0.840 [0.830, 0.892] | 1.05 | 3,659–5,977 | 0.5247 | 0.186 [0.109, 0.492] |
 | `pure_a` | pure a, iterates (reference) | 3 | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 | – |
 | `ppmix_avg_root` | pp mix, avg, root (reference) | 3 | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 | – |
 | `kmeans_a` | k-means, rule a counts (baseline) | 3 | 224M | 0.3424 [0.3202, 0.3524] | 1.00 | 0.802 [0.745, 0.850] | 1.00 | 9,394–10,808 | 0.3366 | – |

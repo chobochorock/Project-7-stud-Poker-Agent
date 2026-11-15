@@ -34,6 +34,10 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppspec_dist     ppspec_gate with the divergence test by the normalised distance alone (design section 19.7, (가))
   ppspec_keep     ppspec_gate keeping prior candidates that fail or whose leaf is not eligible (19.7, (나))
   ppspec_dist_keep  both
+  ppfast_gate     prior leaves split fast and fine, the posterior slowly (design section 19.8; user, 2026-11-15): prior
+                  judgments at every doubling for every leaf (as tree_mse; a prior split changes no table), posterior
+                  judgments when the window's average regret is <= the gate, by the leaves' accumulated-regret directions
+  ppfast_dist_keep  the same with (가) and (나) of section 19.7
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -74,6 +78,8 @@ ARMS = {
     "ppspec_dist": SPEC + ["--div-test", "dist"],
     "ppspec_keep": SPEC + ["--keep-cands", "1"],
     "ppspec_dist_keep": SPEC + ["--div-test", "dist", "--keep-cands", "1"],
+    "ppfast_gate": SPEC + ["--split-plan", "separate", "--prior-eligible", "all"],
+    "ppfast_dist_keep": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--div-test", "dist", "--keep-cands", "1"],
     "ppspec_leaves": SPEC + ["--post-from-leaves", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],

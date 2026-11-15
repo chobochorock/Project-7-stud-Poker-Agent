@@ -1007,6 +1007,8 @@ python tree_pilot.py BINARY OUT_DIR --status | --table | --stop
 | `ppspec_dist` | `ppspec_gate` + (가) (19.7) | 괴리는 정규화 거리만 | 재시작, 옮긴 잎만 기록 초기화 | 교대, 판정마다 대기 조건 | 19.7 | 19.7 |
 | `ppspec_keep` | `ppspec_gate` + (나) (19.7) | 위 `ppspec_gate`와 같음 | 위와 같음, 후보를 버리지 않음 | 교대, 판정마다 대기 조건 | 19.7 | 19.7 |
 | `ppspec_dist_keep` | `ppspec_gate` + (가) + (나) | 괴리는 정규화 거리만 | 후보를 버리지 않음 | 교대, 판정마다 대기 조건 | 19.7 | 19.7 |
+| `ppfast_gate` | prior 빠르게, posterior 천천히 (19.8) | prior MSE(모든 잎), posterior 괴리는 정규화 거리(잎 대 버킷 전체) | 재시작, 옮긴 잎만 기록 초기화 | prior는 2배마다, posterior는 대기 조건 | 19.8 | 19.8 |
+| `ppfast_dist_keep` | `ppfast_gate` + (가) + (나) | 괴리는 정규화 거리만 | 위와 같음, 실패한 후보 유지 | 위와 같음 | 19.8 | 19.8 |
 | `pure_a` (기존) | pure ASWISS | 판정 시점 방향 라벨(규칙 a) | 재시작 | 2배마다, 끝까지 | 0.0075 | 약 1.8만 |
 | `ppmix_avg_root` (기존) | 기존 pp | 판정 시점 방향 라벨 | 재시작 | 2배마다, 끝까지 | 0.034 | 약 2.1만 |
 | `kmeans_a` (기존) | k-means 고정 분할 | – | – | – | 0.342 | 약 1만 |
@@ -1201,3 +1203,20 @@ seed별 (평균 전략, 쓰는 표, 판정 수, prior 분할, posterior 분할):
 시험: 기본값은 이전 커밋과 로그·정책 파일까지 같다. 새 세 설정 모두 중간에 멈췄다 이어도 같다. `--div-test dist`는 `--div-metric dir`이 필요하고, 두 옵션 모두 `--mode ppacc` 전용이다.
 
 실험: `run_ppacc.sh`, 900초 × seed 1–3, 동시에 3개. 노트북: `ministud_pilot.py OUT --arms ppspec_dist ppspec_keep ppspec_dist_keep`.
+
+### 19.8 prior는 빠르게, posterior는 천천히 (`ppfast_*`, 2026-11-15)
+
+사용자 제안: "prior leaf는 예전처럼 빠르게 잘게 쪼개는 것이 좋을 것 같은데, 각 prior leaf의 누적 regret양을 보고 posterior를 천천히 분해하는 것이 좋을 수도?" posterior를 나누는 기준은 방향(사용자 답: "A이긴 해")이다.
+
+근거: pp 구조에서 prior 분할은 표를 바꾸지 않는다(자식이 같은 posterior 표를 가리킴). 학습 손실 없이 잘게 나눌 수 있고, 표를 새로 만드는 posterior만 천천히 하면 된다. 지금까지 원안 구현은 prior 분할을 자격 조건(혼자 사용 또는 방문 50% 이상)에 묶어서, posterior가 안 나뉘면 prior도 안 나뉘었다.
+
+구현 `--split-plan separate --prior-eligible all`:
+- prior: 2배마다(1000·2^k 반복) 판정한다. 모든 잎이 대상이고(자격 조건 없음), 단일 트리 `tree_mse`와 같은 후보 K개 MSE 시험을 쓴다. 자식은 부모의 posterior 표를 그대로 가리킨다.
+- posterior: prior와 따로, 버킷 총합 구간 평균 regret ≤ 0.1일 때(1만 반복마다 확인) 판정한다. 괴리는 잎의 누적 regret(포인터가 정해진 뒤부터) 방향과 버킷 전체 방향의 정규화 거리이고, 묶는 법은 각 잎이 가장 원하는 행동별이다. 새 표는 재시작하고 옮긴 잎만 기록을 초기화한다.
+- 대기 조건의 기준점은 posterior 판정 때만 새로 잡는다(prior 분할은 표를 바꾸지 않으므로).
+
+시험: 기본값은 이전 커밋과 같다. 중간에 멈췄다 이어도 같다. 200만 반복 시험 실행에서 prior 분할은 2,000·4,000·…·1,024,000 반복에만, posterior 분할은 대기 조건 시점에만 일어났다(잎 1,153개, 표 379개; 같은 반복의 `ppspec_gate`는 표 17개).
+
+내가 정한 것: 잎이 잘수록 잎 하나의 누적 regret에 잡음이 많아 posterior 판정에서 유의한 잎이 적어질 수 있다. prior 트리의 중간 노드(아래 잎 기록의 합)에서 판정하는 방법은 처음에는 넣지 않고, 문제가 보이면 추가한다.
+
+실험: `ppfast_gate`, `ppfast_dist_keep`, 900초 × seed 1–3. 노트북: `ministud_pilot.py OUT --arms ppfast_gate ppfast_dist_keep`.

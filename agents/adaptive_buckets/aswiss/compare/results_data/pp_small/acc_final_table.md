@@ -29,6 +29,9 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | `ppfast_gate` | ppfast: prior every doubling (all leaves), posterior when window regret <= 0.1 | 3 | 126M | 0.3696 [0.3249, 0.4912] | 1.08 | 0.816 [0.747, 0.841] | 1.02 | 4,324–5,505 | 0.6328 | 0.327 [0.138, 1.201] |
 | `ppfast_dist_keep` | ppfast with distance-only divergence and kept candidates | 3 | 128M | 0.3583 [0.3353, 0.3907] | 1.05 | 0.840 [0.830, 0.892] | 1.05 | 3,659–5,977 | 0.5247 | 0.186 [0.109, 0.492] |
 | `ppfast_rt` | ppfast with real-time prior splits (a candidate tested once at 1,000 visits) | 3 | 105M | 0.2851 [0.2746, 0.4469] | 0.83 | 0.821 [0.797, 0.881] | 1.02 | 8,234–8,805 | 0.3702 | 0.518 [0.429, 1.380] |
+| `ppfast_rt_hid` | ppfast_rt by the hidden-regret test (normal, d = 0.1), wait beyond noise, stored window directions | 3 | 96M | 0.2745 [0.2266, 0.3153] | 0.80 | 0.663 [0.658, 0.802] | 0.83 | 5,194–6,024 | 0.4722 | 0.178 [0.142, 0.310] |
+| `ppfast_rt_hid_inh` | ppfast_rt_hid, new tables start from the leaves' window sums | 3 | 106M | 0.6972 [0.6556, 1.2513] | 2.04 | 0.798 [0.654, 1.330] | 1.00 | 83–345 | 0.8160 | 0.579 [0.253, 3.183] |
+| `ppfast_rt_hid_ah` | ppfast_rt_hid with the Azuma-Hoeffding noise term | 3 | 156M | 0.8659 [0.6638, 0.8716] | 2.53 | 0.863 [0.663, 0.909] | 1.08 | 6–6 | 0.7958 | 0.001 [0.000, 0.035] |
 | `pure_a` | pure a, iterates (reference) | 3 | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 | – |
 | `ppmix_avg_root` | pp mix, avg, root (reference) | 3 | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 | – |
 | `kmeans_a` | k-means, rule a counts (baseline) | 3 | 224M | 0.3424 [0.3202, 0.3524] | 1.00 | 0.802 [0.745, 0.850] | 1.00 | 9,394–10,808 | 0.3366 | – |

@@ -1010,6 +1010,9 @@ python tree_pilot.py BINARY OUT_DIR --status | --table | --stop
 | `ppfast_gate` | prior 빠르게, posterior 천천히 (19.8) | prior MSE(모든 잎), posterior 괴리는 정규화 거리(잎 대 버킷 전체) | 재시작, 옮긴 잎만 기록 초기화 | prior는 2배마다, posterior는 대기 조건 | 0.370 | 4,324–5,505 (잎 1.6만–1.8만) |
 | `ppfast_dist_keep` | `ppfast_gate` + (가) + (나) | 괴리는 정규화 거리만 | 위와 같음, 실패한 후보 유지 | 위와 같음 | 0.358 | 3,659–5,977 (잎 1.6만–1.9만) |
 | `ppfast_rt` | `ppfast_gate` + 실시간 prior (19.9) | 후보 방문 1000번에 한 번 MSE 시험 | 위와 같음 | prior는 후보마다 방문 1000번, posterior는 대기 조건 | 0.285 | 8,234–8,805 (잎 약 2.9만) |
+| `ppfast_rt_hid` | `ppfast_rt` + 숨은 regret 기준 (22절) | prior: 후보 방문 1000번에 한 번 Δ 시험(정규, δ = 0.1, ε = 0); posterior: 잎 구간 방향 무리마다 Δ 시험 | 재시작, 옮긴 잎만 기록 초기화 | prior는 실시간, posterior는 잡음 보정 대기 조건 ≤ 0.1 | 0.275 | 5,194–6,024 (잎 약 1.6만) |
+| `ppfast_rt_hid_inh` | `ppfast_rt_hid` + 구간 합 상속 | 위와 같음 | 새 표가 무리 잎의 구간 합에서 시작 | 위와 같음 | 0.697 | 83–345 |
+| `ppfast_rt_hid_ah` | `ppfast_rt_hid`, 잡음 항 Azuma–Hoeffding | Δ ≥ L·Σ√(n_i ln(1/δ)/2), L = 64 | 재시작 | 위와 같음 | 0.866 | 6 (분할 없음) |
 | `pure_a` (기존) | pure ASWISS | 판정 시점 방향 라벨(규칙 a) | 재시작 | 2배마다, 끝까지 | 0.0075 | 약 1.8만 |
 | `ppmix_avg_root` (기존) | 기존 pp | 판정 시점 방향 라벨 | 재시작 | 2배마다, 끝까지 | 0.034 | 약 2.1만 |
 | `kmeans_a` (기존) | k-means 고정 분할 | – | – | – | 0.342 | 약 1만 |
@@ -1557,3 +1560,55 @@ python agents\adaptive_buckets\aswiss\stud7\tree_pilot.py agents\adaptive_bucket
 mini-stud (CPU 900초, seed 1–3, `run_ppacc.sh`): `ppfast_rt_hid`(정규, δ = 0.1, ε = 0, 대기 0.1 잡음 보정), `ppfast_rt_hid_inh`(+ `--inherit-candidate 1`), `ppfast_rt_hid_ah`(Azuma–Hoeffding ε = 0). `--prior-leaf-ratio 100`은 mini-stud에서 돌리지 않았다. mini-stud에서는 살아 있는 prior 잎이 쓰이는 표의 약 3배라(3M 반복: 잎 2,222 / 표 595, 1e9 반복 `ppfast_rt`: 약 3.3만 / 1.07만) 상한 100이 걸리지 않고 결과가 `ppfast_rt_hid`와 같다(3M 반복에서 확인).
 
 7-stud (`run_100m.ps1`/`.sh`의 `runs_fair` 비교군): `ppfast_hid`(정규, δ = 0.1, ε = 0, 대기 0.5 잡음 보정, `--mem-budget-mb 4000`), `ppfast_hid_r100`(+ `--prior-leaf-ratio 100`).
+
+### 22.5 mini-stud 결과 (CPU 900초, seed 1–3, 정확한 exploitability, 2026-11-15)
+
+전체 표: `aswiss/compare/results_data/pp_small/acc_final_table.md`, 구간별 표: `pp_small_ppfast_hid.md`, 곡선: `ppfast_hid_curves.png`, regret 합: `ppfast_hid_regret_sums.png`, 실행 기록: `runs_summary_ppfast_hid.tar.gz`. k-means 기준선의 표 수는 pure a 실행을 따른 것이라 이 비교군들과 맞춘 것이 아니다.
+
+| ID | 평균 전략 (중앙값 [최소, 최대]) | k-means 대비 | 현재 전략 | 쓰이는 표 | prior 잎 (seed 1) | 1,638만 반복의 평균 전략 | 반복 수 (중앙값) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `ppfast_rt` (기존) | 0.285 [0.275, 0.447] | 0.83 | 0.821 | 8,234–8,805 | 29,638 | 0.370 | 105M |
+| `ppfast_rt_hid` | 0.275 [0.227, 0.315] | 0.80 | 0.663 | 5,194–6,024 | 16,236 | 0.472 | 96M |
+| `ppfast_rt_hid_inh` | 0.697 [0.656, 1.251] | 2.04 | 0.798 | 83–345 | 4,284 | 0.816 | 106M |
+| `ppfast_rt_hid_ah` | 0.866 [0.664, 0.872] | 2.53 | 0.863 | 6 | 6 | 0.796 | 156M |
+| `tree_mse` (기존) | 0.093 [0.086, 0.121] | 0.27 | 0.491 | 20,408–21,981 | 21,809 | 0.239 | 121M |
+| `kmeans_a` (기준선) | 0.342 [0.320, 0.352] | 1.00 | 0.802 | 9,394–10,808 | – | 0.337 | 224M |
+| `mccfr` (추상화 없음) | 0.0022 | 0.01 | 0.319 | 51,114 | – | 0.012 | 242M |
+
+마지막 행의 regret 합(`--measure 1`, 중앙값; `bucket_regret_sum` = Σ_B M(B)/반복, `regret_sum_gap` = 정보집합 regret 합 − 버킷 regret 합 = 숨은 regret H/반복):
+
+| ID | Σ bucket regret | 숨은 regret (정보집합 − 버킷) |
+|---|---:|---:|
+| `ppfast_rt` | 0.831 | 0.571 |
+| `ppfast_rt_hid` | 0.751 | 0.916 |
+| `ppfast_rt_hid_inh` | 0.936 | 3.984 |
+| `ppfast_rt_hid_ah` | 0.0002 | 3.949 |
+| `tree_mse` | 0.248 | 0.123 |
+
+**읽은 것 (사실)**
+1. `ppfast_rt_hid`의 끝 값(0.275)은 `ppfast_rt`(0.285)와 비슷하고 seed 사이 폭이 좁다. 표는 약 30% 적고(5.2–6.0천 대 8.2–8.8천), prior 잎은 약 45% 적다. 현재 전략은 0.663으로 `ppfast_rt`(0.821)·k-means(0.802)보다 낮다.
+2. 중간 예산에서는 `ppfast_rt`보다 높다: 1,638만 반복에서 0.472 대 0.370, 6,554만 반복에서 0.370 대 0.470(구간별 표). 한 시점의 순서로 결론을 내리지 않는다.
+3. 숨은 regret 기준은 분할을 덜 하므로 끝에서 숨은 regret이 더 크고(0.916 대 0.571), 버킷 regret 합은 조금 작다(0.751 대 0.831).
+4. `--inherit-candidate 1`은 나쁘다(0.697). 판정 뒤 구간 regret이 높게 남아(끝의 잡음 보정 통계 중앙값 0.579, 최대 3.18) 대기 조건이 잘 충족되지 않고 표가 83–345개에 머문다.
+5. Azuma–Hoeffding(ε = 0)은 900초 동안 prior·posterior 분할이 한 번도 없다(측정 21절의 예측과 같음). 시작 추상화(6개 표)의 값이 끝 값이다.
+6. `tree_mse`(0.093)가 여전히 누적 regret 안 중 가장 낮다(표 약 2.1만).
+7. "끝의 구간 regret" 열(`acc_final_table.md`)은 `--gate-noise normal` 비교군에서 잡음 보정 통계다. 보정 없는 `ppfast_rt`의 값과 같은 양이 아니다.
+8. CPU 900초의 반복 수는 `ppfast_rt_hid`가 96M으로 `ppfast_rt`(105M)보다 적다(잎 구간 기록과 버킷 제곱합의 비용). 비교는 같은 CPU 예산이다.
+
+### 22.6 7-stud 빠른 확인 (`ppfast_hid`, seed 1, 대기 조건 0.5, 2026-11-15)
+
+이 기계에서 `aswiss_stud train --partition pp --tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --roots 6000000`(온라인 LBR 없음, 다른 실행과 CPU 공유, 1,473초). 판정은 `pp_post.csv`.
+
+| roots | 구간 regret (보정 전) | 보정 후 (조건) | 판정 | 쓰이는 표 | prior 잎 | 분할 구조 MB |
+|---:|---:|---:|---|---:|---:|---:|
+| 670,000 | 0.524 | 0.497 | 판정: 3개 버킷 분할, 통과 무리 6, 옮긴 잎 1,424 | 9 → 13 | 1,586 | 5.1 |
+| 1,000,000 | 2.250 | 2.183 | – | 13 | 2,896 | 9.4 |
+| 2,000,000 | 1.140 | 1.113 | – | 13 | 6,837 | 22.1 |
+| 4,000,000 | 0.643 | 0.629 | – | 13 | 14,264 | 46.1 |
+| 5,770,000 | 0.509 | 0.499 | 판정: 8개 버킷 분할, 통과 무리 20, 옮긴 잎 16,598 | 13 → 33 | 21,817 | 70.4 |
+| 6,000,000 | 45.71 | 44.54 | – (판정 뒤 23만 roots, 재시작 직후) | 33 | 24,083 | 77.7 |
+
+- prior 잎은 100만 roots당 약 3.6천 개 늘어난다. 같은 seed의 `ppfast_rt` 시범(MSE 시험, 대기 조건 0.1)은 125만 roots에서 잎 38,727개(100만 roots당 약 3.1만)였다.
+- 잡음 보정은 7-stud에서 작다(버킷이 적고 구간이 길어 √n 항이 합에 비해 작다: 0.524 → 0.497).
+- 판정 직후에는 표가 다시 시작해 구간 regret이 크게 뛴다(45.7). 다음 판정까지의 roots는 버킷 수에 따라 늘어난다(22.1의 대기 시간 ∝ 버킷 수).
+- `run_100m.sh`로 같은 비교군을 학습 CPU 120초 예산, 온라인 LBR 64파티클로 돌려 시작, 상태, 예산 도달, `eval`, `final`, `plot`이 끝까지 됨을 확인했다(LBR 값은 예산이 짧아 비교에 쓰지 않는다). Windows에서는 확인하지 못했다.

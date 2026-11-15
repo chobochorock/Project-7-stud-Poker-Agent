@@ -39,6 +39,7 @@ def tail(path, n):
             step = min(size, end); end -= step; f.seek(end); data = f.read(step) + data; size *= 2
     lines = data.decode(errors="replace").split("\n")
     if not data.endswith(b"\n"): lines = lines[:-1]  # a partial last line is being written
+    lines = [l.rstrip("\r") for l in lines]  # files written on Windows end their lines with CRLF
     lines = [l for l in lines if l and l != header][-n:]
     return header, lines
 
@@ -46,7 +47,8 @@ def tail(path, n):
 def rows(path, n):
     header, lines = tail(path, n)
     if not header: return []
-    return [r for r in csv.DictReader(io.StringIO(header + "\n" + "\n".join(lines))) if None not in r.values()]
+    return [r for r in csv.DictReader(io.StringIO(header + "\n" + "\n".join(lines)))
+            if None not in r.values() and not any(k == v for k, v in r.items())]  # never a header line as a row
 
 
 def fnum(x, d=0): return f"{float(x):,.{d}f}"
@@ -61,6 +63,7 @@ def show():
         print(f"{name} ({label}): {run}")
         if not os.path.isdir(d): print("    not started"); continue
         c = rows(os.path.join(d, "curve.csv"), 1)
+        if not c: print("    no curve row yet (curve.csv gets one every -CurveEvery roots)")
         if c:
             r = c[-1]
             cpu = r.get("train_cpu_seconds") or r.get("cpu_seconds") or r.get("seconds")

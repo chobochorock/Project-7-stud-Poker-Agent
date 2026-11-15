@@ -93,6 +93,9 @@
 //   --div-test dist: the divergence test is the normalised distance alone (both sides need a direction; the joint MSE
 //   z test is dropped). --keep-cands 1: a prior candidate is discarded only when one-sided or when its leaf's pointer is
 //   reassigned (the specification's reset), not when it fails a test or its leaf is not eligible.
+//   --split-plan separate (user, 2026-11-15: prior leaves split fast and fine, the posterior slowly by the leaves' accumulated
+//   regrets): prior judgments at every doubling as --mode tree (with --prior-eligible all, every leaf; a prior split never
+//   changes a table), posterior judgments when the window's average regret is <= --regret-gate.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -374,6 +377,7 @@ bool post_from_leaves = false;  // --post-from-leaves 1: a bucket's tables are t
 vector<array<double, W>> lavg;  // --post-from-leaves: each leaf's average-strategy sums since its pointer was set
 bool div_dist_only = false;   // --div-test dist: the divergence test is the normalised distance alone (no MSE z test)
 bool keep_cands = false;      // --keep-cands 1: prior candidates are not discarded when they fail or the leaf is not eligible
+bool prior_all = false;       // --prior-eligible all: every leaf may take a prior split (share: sole user or >= 50% of visits)
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -933,7 +937,7 @@ int ppacc_epoch_end(int k) {
         for (int l = 0; l < nl0; ++l) {
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
-            const bool eligible = users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
+            const bool eligible = prior_all || users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
             if (!eligible) { if (!keep_cands) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
             const int n = counts[cell_members[leaves[l].cell][0]];
             int best = -1; AccTest bt;
@@ -1316,6 +1320,7 @@ int main(int argc, char** argv) try {
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
                             {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"}, {"--div-test", "both"}, {"--keep-cands", "0"},
+                            {"--split-plan", "alternate"}, {"--prior-eligible", "share"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
@@ -1343,6 +1348,10 @@ int main(int argc, char** argv) try {
         div_dist_only = dt == "dist"; keep_cands = opt["--keep-cands"] == "1";
         if ((div_dist_only || keep_cands) && !ppacc_mode) throw runtime_error("--div-test and --keep-cands are for --mode ppacc");
         if (div_dist_only && dm != "dir") throw runtime_error("--div-test dist is the normalised distance: give --div-metric dir");
+        const string pe = opt["--prior-eligible"];
+        if (pe != "share" && pe != "all") throw runtime_error("--prior-eligible must be share or all");
+        prior_all = pe == "all";
+        if (prior_all && !ppacc_mode) throw runtime_error("--prior-eligible is for --mode ppacc");
     }
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
@@ -1453,7 +1462,7 @@ int main(int argc, char** argv) try {
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
             !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-test" && v == "both") &&
-            !(k == "--keep-cands" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
@@ -1466,6 +1475,13 @@ int main(int argc, char** argv) try {
     auto excl = [&](auto&& f) { const double x0 = cpu_now(); f(); excluded += cpu_now() - x0; };
     // --epoch0 E: static judgments at E * 2^k; --eps-at A: the eps rule's first judgment (and eps) at iteration A
     const long long epoch0 = stoll(opt["--epoch0"]), eps_at = stoll(opt["--eps-at"]);
+    // --split-plan separate (--mode ppacc): prior judgments on the static schedule (--epoch0 x --epoch-growth^k), posterior
+    // judgments when the waiting condition holds (--schedule regret); alternate: one schedule, prior and posterior in turn
+    const string split_plan = opt["--split-plan"];
+    if (split_plan != "alternate" && split_plan != "separate") throw runtime_error("--split-plan must be alternate or separate");
+    const bool split_separate = split_plan == "separate";
+    if (split_separate && (!ppacc_mode || schedule != "regret" || post_realtime))
+        throw runtime_error("--split-plan separate needs --mode ppacc and --schedule regret (posterior waiting), without --post-realtime");
     if (epoch0 < 1 || eps_at < 1) throw runtime_error("--epoch0 and --eps-at must be positive");
     const long long growth = stoll(opt["--epoch-growth"]), freeze_at = stoll(opt["--freeze-at"]);
     if (freeze_at > 0 && !tree_mode && !ppacc_mode) throw runtime_error("--freeze-at is for --mode tree and ppacc");
@@ -1892,15 +1908,25 @@ int main(int argc, char** argv) try {
         else if (schedule == "regret") is_end = run.t - run.epoch_start >= 1000 && run.t % gate_check == 0 && window_regret() <= regret_gate;
         else is_end = run.t - run.epoch_start >= 1000 && run.t % eps_check == 0 && eps_stat() < run.eps;
         if (is_end && direction_avg && split_on) { run.cur_tables = avg_table(); run.curK = 1; }  // the split-time average strategy
+        // --split-plan separate: prior judgments at every --epoch-growth multiple (run.k counts them); is_end is the
+        // posterior judgment (the waiting condition; run.epoch_start is the start of its window)
+        const bool prior_end = split_separate && run.t == epoch_end_static(run.k);
         const bool grid_row = run.t == next_row_t();
         if (grid_row) ++run.next_row_j;
-        if (is_end || grid_row || run.t == T) {
+        if (is_end || prior_end || grid_row || run.t == T) {
             const int before = B;
             if (schedule == "regret") row_window_regret = window_regret();
             int splits = 0;
             if (is_end && run.curK > 0 && schedule == "eps" && run.k == 0) run.eps = eps_stat();
             const RowStats st = snapshot(before);
-            if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
+            if (split_separate && (is_end || prior_end) && split_on) {
+                const bool frozen = freeze_at > 0 && run.t >= freeze_at;
+                if (prior_end) { if (!frozen) splits += ppacc_epoch_end(0); ++run.k; }  // prior: tables unchanged
+                if (is_end) {
+                    if (!frozen) splits += ppacc_posterior_pass();
+                    Qwin = Q; run.epoch_start = run.t;  // the next posterior window starts here
+                }
+            } else if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {
                 const bool frozen = freeze_at > 0 && run.t >= freeze_at;
                 if (!frozen) splits = tree_mode ? tree_epoch_end() : ppacc_mode ? ppacc_epoch_end(run.k) : epoch_end();
                 if (schedule == "regret") Qwin = Q;  // the next window starts here (new tables start from their initial values)

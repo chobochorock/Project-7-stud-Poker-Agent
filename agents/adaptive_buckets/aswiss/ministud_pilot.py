@@ -31,6 +31,9 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppspec_gate     alternating prior and posterior judgments, the new posterior tables restart
   ppspec_rt       posterior splits in real time with full inheritance (the user's first alternative)
   ppspec_leaves   a bucket's tables are the sums of its leaves' records (the user's second alternative)
+  ppspec_dist     ppspec_gate with the divergence test by the normalised distance alone (design section 19.7, (가))
+  ppspec_keep     ppspec_gate keeping prior candidates that fail or whose leaf is not eligible (19.7, (나))
+  ppspec_dist_keep  both
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -68,6 +71,9 @@ ARMS = {
     "ppacc_dir_gate": ["--mode", "ppacc", "--acc-metric", "dir", "--schedule", "regret", "--regret-gate", str(a.gate), "--measure", "1"],
     "ppspec_gate": SPEC,
     "ppspec_rt": SPEC + ["--post-realtime", "1", "--inherit-regret", "1", "--inherit-avg", "1"],
+    "ppspec_dist": SPEC + ["--div-test", "dist"],
+    "ppspec_keep": SPEC + ["--keep-cands", "1"],
+    "ppspec_dist_keep": SPEC + ["--div-test", "dist", "--keep-cands", "1"],
     "ppspec_leaves": SPEC + ["--post-from-leaves", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],

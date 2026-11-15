@@ -19,6 +19,10 @@
 #   ppspec_gate     alternating prior and posterior judgments, the new posterior tables restart
 #   ppspec_rt       the user's first alternative: posterior splits in real time with full inheritance
 #   ppspec_leaves   the user's second alternative: a bucket's tables are the sums of its leaves' records
+# Two changes to ppspec_gate (design section 19.7; user, 2026-11-15: "둘 다"):
+#   ppspec_dist       (가) the divergence test is the normalised distance alone (--div-test dist; no MSE z test)
+#   ppspec_keep       (나) prior candidates are kept when they fail or their leaf is not eligible (--keep-cands 1)
+#   ppspec_dist_keep  both
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -49,6 +53,9 @@ for s in $SEEDS; do
   echo "ppspec_gate $s $SPEC" >> "$jobs"
   echo "ppspec_rt $s $SPEC --post-realtime 1 --inherit-regret 1 --inherit-avg 1" >> "$jobs"
   echo "ppspec_leaves $s $SPEC --post-from-leaves 1" >> "$jobs"
+  echo "ppspec_dist $s $SPEC --div-test dist" >> "$jobs"
+  echo "ppspec_keep $s $SPEC --keep-cands 1" >> "$jobs"
+  echo "ppspec_dist_keep $s $SPEC --div-test dist --keep-cands 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
@@ -56,6 +63,10 @@ arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; d
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec" --arm "ppacc_gate=$(arm ppacc_gate)" --arm "ppacc_rt=$(arm ppacc_rt)" \
   --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_rt=$(arm ppspec_rt)" \
   --arm "ppspec_leaves=$(arm ppspec_leaves)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec2" --arm "ppacc_gate=$(arm ppacc_gate)" --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" \
+  --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_dist=$(arm ppspec_dist)" --arm "ppspec_keep=$(arm ppspec_keep)" \
+  --arm "ppspec_dist_keep=$(arm ppspec_dist_keep)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

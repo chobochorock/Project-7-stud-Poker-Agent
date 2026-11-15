@@ -90,6 +90,9 @@
 //   sums are the sums of its leaves' records (a prior split shares the parent's record out so that the sums do not
 //   change; a posterior split restarts the moved leaves, so the new buckets start from zero and the staying bucket keeps
 //   its staying leaves' records).
+//   --div-test dist: the divergence test is the normalised distance alone (both sides need a direction; the joint MSE
+//   z test is dropped). --keep-cands 1: a prior candidate is discarded only when one-sided or when its leaf's pointer is
+//   reassigned (the specification's reset), not when it fails a test or its leaf is not eligible.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -369,6 +372,8 @@ bool div_ref_bucket = false;  // --div-ref bucket: a leaf against its whole buck
 bool reset_moved_only = false;  // --reset-moved-only 1: a posterior split restarts the sums of the leaves that moved only
 bool post_from_leaves = false;  // --post-from-leaves 1: a bucket's tables are the sums of its leaves' records
 vector<array<double, W>> lavg;  // --post-from-leaves: each leaf's average-strategy sums since its pointer was set
+bool div_dist_only = false;   // --div-test dist: the divergence test is the normalised distance alone (no MSE z test)
+bool keep_cands = false;      // --keep-cands 1: prior candidates are not discarded when they fail or the leaf is not eligible
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -417,6 +422,28 @@ AccTest acc_test(const AccCand& c, int n, int metric = -1) {  // metric: -1 --ac
         t.pass = t.pass && t.dist >= acc_dist;
     }
     return t;
+}
+// --div-test dist: a leaf diverges when both sides have a direction (mean regret vector significantly nonzero, z >= --acc-z,
+// both sides >= --acc-min-visits) and the squared distance of their unit vectors is >= --acc-dist; otherwise acc_test
+bool div_pass(const AccCand& c, int n) {
+    if (!div_dist_only) return acc_test(c, n, div_metric).pass;
+    if (c.n[0] < acc_min || c.n[1] < acc_min) return false;
+    double u[2][W] = {};
+    for (int side = 0; side < 2; ++side) {
+        const double m_n = c.n[side];
+        double m2 = 0, mu1 = 0, var1 = 0;
+        for (int a = 0; a < n; ++a) {
+            const double m = c.s[side][a] / m_n;
+            const double v = max(0.0, c.q[side][a] - c.s[side][a] * m) / max(1.0, m_n - 1);
+            m2 += m * m; mu1 += v / m_n; var1 += 2 * (v / m_n) * (v / m_n);
+        }
+        const double zs = var1 > 0 ? (m2 - mu1) / sqrt(var1) : (m2 > 0 ? 1e300 : 0);
+        if (!(zs >= acc_z && m2 > 0)) return false;  // a side without a direction has no normalised vector
+        for (int a = 0; a < n; ++a) u[side][a] = c.s[side][a] / m_n / sqrt(m2);
+    }
+    double dist = 0;
+    for (int a = 0; a < n; ++a) dist += (u[0][a] - u[1][a]) * (u[0][a] - u[1][a]);
+    return dist >= acc_dist;
 }
 vector<Desc> candidates_of(int I);
 void acc_fill(int l) {
@@ -907,7 +934,7 @@ int ppacc_epoch_end(int k) {
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
             const bool eligible = users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
-            if (!eligible) { lacc[l].cand.clear(); continue; }
+            if (!eligible) { if (!keep_cands) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
             const int n = counts[cell_members[leaves[l].cell][0]];
             int best = -1; AccTest bt;
             vector<AccTest> ts(lacc[l].cand.size());
@@ -922,7 +949,7 @@ int ppacc_epoch_end(int k) {
                 for (size_t c = 0; c < ts.size(); ++c) {
                     const AccCand& x = lacc[l].cand[c];
                     const bool one_sided = x.n[0] + x.n[1] >= 4.0 * acc_min && min(x.n[0], x.n[1]) < acc_min;
-                    if (!(ts[c].testable && !ts[c].pass) && !one_sided) keep.push_back(x);
+                    if ((keep_cands || !(ts[c].testable && !ts[c].pass)) && !one_sided) keep.push_back(x);  // a one-sided one never tests
                 }
                 lacc[l].cand.swap(keep);
                 acc_fill(l);
@@ -990,7 +1017,7 @@ int ppacc_posterior_pass() {
                 x.s[1][a] = tot_s[a] - keep * lown[l].s[a]; x.q[1][a] = tot_q[a] - keep * lown[l].q[a];
             }
             x.n[0] = lown[l].n; x.n[1] = tot_n - keep * lown[l].n;
-            if (acc_test(x, n, div_metric).pass) { diverging = true; ++n_diverging; }
+            if (div_pass(x, n)) { diverging = true; ++n_diverging; }
         }
         if (!diverging) continue;
         map<int, vector<int>> groups;  // label (-1: stays) -> leaves
@@ -1288,7 +1315,7 @@ int main(int argc, char** argv) try {
                             {"--epoch0", "1000"}, {"--eps-at", "1000"},
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"},
+                            {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"}, {"--div-test", "both"}, {"--keep-cands", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
@@ -1311,6 +1338,11 @@ int main(int argc, char** argv) try {
             throw runtime_error("--div-metric, --div-ref, --reset-moved-only and --post-from-leaves are for --mode ppacc");
         if (post_from_leaves && !reset_moved_only) throw runtime_error("--post-from-leaves needs --reset-moved-only 1 (the staying leaves keep their records)");
         if (post_from_leaves && post_realtime) throw runtime_error("--post-from-leaves and --post-realtime are separate alternatives");
+        const string dt = opt["--div-test"];
+        if (dt != "both" && dt != "dist") throw runtime_error("--div-test must be both or dist");
+        div_dist_only = dt == "dist"; keep_cands = opt["--keep-cands"] == "1";
+        if ((div_dist_only || keep_cands) && !ppacc_mode) throw runtime_error("--div-test and --keep-cands are for --mode ppacc");
+        if (div_dist_only && dm != "dir") throw runtime_error("--div-test dist is the normalised distance: give --div-metric dir");
     }
     acc_k = stoi(opt["--acc-candidates"]); acc_min = stoi(opt["--acc-min-visits"]); acc_z = stod(opt["--acc-z"]);
     acc_pool = stoi(opt["--acc-pool"]); acc_dir = opt["--acc-metric"] == "dir"; acc_dist = stod(opt["--acc-dist"]);
@@ -1420,7 +1452,8 @@ int main(int argc, char** argv) try {
             !(k == "--acc-pool" && v == "16") && !(k == "--acc-metric" && v == "mse") && !(k == "--acc-dist" && v == "0.5") &&
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
-            !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-test" && v == "both") &&
+            !(k == "--keep-cands" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);

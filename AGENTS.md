@@ -14,3 +14,9 @@ and seeds or explicitly label the reference as unmatched. Never silently omit a
 missing baseline. Do not extrapolate crossings from fitted slopes, hide negative
 LBR values on log axes, or conflate these metrics with exploitability. Record
 remaining training-data/key-partition differences even after matching evaluation.
+
+## ASWISS Design Reference
+
+The user's ASWISS / prior-posterior design (verbatim, 2026-11-15) and this project's working rules are in
+`CLAUDE.md`. Read it before any ASWISS, prior-posterior or 7-stud comparison work; 7-stud comparisons go into the
+main `runs_fair` experiment of `agents/adaptive_buckets/aswiss/stud7/run_100m.ps1`.

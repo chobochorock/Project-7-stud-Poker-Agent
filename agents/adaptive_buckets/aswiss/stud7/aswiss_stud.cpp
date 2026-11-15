@@ -575,6 +575,9 @@ public:
     void pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask);
     void pp_acc_fill(int32_t l);
     int pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std::ostream& jlog, std::ostream& plog);
+    void pp_acc_split(int32_t l, int best, const pp::AccTest& bt, uint64_t epoch, uint64_t roots, std::ostream& plog);
+    int pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog);  // --prior-visits, after every root
+    int pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved);  // two-layer accum posterior judgment
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
     void pp_finalize_fill(int32_t l, bool at_judgment);
@@ -1924,7 +1927,8 @@ int train(int argc, char** argv) {
                                 {"--online-lbr-schedule", "fixed"}, {"--inherit-regret", "0"}, {"--inherit-avg", "0"}, {"--inherit-share", "0"}, {"--epoch-growth", "2"},
                                 {"--pp-structure", "pp"}, {"--tree-split", "label"}, {"--acc-candidates", "8"},
                                 {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
-                                {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}});
+                                {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
+                                {"--post-check", "10000"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2004,7 +2008,19 @@ int train(int argc, char** argv) {
         ppo.acc_k = std::stoi(o["--acc-candidates"]); ppo.acc_min = std::stoi(o["--acc-min-visits"]);
         ppo.acc_z = std::stod(o["--acc-z"]); ppo.acc_pool = std::stoi(o["--acc-pool"]);
         ppo.acc_dir = o["--acc-metric"] == "dir"; ppo.acc_dist = std::stod(o["--acc-dist"]);
-        if (ppo.acc && !ppo.tree) throw std::runtime_error("--tree-split accum needs --pp-structure tree");
+        // two layers (--pp-structure pp, section 19.10): prior splits keep the pointer; posterior judgments by the
+        // leaves' own records when the window regret (sum_B max(0, max_a R_B(a)) per root, both seats, ante) is at
+        // most --post-gate, checked every --post-check roots; --prior-visits N: real-time prior splits
+        ppo.prior_visits = std::stoull(o["--prior-visits"]); ppo.post_gate = std::stod(o["--post-gate"]);
+        ppo.post_check = std::stoull(o["--post-check"]);
+        if (ppo.two_layer_acc() && !(ppo.post_gate > 0))
+            throw std::runtime_error("--tree-split accum with --pp-structure pp needs --post-gate G > 0 (the posterior judgment's waiting condition)");
+        if (!ppo.two_layer_acc() && (ppo.prior_visits > 0 || ppo.post_gate != 0 || o["--post-check"] != "10000"))
+            throw std::runtime_error("--prior-visits, --post-gate and --post-check need --tree-split accum with --pp-structure pp");
+        if (ppo.prior_visits > 0 && ppo.prior_visits < 2 * static_cast<uint64_t>(std::stoi(o["--acc-min-visits"])))
+            throw std::runtime_error("--prior-visits must be >= 2 x --acc-min-visits");
+        if (ppo.post_check < 1) throw std::runtime_error("--post-check must be >= 1");
+        if (ppo.two_layer_acc() && ppo.fill) throw std::runtime_error("--tree-split accum has no pending leaves: it does not take --pp-assign fill");
         if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
             if (ppo.fill) throw std::runtime_error("--pp-structure tree has no pending leaves: it does not take --pp-assign fill");
@@ -2031,7 +2047,8 @@ int train(int argc, char** argv) {
     // Logging only; rows of epochs after a checkpoint are rewritten on resume.
     if (o["--log-splits"] != "0" && o["--log-splits"] != "1") throw std::runtime_error("--log-splits must be 0 or 1");
     const bool log_splits = o["--log-splits"] == "1" && partition == Partition::History;
-    model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret);
+    const bool post_acc = pp_mode && ppo.two_layer_acc();  // two-layer accum: the posterior window regret
+    model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret || post_acc);
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -2066,7 +2083,9 @@ int train(int argc, char** argv) {
                           (ppo.tree ? ";pp_structure=tree" : "") + (ppo.inherit_share ? ";inherit_share=1" : "") +
                           (ppo.acc ? ";tree_split=accum;acc_candidates=" + o["--acc-candidates"] + ";acc_min_visits=" + o["--acc-min-visits"] +
                                          ";acc_z=" + o["--acc-z"] + ";acc_pool=" + o["--acc-pool"] +
-                                         (ppo.acc_dir ? ";acc_metric=dir;acc_dist=" + o["--acc-dist"] : "") : "") : std::string());
+                                         (ppo.acc_dir ? ";acc_metric=dir;acc_dist=" + o["--acc-dist"] : "") : "") +
+                          (ppo.two_layer_acc() ? ";two_layer_acc=1;prior_visits=" + o["--prior-visits"] + ";post_gate=" + o["--post-gate"] +
+                                                     ";post_check=" + o["--post-check"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -2077,7 +2096,7 @@ int train(int argc, char** argv) {
     const std::string log_path = out + "/log.csv", index_path = out + "/snapshots.csv", curve_path = out + "/curve.csv";
     const std::string backward_path = out + "/backward.csv", gate_path = out + "/gate.csv", fill_path = out + "/fill.csv";
     const std::string regret_path = out + "/regret.csv", splits_path = out + "/splits.csv";
-    const std::string ppj_path = out + "/pp_judge.csv", ppp_path = out + "/prior_splits.csv";
+    const std::string ppj_path = out + "/pp_judge.csv", ppp_path = out + "/prior_splits.csv", ppq_path = out + "/pp_post.csv";
     LoopState s;
     s.L = epoch0;
     uint64_t online_bytes = 0, regret_bytes = 0;
@@ -2093,12 +2112,20 @@ int train(int argc, char** argv) {
         std::filesystem::resize_file(index_path, s.index_bytes);
         std::filesystem::resize_file(curve_path, s.curve_bytes);
         for (const auto& [on, path] : {std::pair{backward, backward_path}, std::pair{gated, gate_path}, std::pair{avg_fill, fill_path},
-                                       std::pair{log_splits, splits_path}, std::pair{pp_mode, ppj_path}, std::pair{pp_mode, ppp_path}}) {
+                                       std::pair{log_splits, splits_path}, std::pair{pp_mode, ppj_path}, std::pair{pp_mode, ppp_path},
+                                       std::pair{post_acc, ppq_path}}) {
             if (!on) continue;  // keep the rows of the epochs before the checkpoint; the replay writes the later ones again
+            // two-layer accum writes rows during an epoch too: keep the rows of the roots up to the checkpoint's
+            const bool by_roots = post_acc && (path == ppj_path || path == ppp_path || path == ppq_path);
             std::ifstream in(path);
             std::string line, kept;
-            while (std::getline(in, line))
-                if (line.rfind("epoch", 0) == 0 || std::stoull(line.substr(0, line.find(','))) < s.k) kept += line + "\n";
+            while (std::getline(in, line)) {
+                if (line.rfind("epoch", 0) == 0) { kept += line + "\n"; continue; }
+                const size_t c1 = line.find(',');
+                const bool keep = by_roots ? std::stoull(line.substr(c1 + 1, line.find(',', c1 + 1) - c1 - 1)) <= s.t
+                                           : std::stoull(line.substr(0, c1)) < s.k;
+                if (keep) kept += line + "\n";
+            }
             in.close();
             std::ofstream(path) << kept;
         }
@@ -2125,6 +2152,8 @@ int train(int argc, char** argv) {
                                        "stored_tables_mb,rss_mb,peak_rss_mb,fill_steps,frozen\n";
             std::ofstream(ppp_path) << "epoch,roots,leaf,street,legal_mask,depth,feature,threshold,gain_a,gain_b,rows,signal,left_leaf,"
                                        "right_leaf,left_bucket,right_bucket\n";
+            if (post_acc) std::ofstream(ppq_path) << "epoch,roots,window_roots,window_regret,gate,judged,buckets_before,buckets_split,"
+                                                       "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds\n";
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2159,8 +2188,9 @@ int train(int argc, char** argv) {
         return 0;
     }
     std::ofstream log(log_path, std::ios::app), index(index_path, std::ios::app), curve(curve_path, std::ios::app);
-    std::ofstream regret, splits_log, ppj_log, ppp_log;
+    std::ofstream regret, splits_log, ppj_log, ppp_log, ppq_log;
     if (pp_mode) { ppj_log.open(ppj_path, std::ios::app); ppp_log.open(ppp_path, std::ios::app); }
+    if (post_acc) ppq_log.open(ppq_path, std::ios::app);
     if (log_regret) regret.open(regret_path, std::ios::app);
     if (log_splits) splits_log.open(splits_path, std::ios::app);
     // graceful stop: Ctrl+C / SIGTERM, or creating OUT/STOP (works for background processes on Windows too)
@@ -2188,6 +2218,7 @@ int train(int argc, char** argv) {
         if (log_regret) { regret.flush(); regret_bytes = file_size_or_zero(regret_path); }
         if (log_splits) splits_log.flush();
         if (pp_mode) { ppj_log.flush(); ppp_log.flush(); }
+        if (post_acc) ppq_log.flush();
         write_checkpoint(out, config, s, model, &online, regret_slot);
         { std::ofstream(cpu_path + ".tmp") << std::setprecision(17) << train_cpu() << ' ' << s.t << '\n'; }
         std::filesystem::rename(cpu_path + ".tmp", cpu_path);
@@ -2226,6 +2257,26 @@ int train(int argc, char** argv) {
             model.apply_regrets();
         }
         model.count_root();
+        if (post_acc && judging(s.t) && !model.ppd()->frozen) {
+            // real-time prior splits (--prior-visits), then every --post-check roots the posterior waiting condition: the
+            // window regret sum_B max(0, max_a R_B(a)) / window roots (both seats, ante) at most --post-gate, over a window
+            // of at least 1,000 roots; a judgment restarts the window
+            if (ppo.prior_visits > 0) model.pp_visit_checks(s.k, s.t, ppp_log);
+            if (s.t % ppo.post_check == 0) {
+                const uint64_t wroots = model.iterate_window_roots();
+                const double wr = 2 * model.iterate_regret_half(false);
+                const bool judge = wroots >= 1000 && wr <= ppo.post_gate;
+                const auto live0 = model.live_buckets();
+                uint64_t diverging = 0, moved = 0;
+                int ps = 0;
+                if (judge) { ps = model.pp_posterior_acc(s.t, diverging, moved); model.iterate_regret_half(true); }
+                const auto live1 = model.live_buckets();
+                ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ',' << judge << ','
+                        << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
+                        << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
+                        << elapsed() << '\n';
+            }
+        }
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root
         s.curve_sum += gap; s.curve_sq += gap * gap; ++s.curve_roots;
         if (curve_every && s.t % curve_every == 0) {
@@ -2434,7 +2485,7 @@ int train(int argc, char** argv) {
                 << model.h4_live() << ',' << model.last_h4_splits() << '\n';
             std::cerr << "epoch " << s.k << " roots=" << s.t << " buckets_after=" << live[0] + live[1] + live[2]
                       << " splits=" << splits << (track && !judging(s.t) ? " (splits frozen)" : "") << " h4_buckets=" << model.h4_live() << " atoms=" << w.atoms << " H/root=" << (w.L - w.C) / len << " (" << secs << "s)\n";
-            if (log_regret && !gated) model.iterate_regret_half(true);  // the next epoch's window (gated: reset at judgments)
+            if (log_regret && !gated && !post_acc) model.iterate_regret_half(true);  // the next epoch's window (gated, two-layer accum: reset at judgments)
             s.epoch_start = s.t; ++s.k; s.L *= epoch_growth; epoch_end = schedule_end(std::min(T, s.t + s.L));
         }
         if (epoch_done || (checkpoint_every && s.t % checkpoint_every == 0) || s.t == T) checkpoint();

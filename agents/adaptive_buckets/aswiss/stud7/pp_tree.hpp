@@ -26,6 +26,14 @@ struct Opts {
     bool acc_dir = false;        // --acc-metric dir: the sides must also differ in the direction of their regret vectors
     double acc_dist = 0.5;       // --acc-dist: least |u_L - u_R|^2 of the unit mean regret vectors (0..4) for dir
     bool tree = false;           // --pp-structure tree: every prior leaf is its own bucket (no posterior layer, no pointers)
+    // --tree-split accum with the two layers (--pp-structure pp; PP_STUD7_DESIGN_KO.md section 19.10, mini-stud ppfast_rt):
+    // a prior split keeps the leaf's pointer (no table changes); a posterior judgment splits a bucket by its leaves' own
+    // accumulated regrets (direction), only when the window regret is at most post_gate
+    uint64_t prior_visits = 0;   // --prior-visits N: no prior judgments at the epoch ends; a candidate is tested once, when
+                                 // its two sides together reach N visits; it splits its leaf if it passes, else it is replaced
+    double post_gate = 0;        // --post-gate G (ante per root): posterior judgments wait for the window regret <= G
+    uint64_t post_check = 10000; // --post-check R: the window regret is checked every R roots (window at least 1,000 roots)
+    bool two_layer_acc() const { return acc && !tree; }
 };
 
 struct TNode { Desc d; float thr = 0; int32_t left = -1, right = -1, leaf = -1; };
@@ -51,6 +59,11 @@ struct AccCand {
     Desc d; float thr = 0;
     std::array<std::array<double, A>, 2> s{}, q{};
     std::array<double, 2> n{};
+};
+// --tree-split accum, two layers: a leaf's own record since its pointer was set (the regrets its traverser visits added)
+struct LeafOwn {
+    std::array<double, A> s{}, q{};
+    double n = 0;
 };
 struct LeafAcc {
     std::vector<AccCand> cand;
@@ -105,6 +118,23 @@ AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min
     return t;
 }
 
+// a leaf record's mean regret vector is significantly non-zero (the one-side standardisation of acc_test's dir), and
+// argmax: its legal action of largest mean regret
+bool own_significant(const LeafOwn& o, uint8_t mask, double min_visits, double z_min, int& argmax) {
+    argmax = -1;
+    if (o.n < min_visits) return false;
+    double m2 = 0, mu1 = 0, var1 = 0, best = -1e300;
+    for (int a = 0; a < A; ++a) {
+        if (!(mask & (1u << a))) continue;
+        const double m = o.s[a] / o.n;
+        const double v = std::max(0.0, o.q[a] - o.s[a] * m) / std::max(1.0, o.n - 1);
+        m2 += m * m; mu1 += v / o.n; var1 += 2 * (v / o.n) * (v / o.n);
+        if (m > best) { best = m; argmax = a; }
+    }
+    const double z = var1 > 0 ? (m2 - mu1) / std::sqrt(var1) : (m2 > 0 ? 1e300 : 0);
+    return z >= z_min && m2 > 0;
+}
+
 struct Data {
     Opts opt;
     std::unordered_map<uint16_t, int32_t> cell_of;
@@ -123,6 +153,10 @@ struct Data {
     int32_t leaves_at_judgment = 0;
     std::vector<std::string> split_rows;           // prior_splits.csv rows not yet written (fill mode, during training)
     std::vector<LeafAcc> acc;                      // --tree-split accum: per leaf (index = leaf), grown on demand
+    std::vector<LeafOwn> own;                      // two-layer accum: per leaf, grown on demand (checkpointed)
+    std::vector<int32_t> ready;                    // --prior-visits: leaves with a candidate due this root (empty between roots)
+    std::vector<char> ready_flag;
+    uint64_t post_judgments = 0, post_splits = 0, post_children = 0;  // two-layer accum counters (checkpointed)
 
     uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
         while (b != 0xffffffffu && born[b] > lv) b = parent[b];

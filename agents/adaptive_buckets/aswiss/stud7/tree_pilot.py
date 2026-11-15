@@ -58,6 +58,11 @@ ARMS = {
     "tree_acc": ("tree, accumulated-regret split, restart", "pp", "", TREE + ["--tree-split", "accum"]),
     "tree_acc_inh11": ("tree, accumulated-regret split, inherit regret 1 + avg 1", "pp", "",
                        TREE + ["--tree-split", "accum", "--inherit-regret", "1", "--inherit-avg", "1"]),
+    # two layers (section 19.10, mini-stud ppfast_rt): accumulated-regret prior splits in real time (a candidate tested
+    # once at 1,000 visits, the children keep the pointer), posterior splits by the leaves' records when the window
+    # regret (ante per root) is at most 0.1
+    "ppfast_rt": ("pp, real-time accumulated-regret prior (1,000 visits), posterior when window regret <= 0.1", "pp", "",
+                  ["--tree-split", "accum", "--prior-visits", "1000", "--post-gate", "0.1"]),
     "tree_accdir": ("tree, accumulated-regret split (direction), restart", "pp", "", TREE + ["--tree-split", "accum", "--acc-metric", "dir"]),
     "tree_accdir_inh11": ("tree, accumulated-regret split (direction), inherit regret 1 + avg 1", "pp", "",
                           TREE + ["--tree-split", "accum", "--acc-metric", "dir", "--inherit-regret", "1", "--inherit-avg", "1"]),

@@ -45,6 +45,8 @@ ap.add_argument("--seeds", nargs="+", type=int, default=[1])
 ap.add_argument("--iters", type=int, default=1_000_000_000)
 ap.add_argument("--gate", type=float, default=0.1, help="tree_gate: the window's average-regret threshold")
 ap.add_argument("--baseline", default="pure_a")
+ap.add_argument("--baseline-dir", default="", help="--eval: another OUT_DIR holding the --baseline arm's runs (read from "
+                "their exploitability.csv, not re-evaluated)")
 ap.add_argument("--gxx", default="")
 mode = ap.add_mutually_exclusive_group()
 mode.add_argument("--status", action="store_true"); mode.add_argument("--eval", action="store_true")
@@ -133,26 +135,45 @@ if a.status:
         done = os.path.exists(os.path.join(d, "DONE"))
         if r is None: print(f"{arm}_s{s}: not started"); continue
         extra = f", window regret {float(r['eps_stat']):.4f} (gate {r['eps']})" if r.get("eps_stat") not in ("nan", "", None) else ""
+        lv = f", {int(r['prior_leaves']):,} prior leaves" if int(r.get("prior_leaves") or 0) > 0 else ""
         print(f"{arm}_s{s}: {'finished' if done else 'running or stopped'} at {int(r['iters']):,} iterations, "
-              f"{int(r['buckets_after']):,} tables, {float(r['train_seconds']):.0f} CPU s{extra}")
+              f"{int(r['buckets_after']):,} tables{lv}, {float(r['train_seconds']):.0f} CPU s{extra}")
 elif a.eval:
     if not os.path.exists(os.path.join(TREE, "meta.json")): sys.exit("no tree in OUT_DIR: start a run first")
     by = {}
+    def add(arm, path):
+        prev = 0  # prior leaves before a row's judgment = after it - the prior splits it made
+        for r in sorted(csv.DictReader(open(path)), key=lambda r: int(r["row"])):
+            ps = int(r.get("prior_splits") or 0)
+            r["leaves_before"] = str(int(r.get("prior_leaves") or 0) - (ps - prev)); prev = ps
+            by.setdefault(arm, {}).setdefault(int(r["iters"]), []).append(r)
     for arm, s, d in found():
         subprocess.run([sys.executable, os.path.join(HERE, "eval.py"), TREE, d], check=True, stdout=subprocess.DEVNULL)
-        for r in csv.DictReader(open(os.path.join(d, "exploitability.csv"))):
-            by.setdefault(arm, {}).setdefault(int(r["iters"]), []).append(r)
+        add(arm, os.path.join(d, "exploitability.csv"))
+    if a.baseline_dir:
+        by.pop(a.baseline, None)
+        bd = os.path.abspath(a.baseline_dir)
+        got = [os.path.join(bd, n, "exploitability.csv") for n in sorted(os.listdir(bd)) if n.rsplit("_s", 1)[0] == a.baseline]
+        got = [g for g in got if os.path.exists(g)]
+        if not got: print(f"no evaluated {a.baseline} run in {bd} (run --eval there first)")
+        for g in got: add(a.baseline, g)
     def med(rows, k):
         x = [float(r[k]) for r in rows if r.get(k) not in ("", "nan", None)]
         return statistics.median(x) if x else None
-    print("| arm | iterations | tables | window regret (gate) | average policy | ratio to " + a.baseline + " | current policy | ratio |")
-    print("|---|---:|---:|---:|---:|---:|---:|---:|")
+    print("| arm | iterations | tables (before -> after) | tables in use | prior leaves (before -> after) | window regret (gate) "
+          "| average policy | ratio to " + a.baseline + " | current policy | ratio |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for arm in by:
         pts = sorted(by[arm])
         show = [it for it in pts if it >= 1_000_000][-12:]  # the last rows from one million iterations on
         for it in show:
             rows = by[arm][it]
             av, cu, tb = med(rows, "expl_bucket_avg"), med(rows, "expl_current"), med(rows, "buckets")
+            ta, tu = med(rows, "buckets_after"), med(rows, "buckets_used")
+            lb, la = med(rows, "leaves_before"), med(rows, "prior_leaves")
+            tbs = f"{tb:,.0f}" + (f" -> {ta:,.0f}" if ta is not None and ta != tb else "") if tb is not None else ""
+            tus = f"{tu:,.0f}" if tu is not None else ""
+            lvs = (f"{lb:,.0f}" + (f" -> {la:,.0f}" if la != lb else "")) if la else "–"
             wr = med(rows, "eps_stat")  # gated arms: the window's abstract-game average regret at this row (before its judgment)
             wrs = f"{wr:.4f} ({rows[0].get('eps', '')})" if wr is not None else ""
             base = by.get(a.baseline, {}).get(it)
@@ -160,11 +181,14 @@ elif a.eval:
             bcu = med(base, "expl_current") if base else None
             ra = f"{av / bav:.2f}" if av is not None and bav else ("missing baseline row" if arm != a.baseline else "1.00")
             rc = f"{cu / bcu:.2f}" if cu is not None and bcu else ("missing baseline row" if arm != a.baseline else "1.00")
-            print(f"| {arm} | {it:,} | {tb:,.0f} | {wrs} | {av:.4f} | {ra} | {cu:.4f} | {rc} |" if av is not None and cu is not None and tb is not None
-                  else f"| {arm} | {it:,} | | | not evaluated | | | |")
+            print(f"| {arm} | {it:,} | {tbs} | {tus} | {lvs} | {wrs} | {av:.4f} | {ra} | {cu:.4f} | {rc} |" if av is not None and cu is not None and tb is not None
+                  else f"| {arm} | {it:,} | | | | | not evaluated | | | |")
     print("\nThe arms' rows are on the same iteration grid (1000 * 2^(j/2)); a gated judgment adds rows of its own. Window regret:")
     print("the sum over buckets of max(0, max_a (Q_b - Q_b at the last judgment)) / iterations since the last judgment, at that")
-    print("row; the gate in parentheses (a judgment happens when it is <= the gate). Tables: buckets before that row's judgment.")
+    print("row; the gate in parentheses (a judgment happens when it is <= the gate). Tables: posterior buckets before that row's")
+    print("judgment (the evaluated policy) -> after it; in use: buckets some information set uses (before the judgment). Prior")
+    print("leaves: leaves of the prior tree before -> after the judgment (pp arms: a prior judgment adds leaves, a posterior one")
+    print("adds tables; tree arms: every leaf is its own table). Medians over seeds.")
 else:
     prepare()
     for arm, s, d in runs:

@@ -578,6 +578,8 @@ public:
     void pp_acc_split(int32_t l, int best, const pp::AccTest& bt, uint64_t epoch, uint64_t roots, std::ostream& plog);
     int pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog);  // --prior-visits, after every root
     int pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved);  // two-layer accum posterior judgment
+    void pp_freeze_prior();  // two-layer accum: --mem-budget-mb reached
+    double pp_prior_mb() const;  // two-layer accum: the partition's structures in MB (counted, deterministic)
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
     void pp_finalize_fill(int32_t l, bool at_judgment);
@@ -2153,7 +2155,7 @@ int train(int argc, char** argv) {
             std::ofstream(ppp_path) << "epoch,roots,leaf,street,legal_mask,depth,feature,threshold,gain_a,gain_b,rows,signal,left_leaf,"
                                        "right_leaf,left_bucket,right_bucket\n";
             if (post_acc) std::ofstream(ppq_path) << "epoch,roots,window_roots,window_regret,gate,judged,buckets_before,buckets_split,"
-                                                       "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds\n";
+                                                       "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb\n";
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2263,6 +2265,15 @@ int train(int argc, char** argv) {
             // of at least 1,000 roots; a judgment restarts the window
             if (ppo.prior_visits > 0) model.pp_visit_checks(s.k, s.t, ppp_log);
             if (s.t % ppo.post_check == 0) {
+                // --mem-budget-mb (two-layer accum): when the partition's structures (counted, so the root is the same on
+                // every machine and on resume) reach the budget, the prior stops growing (candidates freed); the
+                // posterior goes on
+                const double prior_mb = model.pp_prior_mb();
+                if (ppo.mem_budget_mb > 0 && !model.ppd()->prior_frozen && prior_mb >= ppo.mem_budget_mb) {
+                    model.pp_freeze_prior();
+                    std::cerr << "memory budget " << ppo.mem_budget_mb << " MB (partition structures, counted) reached: prior splits stop from root " << s.t
+                              << " (posterior judgments go on)\n";
+                }
                 const uint64_t wroots = model.iterate_window_roots();
                 const double wr = 2 * model.iterate_regret_half(false);
                 const bool judge = wroots >= 1000 && wr <= ppo.post_gate;
@@ -2274,7 +2285,7 @@ int train(int argc, char** argv) {
                 ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ',' << judge << ','
                         << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
-                        << elapsed() << '\n';
+                        << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb << '\n';
                 ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
         }
@@ -2312,7 +2323,7 @@ int train(int argc, char** argv) {
                 // --mem-budget-mb: once the resident memory plus a judgment's transient memory reaches the budget, no more
                 // judgments (the partition reached so far is trained to the end)
                 pp::Data& D = *model.ppd();
-                if (ppo.mem_budget_mb > 0 && !D.frozen && memory_mb(1) + ppo.judge_mem_mb >= ppo.mem_budget_mb) {
+                if (ppo.mem_budget_mb > 0 && !D.frozen && !post_acc && memory_mb(1) + ppo.judge_mem_mb >= ppo.mem_budget_mb) {
                     D.frozen = true;
                     std::cerr << "memory budget " << ppo.mem_budget_mb << " MB reached: splits frozen from root " << s.t << "\n";
                 }

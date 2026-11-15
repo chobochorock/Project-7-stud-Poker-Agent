@@ -1724,3 +1724,24 @@ stud_mccfr --bucket power --fit-hands 100000 --clusters K --power-samples 128 --
 ```
 
 **실행 시간:** 4개 병렬 기준으로 원자 기반 학습은 비교군당 약 2–2.5시간, context는 약 5.5시간이었다. 평가는 2,000 pair에 약 2분, 20,000 pair에 약 20분이었다.
+
+## `runs_fair`에 `ppfast_rt` 추가 (2026-11-15)
+
+prior-posterior 누적 regret 안(`PP_STUD7_DESIGN_KO.md` 19.8–19.10, mini-stud `ppfast_rt`)을 `runs_fair`와 같은 조건(학습 CPU 24시간, 온라인 LBR 1,000 roots마다 64파티클, 평균 정책 평가)으로 같은 폴더에서 돌린다. 다른 비교군이 `aswiss_stud.exe`를 쓰고 있을 수 있어 exe 이름을 따로 준다.
+
+```
+# 시작 (백그라운드, 창은 바로 돌아온다)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_rt -ExeName aswiss_ppfast.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 상태 (60초마다, Ctrl+C로 끝)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status -Arms hist_bbf,k256,ppfast_rt -BudgetCpuSeconds 86400 -Watch 60 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 예산이 끝난 뒤: epoch 스냅숏(2,000 pair), 예산 스냅숏(20,000 pair), 그림, 묶음
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval -Arms ppfast_rt -AverageOnly -ExeName aswiss_ppfast.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final -Arms ppfast_rt -AverageOnly -ExeName aswiss_ppfast.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot -Arms hist_bbf,k256,ppfast_rt,mmd,escher,rebel -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+```
+- 비교군 `ppfast_rt`(실행 이름 `pp_ppfast_rt_s1`): `--tree-split accum --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000`. epoch는 다른 비교군과 같은 10,000 × 2^k라서 epoch 스냅숏이 ASWISS·k-means와 같은 roots(0.15M, 1.27M, 10.23M, 40.95M, 81.91M, …)에 찍힌다. 온라인 LBR은 고정 간격(1,000 roots)이다.
+- 메모리: 24시간이면 약 2.9억 roots라 prior 잎이 계속 늘어난다. 분할 구조의 크기(원소 수로 센 값, 기계와 재개에 상관없이 같은 root에서 멈춘다)가 4,000 MB에 닿으면 prior 분할을 멈추고 후보·표본을 비운다. posterior 판정은 계속한다. 상주 메모리는 이 값보다 약 10% + 20 MB 크다(측정: 잎당 센 값 3.4 KB, 상주 3.7 KB). 바꾸려면 `-PpExtra "--mem-budget-mb 8000"`(뒤의 값이 이긴다). 멈춘 root는 `pp_post.csv`의 `prior_frozen`과 stderr에 남는다.
+- 상태(`-Action status`, `run_status.py`): 비교군마다 실행 여부, roots, 학습 CPU(예산 대비 %), 표 수, 상주 메모리, 온라인 LBR 마지막 500판 평균(90% 구간), 평가 수와 최신 평가, `ppfast_rt`는 posterior 대기 조건(구간 regret 대 0.1, 판정 수, 마지막 판정 root, 표 수, prior 잎 수, 메모리 상한 도달 여부). `-Watch N`은 N초마다 다시 보여 준다. 파일만 읽는다.
+- 시험(Linux, `run_100m.sh`): `ppfast_rt`와 `k256`을 학습 CPU 150초 예산, 온라인 LBR 64파티클로 돌려 시작, 상태, 예산 도달, `eval`, `plot`(그림 7종 모두에 두 비교군)을 확인했다. Windows에서는 확인하지 못했다.
+

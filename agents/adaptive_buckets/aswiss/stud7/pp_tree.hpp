@@ -157,6 +157,7 @@ struct Data {
     std::vector<int32_t> ready;                    // --prior-visits: leaves with a candidate due this root (empty between roots)
     std::vector<char> ready_flag;
     uint64_t post_judgments = 0, post_splits = 0, post_children = 0;  // two-layer accum counters (checkpointed)
+    bool prior_frozen = false;  // two-layer accum, --mem-budget-mb reached: no more prior splits, candidates freed (checkpointed)
 
     uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
         while (b != 0xffffffffu && born[b] > lv) b = parent[b];

@@ -1,6 +1,6 @@
 # Long 7-stud ASWISS comparison (default 100M roots), resumable. Run from the repository root:
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1                 # start or resume all arms
-#   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status   # progress
+#   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status   # progress (-Watch 60: every 60 s)
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action stop     # checkpoint and exit
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval     # LBR / gap of new snapshots
 #   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final    # newest snapshot, 20k pairs
@@ -49,7 +49,8 @@ param(
     [long]$FreezeSplitsAt = 0,     # > 0: epochs ending at or after this root are not judged (no label pass, no split); tabular arms
     [long]$JudgeAt = 0,            # > 0: the epoch containing this root ends there and is judged, frozen or not (one forced split)
     [string]$Gxx = "",   # path to g++.exe when it is not on PATH
-    [string]$PpExtra = ""  # pp arms only: more --partition pp options, e.g. "--mem-budget-mb 160"
+    [string]$PpExtra = "",  # pp arms only: more --partition pp options, e.g. "--mem-budget-mb 160"
+    [int]$Watch = 0      # -Action status: repeat every this many seconds (Ctrl+C ends it)
 )
 $ErrorActionPreference = "Stop"
 # powershell -File passes "-Arms aswiss,k256" as the single string "aswiss,k256", so split on commas here
@@ -86,6 +87,12 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     pp_parent_full = @("pp_particle_parent_inherit_full", "pp", 0, "prior-posterior ASWISS, parent start, children inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --leaf-start parent --inherit-regret 1 --inherit-avg 1")
     pp_tree_acc = @("pp_tree_accum", "pp", 0, "single tree split by accumulated regret on candidate tests", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --tree-split accum")
     pp_tree_acc_full = @("pp_tree_accum_inherit_full", "pp", 0, "single tree split by accumulated regret, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --tree-split accum --inherit-regret 1 --inherit-avg 1")
+    # prior-posterior with accumulated regrets (PP_STUD7_DESIGN_KO.md 19.8-19.10, mini-stud ppfast_rt): real-time prior
+    # splits (a candidate tested once when its two sides reach 1,000 visits; children keep the pointer), posterior
+    # splits by the leaves' own accumulated regrets when the window regret is <= 0.1 ante per root; the runner's epoch
+    # schedule (10,000 x 2^k) only places the epoch snapshots, the same roots as the other arms'. --mem-budget-mb 4000:
+    # when the partition's counted structures reach 4,000 MB the prior stops growing (posterior judgments go on)
+    ppfast_rt = @("pp_ppfast_rt", "pp", 0, "prior-posterior ASWISS, accumulated regret: real-time prior, posterior when window regret <= 0.1", "--tree-split accum --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")
@@ -189,14 +196,10 @@ elseif ($Action -eq "run") {
     Write-Host "progress: -Action status; stop safely: -Action stop"
 }
 elseif ($Action -eq "status") {
-    foreach ($a in $Arms) {
-        $name = RunName $a; $dir = Join-Path $Out $name
-        $alive = $false
-        $pidFile = Join-Path $Out "$name.pid"
-        if (Test-Path $pidFile) { $alive = $null -ne (Get-Process -Id (Get-Content $pidFile) -ErrorAction SilentlyContinue) }
-        $last = if (Test-Path "$dir\curve.csv") { (Get-Content "$dir\curve.csv" -Tail 1) } else { "-" }
-        Write-Host ("{0,-22} running={1,-5} last curve row (roots,seconds,n,gap,se,buckets,rssMB): {2}" -f $name, $alive, $last)
-    }
+    # run_status.py: per arm running or not, roots, training CPU (share of -BudgetCpuSeconds), tables, memory, the online
+    # LBR of the last 500 deals, evaluations, and ppfast_rt's posterior waiting condition; -Watch N repeats it
+    $specs = @($Arms | ForEach-Object { "$(RunName $_):$($Arm[$_][3])" })
+    & $Python (Join-Path $Here "run_status.py") $Out --runs @specs --budget $BudgetCpuSeconds --watch $Watch
 }
 elseif ($Action -eq "stop") {
     foreach ($a in $Arms) { New-Item -ItemType File -Force (Join-Path (Join-Path $Out (RunName $a)) "STOP") | Out-Null }

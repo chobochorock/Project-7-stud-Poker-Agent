@@ -1373,3 +1373,7 @@ python agents\adaptive_buckets\aswiss\stud7\tree_pilot.py agents\adaptive_bucket
 - 여기서의 시범(멈춤): 125만 roots까지 posterior 판정 없음, 구간 regret 0.30 / 1.00 / 0.31(seed 1 / 2 / 3), prior 잎 약 3.8만, 100만 roots에서 메모리 약 130 MB. 6.3만 roots에서 LBR 평균 1.983(k-means 256의 0.59배, 표 9개 대 33,764개).
 - 더 길게: 같은 명령을 `--roots 16383000`으로 다시 시작하면 이어서 돈다.
 
+**주 비교 실험으로 옮김** (사용자: "그냥 aswiss 7stud에서 같이 비교하라고"): 위 `tree_pilot.py` 시범 대신 `run_100m.ps1`/`.sh`의 비교군 `ppfast_rt`로 `runs_fair`(학습 CPU 24시간, 온라인 LBR, 평균 정책 평가, 같은 deal) 폴더에서 다른 비교군과 같이 비교한다. 명령과 메모리 상한은 `aswiss/stud7/README_KO.md`의 "`runs_fair`에 `ppfast_rt` 추가" 절.
+- 메모리 상한 `--mem-budget-mb`(두 겹 누적 regret): 분할 구조의 크기를 원소 수로 세어(결정적) 상한에 닿으면 prior 분할만 멈추고 후보·표본을 비운다. posterior 판정은 계속한다. 시험: 상한 전·후 두 번 멈췄다 이어도 같은 root(3.2만)에서 멈추고 스냅숏·기록이 같다. 처음에는 상주 메모리로 판단했는데, 새 프로세스의 메모리가 달라 이어 돌릴 때 멈추는 root가 바뀌어(4만 대 4.2만) 바꿨다.
+- 노트북 `tree_pilot` 시범(`..\pp7_fast`, 819.1만 roots): seed 1은 500만 roots에 posterior 판정 1번(표 9 → 36), 그 뒤 구간 regret 1.050; seed 2는 판정 없음(구간 regret 0.169). prior 잎 23.5만–27.5만.
+

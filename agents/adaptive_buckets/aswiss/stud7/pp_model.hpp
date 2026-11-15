@@ -602,7 +602,7 @@ std::map<uint64_t, pp::Reservoir> Model::pp_collect(uint64_t n, uint64_t seed, s
 int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
     pp::Data& D = *pp_;
     const pp::Opts& O = D.opt;
-    if (D.ready.empty()) return 0;
+    if (D.ready.empty() || D.prior_frozen) { D.ready.clear(); return 0; }
     pp_root_now_ = roots;
     D.acc.resize(D.leaves.size()); D.own.resize(D.leaves.size());
     std::vector<int32_t> ready;
@@ -634,6 +634,25 @@ int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
     return splits;
 }
 
+// Two-layer accum: the size of the partition's structures in MB, counted from their element counts (deterministic, so
+// a run freezes at the same root on every machine and on resume): tree nodes, leaves, candidates with their reservoirs,
+// leaf records, bucket tables and window sums. The process's resident memory is larger (allocator, LBR, I/O buffers).
+double Model::pp_prior_mb() const {
+    const pp::Data& D = *pp_;
+    double b = static_cast<double>(D.nodes.size() * sizeof(pp::TNode) + D.leaves.size() * sizeof(pp::Leaf) +
+                                   D.acc.size() * sizeof(pp::LeafAcc) + D.own.size() * sizeof(pp::LeafOwn) +
+                                   buckets_.size() * (sizeof(Bucket) + sizeof(std::array<double, A>)));
+    for (const pp::LeafAcc& L : D.acc) b += static_cast<double>(L.cand.size() * sizeof(pp::AccCand) + L.pool.size() * sizeof(pp::Sample));
+    return b / (1024.0 * 1024.0);
+}
+// Two-layer accum, --mem-budget-mb reached: no more prior splits; the candidates and reservoirs (most of the memory)
+// are freed. The leaves' own records stay, so the posterior judgments go on.
+void Model::pp_freeze_prior() {
+    pp::Data& D = *pp_;
+    D.prior_frozen = true;
+    std::vector<pp::LeafAcc>().swap(D.acc);
+    D.ready.clear(); std::vector<char>().swap(D.ready_flag);
+}
 // Two-layer accum: the posterior judgment (mini-stud ppacc_posterior_pass with the ppspec settings: --div-metric dir
 // --div-ref bucket --reset-moved-only 1). For every bucket with two or more live leaves: a leaf diverges when its own
 // record and the bucket's (the sum of its leaves' records) differ (acc_test with the direction criterion: z >= --acc-z
@@ -646,7 +665,8 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
     pp::Data& D = *pp_;
     const pp::Opts& O = D.opt;
     pp_root_now_ = roots;
-    D.acc.resize(D.leaves.size()); D.own.resize(D.leaves.size());
+    if (!D.prior_frozen) D.acc.resize(D.leaves.size());
+    D.own.resize(D.leaves.size());
     const size_t B0 = buckets_.size();
     std::vector<std::vector<int32_t>> users(B0);
     for (int32_t l = 0; l < static_cast<int32_t>(D.leaves.size()); ++l)
@@ -694,8 +714,7 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
         for (int32_t l : users[b]) {
             if (D.leaves[l].ptr == b) continue;  // a leaf whose pointer was not reassigned keeps its record
             D.own[l] = pp::LeafOwn{};
-            D.acc[l].cand.clear();
-            pp_acc_fill(l);
+            if (!D.prior_frozen) { D.acc[l].cand.clear(); pp_acc_fill(l); }
             ++moved;
         }
         ++splits;
@@ -710,6 +729,13 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
 // state falls on, and the state is offered to the leaf's sample reservoir (Algorithm R with a deterministic draw)
 void Model::pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask) {
     pp::Data& D = *pp_;
+    if (D.prior_frozen) {  // two-layer accum past the memory budget: only the leaf's own record (the posterior reads it)
+        if (D.own.size() <= static_cast<size_t>(l)) D.own.resize(D.leaves.size());
+        pp::LeafOwn& o = D.own[l];
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) { o.s[a] += r[a]; o.q[a] += r[a] * r[a]; }
+        o.n += 1;
+        return;
+    }
     if (D.acc.size() <= static_cast<size_t>(l)) D.acc.resize(D.leaves.size());
     pp::LeafAcc& L = D.acc[l];
     const double due_at = static_cast<double>(D.opt.prior_visits);
@@ -1124,7 +1150,7 @@ void Model::pp_save(std::ofstream& out, bool full) const {
     if (D.opt.two_layer_acc()) {  // the leaves' own records, the posterior window and the counters
         put(out, static_cast<uint64_t>(D.own.size()));
         for (const pp::LeafOwn& o : D.own) put(out, o);
-        put(out, D.post_judgments); put(out, D.post_splits); put(out, D.post_children);
+        put(out, D.post_judgments); put(out, D.post_splits); put(out, D.post_children); put(out, static_cast<uint8_t>(D.prior_frozen));
         put(out, rwin_roots_); put(out, static_cast<uint64_t>(rwin_.size()));
         for (const auto& r : rwin_) put(out, r);
     }
@@ -1186,6 +1212,7 @@ void Model::pp_load(std::ifstream& in, bool full) {
         D.own.assign(n, {});
         for (pp::LeafOwn& o : D.own) get(in, o);
         get(in, D.post_judgments); get(in, D.post_splits); get(in, D.post_children);
+        uint8_t pf; get(in, pf); D.prior_frozen = pf;
         get(in, rwin_roots_); get(in, n);
         rwin_.assign(n, {});
         for (auto& r : rwin_) get(in, r);

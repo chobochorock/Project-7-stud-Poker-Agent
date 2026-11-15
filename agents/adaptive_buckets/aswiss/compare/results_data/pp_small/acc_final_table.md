@@ -28,6 +28,7 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | `ppspec_dist_keep` | ppspec_gate, both | 3 | 147M | 0.8355 [0.6685, 0.8823] | 2.44 | 0.747 [0.681, 0.880] | 0.93 | 76–308 | 0.8183 | 0.188 [0.098, 0.238] |
 | `ppfast_gate` | ppfast: prior every doubling (all leaves), posterior when window regret <= 0.1 | 3 | 126M | 0.3696 [0.3249, 0.4912] | 1.08 | 0.816 [0.747, 0.841] | 1.02 | 4,324–5,505 | 0.6328 | 0.327 [0.138, 1.201] |
 | `ppfast_dist_keep` | ppfast with distance-only divergence and kept candidates | 3 | 128M | 0.3583 [0.3353, 0.3907] | 1.05 | 0.840 [0.830, 0.892] | 1.05 | 3,659–5,977 | 0.5247 | 0.186 [0.109, 0.492] |
+| `ppfast_rt` | ppfast with real-time prior splits (a candidate tested once at 1,000 visits) | 3 | 105M | 0.2851 [0.2746, 0.4469] | 0.83 | 0.821 [0.797, 0.881] | 1.02 | 8,234–8,805 | 0.3702 | 0.518 [0.429, 1.380] |
 | `pure_a` | pure a, iterates (reference) | 3 | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 | – |
 | `ppmix_avg_root` | pp mix, avg, root (reference) | 3 | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 | – |
 | `kmeans_a` | k-means, rule a counts (baseline) | 3 | 224M | 0.3424 [0.3202, 0.3524] | 1.00 | 0.802 [0.745, 0.850] | 1.00 | 9,394–10,808 | 0.3366 | – |

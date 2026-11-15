@@ -96,6 +96,9 @@
 //   --split-plan separate (user, 2026-11-15: prior leaves split fast and fine, the posterior slowly by the leaves' accumulated
 //   regrets): prior judgments at every doubling as --mode tree (with --prior-eligible all, every leaf; a prior split never
 //   changes a table), posterior judgments when the window's average regret is <= --regret-gate.
+//   --prior-realtime 1 (user, 2026-11-15: a prior split does not reach the posterior at once): between the doublings every
+//   leaf's candidates are tested every --gate-check iterations and a passing one splits its leaf at once; failed
+//   candidates are still dropped only at the doublings, so a candidate collects at least one doubling's evidence.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -378,6 +381,7 @@ vector<array<double, W>> lavg;  // --post-from-leaves: each leaf's average-strat
 bool div_dist_only = false;   // --div-test dist: the divergence test is the normalised distance alone (no MSE z test)
 bool keep_cands = false;      // --keep-cands 1: prior candidates are not discarded when they fail or the leaf is not eligible
 bool prior_all = false;       // --prior-eligible all: every leaf may take a prior split (share: sole user or >= 50% of visits)
+bool prior_realtime = false;  // --prior-realtime 1 (--split-plan separate): prior splits checked every --gate-check iterations
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
@@ -924,7 +928,9 @@ bool own_significant(const LeafOwn& o, int na, int& argmax) {
 int ppacc_posterior_pass();
 // --mode ppacc: the judgment at an epoch end, a prior phase (even epochs) or a posterior phase (odd epochs); with
 // --post-realtime 1 every judgment is a prior phase (the posterior splits happen in ppacc_posterior_pass during training)
-int ppacc_epoch_end(int k) {
+// cleanup false (--prior-realtime checks between judgments): a passing candidate splits its leaf, nothing else changes;
+// failed and one-sided candidates are dropped and refilled only at the judgments themselves
+int ppacc_epoch_end(int k, bool cleanup = true) {
     if (k % 2 == 1 && !post_realtime) return ppacc_posterior_pass();
     lacc.resize(leaves.size()); lown.resize(leaves.size());
     if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
@@ -938,7 +944,7 @@ int ppacc_epoch_end(int k) {
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
             const bool eligible = prior_all || users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
-            if (!eligible) { if (!keep_cands) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
+            if (!eligible) { if (!keep_cands && cleanup) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
             const int n = counts[cell_members[leaves[l].cell][0]];
             int best = -1; AccTest bt;
             vector<AccTest> ts(lacc[l].cand.size());
@@ -949,6 +955,7 @@ int ppacc_epoch_end(int k) {
                 if (ts[c].pass && (best < 0 || better)) { best = (int)c; bt = ts[c]; }
             }
             if (best < 0) {
+                if (!cleanup) continue;
                 vector<AccCand> keep;
                 for (size_t c = 0; c < ts.size(); ++c) {
                     const AccCand& x = lacc[l].cand[c];
@@ -1320,7 +1327,7 @@ int main(int argc, char** argv) try {
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
                             {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"}, {"--div-test", "both"}, {"--keep-cands", "0"},
-                            {"--split-plan", "alternate"}, {"--prior-eligible", "share"},
+                            {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-realtime", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
@@ -1462,7 +1469,7 @@ int main(int argc, char** argv) try {
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
             !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-test" && v == "both") &&
-            !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-realtime" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
@@ -1482,6 +1489,8 @@ int main(int argc, char** argv) try {
     const bool split_separate = split_plan == "separate";
     if (split_separate && (!ppacc_mode || schedule != "regret" || post_realtime))
         throw runtime_error("--split-plan separate needs --mode ppacc and --schedule regret (posterior waiting), without --post-realtime");
+    prior_realtime = opt["--prior-realtime"] == "1";
+    if (prior_realtime && !split_separate) throw runtime_error("--prior-realtime 1 needs --split-plan separate");
     if (epoch0 < 1 || eps_at < 1) throw runtime_error("--epoch0 and --eps-at must be positive");
     const long long growth = stoll(opt["--epoch-growth"]), freeze_at = stoll(opt["--freeze-at"]);
     if (freeze_at > 0 && !tree_mode && !ppacc_mode) throw runtime_error("--freeze-at is for --mode tree and ppacc");
@@ -1893,6 +1902,7 @@ int main(int argc, char** argv) try {
         }
         for (int p = 0; p < 2; ++p) { es(0, p); apply_regrets(); }
         if (post_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_posterior_pass();
+        if (prior_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_epoch_end(0, false);
         if (pp_mode && !to_finalize.empty()) {
             const double a0 = cpu_now();
             vector<int> f = move(to_finalize); to_finalize.clear();

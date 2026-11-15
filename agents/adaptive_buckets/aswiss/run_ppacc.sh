@@ -27,6 +27,8 @@
 #   ppfast_gate       prior judgments at every doubling for every leaf (as tree_mse), posterior judgments when the
 #                     window's average regret is <= 0.1, by the leaves' accumulated-regret directions
 #   ppfast_dist_keep  the same with (가) and (나)
+#   ppfast_rt         ppfast_gate with prior splits checked every 10,000 iterations (design section 19.9; user, 2026-11-15:
+#                     a prior split does not reach the posterior at once); failed candidates dropped only at doublings
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -62,6 +64,7 @@ for s in $SEEDS; do
   echo "ppspec_dist_keep $s $SPEC --div-test dist --keep-cands 1" >> "$jobs"
   echo "ppfast_gate $s $SPEC --split-plan separate --prior-eligible all" >> "$jobs"
   echo "ppfast_dist_keep $s $SPEC --split-plan separate --prior-eligible all --div-test dist --keep-cands 1" >> "$jobs"
+  echo "ppfast_rt $s $SPEC --split-plan separate --prior-eligible all --prior-realtime 1" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
@@ -77,6 +80,9 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_ppspec2" --arm "ppacc_gate=$(arm ppacc_ga
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast" --arm "ppspec_gate=$(arm ppspec_gate)" --arm "ppspec_dist_keep=$(arm ppspec_dist_keep)" \
   --arm "ppfast_gate=$(arm ppfast_gate)" --arm "ppfast_dist_keep=$(arm ppfast_dist_keep)" --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" \
   --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_rt" --arm "ppfast_gate=$(arm ppfast_gate)" --arm "ppfast_rt=$(arm ppfast_rt)" \
+  --arm "ppacc_rt_restart=$(arm ppacc_rt_restart)" --arm "tree_mse=$(arm tree_mse)" --arm "pure_a=$(arm pure_a)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

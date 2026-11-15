@@ -38,8 +38,8 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
                   judgments at every doubling for every leaf (as tree_mse; a prior split changes no table), posterior
                   judgments when the window's average regret is <= the gate, by the leaves' accumulated-regret directions
   ppfast_dist_keep  the same with (가) and (나) of section 19.7
-  ppfast_rt       ppfast_gate with prior splits checked every 10,000 iterations (section 19.9; failed candidates are
-                  dropped only at the doublings)
+  ppfast_rt       ppfast_gate with real-time prior splits (section 19.9): a candidate is tested once when its two sides
+                  together reach 1,000 visits; it splits the leaf if it passes, else it is replaced
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -82,7 +82,7 @@ ARMS = {
     "ppspec_dist_keep": SPEC + ["--div-test", "dist", "--keep-cands", "1"],
     "ppfast_gate": SPEC + ["--split-plan", "separate", "--prior-eligible", "all"],
     "ppfast_dist_keep": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--div-test", "dist", "--keep-cands", "1"],
-    "ppfast_rt": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--prior-realtime", "1"],
+    "ppfast_rt": SPEC + ["--split-plan", "separate", "--prior-eligible", "all", "--prior-visits", "1000"],
     "ppspec_leaves": SPEC + ["--post-from-leaves", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],

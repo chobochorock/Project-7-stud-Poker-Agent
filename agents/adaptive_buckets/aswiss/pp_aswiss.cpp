@@ -96,9 +96,10 @@
 //   --split-plan separate (user, 2026-11-15: prior leaves split fast and fine, the posterior slowly by the leaves' accumulated
 //   regrets): prior judgments at every doubling as --mode tree (with --prior-eligible all, every leaf; a prior split never
 //   changes a table), posterior judgments when the window's average regret is <= --regret-gate.
-//   --prior-realtime 1 (user, 2026-11-15: a prior split does not reach the posterior at once): between the doublings every
-//   leaf's candidates are tested every --gate-check iterations and a passing one splits its leaf at once; failed
-//   candidates are still dropped only at the doublings, so a candidate collects at least one doubling's evidence.
+//   --prior-visits N (user, 2026-11-15: real-time prior splits, since a prior split does not reach the posterior at once;
+//   "분할 후보 (양쪽) 모두가 총 1000번 방문되었을 때 ... 괴리가 크다면 분할 ... 아니라면, 그냥 냅둔다"): no prior judgments at
+//   the doublings; each candidate is tested once, when its two sides together reach N visits (the same MSE test, so each
+//   side still needs --acc-min-visits); the best passing candidate splits the leaf at once, failed ones are replaced.
 // --analyze N (pp, after a run): N information sets of resolved leaves, own route vs pointer -> RUN/analysis.json.
 // Outputs (RUN): log.csv (rows on the grid 1000 * 2^(j/--rows-per-octave) and at epoch ends), policy_bucket_K.bin and
 // policy_current_K.bin per row (for eval.py), events.csv, final_bucket_map.bin, prior_splits.csv, prior_tree.json (pp), and with
@@ -381,19 +382,31 @@ vector<array<double, W>> lavg;  // --post-from-leaves: each leaf's average-strat
 bool div_dist_only = false;   // --div-test dist: the divergence test is the normalised distance alone (no MSE z test)
 bool keep_cands = false;      // --keep-cands 1: prior candidates are not discarded when they fail or the leaf is not eligible
 bool prior_all = false;       // --prior-eligible all: every leaf may take a prior split (share: sole user or >= 50% of visits)
-bool prior_realtime = false;  // --prior-realtime 1 (--split-plan separate): prior splits checked every --gate-check iterations
+long long prior_visits = 0;   // --prior-visits N (--split-plan separate): a prior candidate is tested once, when its two sides
+                              // together reach N visits; it splits its leaf if it passes, else it is replaced
+vector<int> prior_ready; vector<char> prior_ready_flag;  // --prior-visits: leaves with a candidate due, this iteration
 void acc_visit(int l, int I, const double* r, int n) {
     if ((int)lacc.size() <= l) lacc.resize(leaves.size());
     LeafAcc& L = lacc[l];
+    bool due = false;
     for (AccCand& c : L.cand) {
         const int side = feat(I, c.d) <= c.thr ? 0 : 1;
         c.n[side] += 1;
         for (int a = 0; a < n; ++a) { c.s[side][a] += r[a]; c.q[side][a] += r[a] * r[a]; }
+        due = due || (prior_visits > 0 && c.n[0] + c.n[1] >= prior_visits);
     }
+    auto mark = [&] {  // handled after this iteration's traversals (the tree must not change during them)
+        if ((int)prior_ready_flag.size() <= l) prior_ready_flag.resize(leaves.size(), 0);
+        if (!prior_ready_flag[l]) { prior_ready_flag[l] = 1; prior_ready.push_back(l); }
+    };
+    if (due) mark();
     if (find(L.pool.begin(), L.pool.end(), I) != L.pool.end()) return;  // the reservoir holds distinct information sets
     ++L.seen;
-    if ((int)L.pool.size() < acc_pool) L.pool.push_back(I);
-    else { const uint64_t j = mix64(tree_salt ^ ((uint64_t)l << 32) ^ L.seen) % L.seen; if (j < (uint64_t)acc_pool) L.pool[j] = I; }
+    bool changed = false;
+    if ((int)L.pool.size() < acc_pool) { L.pool.push_back(I); changed = true; }
+    else { const uint64_t j = mix64(tree_salt ^ ((uint64_t)l << 32) ^ L.seen) % L.seen; if (j < (uint64_t)acc_pool) { L.pool[j] = I; changed = true; } }
+    // --prior-visits has no judgments to fill candidates: a leaf short of --acc-candidates is filled when its pool changes
+    if (prior_visits > 0 && changed && (int)L.cand.size() < acc_k && L.pool.size() >= 2) mark();
 }
 struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain = 0, dist = 0; };
 AccTest acc_test(const AccCand& c, int n, int metric = -1) {  // metric: -1 --acc-metric, 0 mse, 1 dir
@@ -928,9 +941,8 @@ bool own_significant(const LeafOwn& o, int na, int& argmax) {
 int ppacc_posterior_pass();
 // --mode ppacc: the judgment at an epoch end, a prior phase (even epochs) or a posterior phase (odd epochs); with
 // --post-realtime 1 every judgment is a prior phase (the posterior splits happen in ppacc_posterior_pass during training)
-// cleanup false (--prior-realtime checks between judgments): a passing candidate splits its leaf, nothing else changes;
-// failed and one-sided candidates are dropped and refilled only at the judgments themselves
-int ppacc_epoch_end(int k, bool cleanup = true) {
+void ppacc_split_leaf(int l, int best, const AccTest& bt);
+int ppacc_epoch_end(int k) {
     if (k % 2 == 1 && !post_realtime) return ppacc_posterior_pass();
     lacc.resize(leaves.size()); lown.resize(leaves.size());
     if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
@@ -944,7 +956,7 @@ int ppacc_epoch_end(int k, bool cleanup = true) {
             if (leaves[l].node < 0) continue;
             const int b = leaves[l].ptr;
             const bool eligible = prior_all || users[b].size() == 1 || (bvis[b] > 0 && lown[l].n >= 0.5 * bvis[b]);
-            if (!eligible) { if (!keep_cands && cleanup) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
+            if (!eligible) { if (!keep_cands) lacc[l].cand.clear(); continue; }  // --keep-cands: they go on collecting
             const int n = counts[cell_members[leaves[l].cell][0]];
             int best = -1; AccTest bt;
             vector<AccTest> ts(lacc[l].cand.size());
@@ -955,7 +967,6 @@ int ppacc_epoch_end(int k, bool cleanup = true) {
                 if (ts[c].pass && (best < 0 || better)) { best = (int)c; bt = ts[c]; }
             }
             if (best < 0) {
-                if (!cleanup) continue;
                 vector<AccCand> keep;
                 for (size_t c = 0; c < ts.size(); ++c) {
                     const AccCand& x = lacc[l].cand[c];
@@ -966,44 +977,81 @@ int ppacc_epoch_end(int k, bool cleanup = true) {
                 acc_fill(l);
                 continue;
             }
-            const AccCand c = lacc[l].cand[best];
-            const vector<int32_t> pool = lacc[l].pool;
-            const int node = leaves[l].node, cell = leaves[l].cell, depth = leaves[l].depth;
-            tnodes[node].d = c.d; tnodes[node].thr = c.thr; tnodes[node].leaf = -1;
-            int kid[2];
-            for (int side = 0; side < 2; ++side) {
-                TNode t; t.leaf = (int)leaves.size();
-                kid[side] = (int)tnodes.size(); tnodes.push_back(t);
-                Leaf L; L.node = kid[side]; L.cell = cell; L.depth = depth + 1; L.pending = false; L.ptr = b; L.born = cur_t;
-                leaves.push_back(L);
-                LeafAcc K;
-                for (int32_t I : pool) if ((feat(I, c.d) <= c.thr) == (side == 0)) K.pool.push_back(I);
-                K.seen = K.pool.size();
-                lacc.push_back(K);
-                LeafOwn o; for (int a = 0; a < W; ++a) { o.s[a] = c.s[side][a]; o.q[a] = c.q[side][a]; } o.n = c.n[side];
-                if (post_from_leaves) {  // the parent's record is split, so that the bucket's sums do not change: each side
-                    // keeps its own sums and a visit share of the part from before the candidate existed
-                    const double share = c.n[0] + c.n[1] > 0 ? c.n[side] / (c.n[0] + c.n[1]) : 0.5;
-                    for (int a = 0; a < W; ++a) {
-                        o.s[a] += share * (lown[l].s[a] - c.s[0][a] - c.s[1][a]);
-                        o.q[a] += share * max(0.0, lown[l].q[a] - c.q[0][a] - c.q[1][a]);
-                    }
-                    o.n += share * max(0.0, lown[l].n - c.n[0] - c.n[1]);
-                    lavg.resize(leaves.size(), array<double, W>{});  // the child was pushed above: its slot is the last
-                    for (int a = 0; a < W; ++a) lavg.back()[a] = share * lavg[l][a];
-                }
-                lown.push_back(o);
-                acc_fill((int)leaves.size() - 1);
-            }
-            tnodes[node].left = kid[0]; tnodes[node].right = kid[1];
-            leaves[l].node = -1; lacc[l] = LeafAcc{}; lown[l] = LeafOwn{};
-            if (post_from_leaves) lavg[l] = array<double, W>{};
-            ++cell_ver[cell]; ++n_prior_splits; ++splits;
-            fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%.0f,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(c.d).c_str(), c.thr,
-                    acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
+            ppacc_split_leaf(l, best, bt);
+            ++splits;
         }
         return splits;
     }
+}
+// one prior split of leaf l by its candidate best (the children keep the leaf's pointer: no table changes)
+void ppacc_split_leaf(int l, int best, const AccTest& bt) {
+    const int b = leaves[l].ptr;
+    const AccCand c = lacc[l].cand[best];
+    const vector<int32_t> pool = lacc[l].pool;
+    const int node = leaves[l].node, cell = leaves[l].cell, depth = leaves[l].depth;
+    tnodes[node].d = c.d; tnodes[node].thr = c.thr; tnodes[node].leaf = -1;
+    int kid[2];
+    for (int side = 0; side < 2; ++side) {
+        TNode t; t.leaf = (int)leaves.size();
+        kid[side] = (int)tnodes.size(); tnodes.push_back(t);
+        Leaf L; L.node = kid[side]; L.cell = cell; L.depth = depth + 1; L.pending = false; L.ptr = b; L.born = cur_t;
+        leaves.push_back(L);
+        LeafAcc K;
+        for (int32_t I : pool) if ((feat(I, c.d) <= c.thr) == (side == 0)) K.pool.push_back(I);
+        K.seen = K.pool.size();
+        lacc.push_back(K);
+        LeafOwn o; for (int a = 0; a < W; ++a) { o.s[a] = c.s[side][a]; o.q[a] = c.q[side][a]; } o.n = c.n[side];
+        if (post_from_leaves) {  // the parent's record is split, so that the bucket's sums do not change: each side
+            // keeps its own sums and a visit share of the part from before the candidate existed
+            const double share = c.n[0] + c.n[1] > 0 ? c.n[side] / (c.n[0] + c.n[1]) : 0.5;
+            for (int a = 0; a < W; ++a) {
+                o.s[a] += share * (lown[l].s[a] - c.s[0][a] - c.s[1][a]);
+                o.q[a] += share * max(0.0, lown[l].q[a] - c.q[0][a] - c.q[1][a]);
+            }
+            o.n += share * max(0.0, lown[l].n - c.n[0] - c.n[1]);
+            lavg.resize(leaves.size(), array<double, W>{});  // the child was pushed above: its slot is the last
+            for (int a = 0; a < W; ++a) lavg.back()[a] = share * lavg[l][a];
+        }
+        lown.push_back(o);
+        acc_fill((int)leaves.size() - 1);
+    }
+    tnodes[node].left = kid[0]; tnodes[node].right = kid[1];
+    leaves[l].node = -1; lacc[l] = LeafAcc{}; lown[l] = LeafOwn{};
+    if (post_from_leaves) lavg[l] = array<double, W>{};
+    ++cell_ver[cell]; ++n_prior_splits;
+    fprintf(prior_log, "%lld,%d,%d,%d,%s,%.6g,%.6g,%.6g,%.0f,%d,%d,%d\n", cur_t, l, cell, depth, desc_name(c.d).c_str(), c.thr,
+            acc_dir ? bt.dist : bt.gain, bt.z, c.n[0] + c.n[1], level_now, (int)leaves.size() - 2, (int)leaves.size() - 1);
+}
+// --prior-visits: the leaves whose candidates reached the count during this iteration (or that are short of candidates);
+// each due candidate is tested once, the best passing one splits the leaf, and the failed due ones are replaced
+int ppacc_visit_checks() {
+    if (prior_ready.empty()) return 0;
+    lacc.resize(leaves.size()); lown.resize(leaves.size());
+    if (post_from_leaves) lavg.resize(leaves.size(), array<double, W>{});
+    vector<int> ready; ready.swap(prior_ready);
+    int splits = 0;
+    for (int l : ready) {
+        prior_ready_flag[l] = 0;
+        if (leaves[l].node < 0) continue;
+        const int n = counts[cell_members[leaves[l].cell][0]];
+        int best = -1; AccTest bt;
+        vector<char> due(lacc[l].cand.size(), 0);
+        for (size_t c = 0; c < due.size(); ++c) {
+            const AccCand& x = lacc[l].cand[c];
+            if (x.n[0] + x.n[1] < prior_visits) continue;
+            due[c] = 1;
+            const AccTest t = acc_test(x, n);  // a side under --acc-min-visits cannot be tested: it fails
+            n_acc_tested += t.testable;
+            const bool better = acc_dir ? (t.dist > bt.dist || (t.dist == bt.dist && t.gain > bt.gain)) : t.gain > bt.gain;
+            if (t.pass && (best < 0 || better)) { best = (int)c; bt = t; }
+        }
+        if (best >= 0) { ppacc_split_leaf(l, best, bt); ++splits; continue; }
+        vector<AccCand> keep;
+        for (size_t c = 0; c < due.size(); ++c) if (!due[c]) keep.push_back(lacc[l].cand[c]);
+        lacc[l].cand.swap(keep);
+        acc_fill(l);
+    }
+    return splits;
 }
 // --mode ppacc: the posterior phase (a bucket with a diverging leaf is split by its leaves' largest-regret actions)
 int ppacc_posterior_pass() {
@@ -1327,7 +1375,7 @@ int main(int argc, char** argv) try {
                             {"--direction", "iterates"}, {"--leaf-start", "root"}, {"--tol", "1e-3"},
                             {"--acc-candidates", "8"}, {"--acc-min-visits", "100"}, {"--acc-z", "3"}, {"--acc-pool", "16"},
                             {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--epoch-growth", "2"}, {"--freeze-at", "0"}, {"--regret-gate", "0.1"}, {"--gate-check", "10000"}, {"--post-realtime", "0"}, {"--div-metric", "same"}, {"--judgment-rows", "all"}, {"--div-test", "both"}, {"--keep-cands", "0"},
-                            {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-realtime", "0"},
+                            {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
@@ -1469,7 +1517,7 @@ int main(int argc, char** argv) try {
             !(k == "--epoch-growth" && v == "2") && !(k == "--freeze-at" && v == "0") &&
             !(k == "--regret-gate" && v == "0.1") && !(k == "--gate-check" && v == "10000") && !(k == "--post-realtime" && v == "0") &&
             !(k == "--div-metric" && v == "same") && k != "--judgment-rows" && !(k == "--div-test" && v == "both") &&
-            !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-realtime" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
+            !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-visits" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
@@ -1489,8 +1537,11 @@ int main(int argc, char** argv) try {
     const bool split_separate = split_plan == "separate";
     if (split_separate && (!ppacc_mode || schedule != "regret" || post_realtime))
         throw runtime_error("--split-plan separate needs --mode ppacc and --schedule regret (posterior waiting), without --post-realtime");
-    prior_realtime = opt["--prior-realtime"] == "1";
-    if (prior_realtime && !split_separate) throw runtime_error("--prior-realtime 1 needs --split-plan separate");
+    prior_visits = stoll(opt["--prior-visits"]);
+    if (prior_visits < 0) throw runtime_error("--prior-visits must be >= 0");
+    if (prior_visits > 0 && (!split_separate || !prior_all))
+        throw runtime_error("--prior-visits needs --split-plan separate and --prior-eligible all");
+    if (prior_visits > 0 && prior_visits < 2 * acc_min) throw runtime_error("--prior-visits must be >= 2 x --acc-min-visits");
     if (epoch0 < 1 || eps_at < 1) throw runtime_error("--epoch0 and --eps-at must be positive");
     const long long growth = stoll(opt["--epoch-growth"]), freeze_at = stoll(opt["--freeze-at"]);
     if (freeze_at > 0 && !tree_mode && !ppacc_mode) throw runtime_error("--freeze-at is for --mode tree and ppacc");
@@ -1902,7 +1953,7 @@ int main(int argc, char** argv) try {
         }
         for (int p = 0; p < 2; ++p) { es(0, p); apply_regrets(); }
         if (post_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_posterior_pass();
-        if (prior_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_epoch_end(0, false);
+        if (prior_visits > 0 && split_on && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_visit_checks();
         if (pp_mode && !to_finalize.empty()) {
             const double a0 = cpu_now();
             vector<int> f = move(to_finalize); to_finalize.clear();
@@ -1920,7 +1971,7 @@ int main(int argc, char** argv) try {
         if (is_end && direction_avg && split_on) { run.cur_tables = avg_table(); run.curK = 1; }  // the split-time average strategy
         // --split-plan separate: prior judgments at every --epoch-growth multiple (run.k counts them); is_end is the
         // posterior judgment (the waiting condition; run.epoch_start is the start of its window)
-        const bool prior_end = split_separate && run.t == epoch_end_static(run.k);
+        const bool prior_end = split_separate && prior_visits == 0 && run.t == epoch_end_static(run.k);  // --prior-visits: none
         const bool grid_row = run.t == next_row_t();
         if (grid_row) ++run.next_row_j;
         if (is_end || prior_end || grid_row || run.t == T) {

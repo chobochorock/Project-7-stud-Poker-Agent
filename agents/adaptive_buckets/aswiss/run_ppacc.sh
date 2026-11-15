@@ -27,8 +27,9 @@
 #   ppfast_gate       prior judgments at every doubling for every leaf (as tree_mse), posterior judgments when the
 #                     window's average regret is <= 0.1, by the leaves' accumulated-regret directions
 #   ppfast_dist_keep  the same with (가) and (나)
-#   ppfast_rt         ppfast_gate with prior splits checked every 10,000 iterations (design section 19.9; user, 2026-11-15:
-#                     a prior split does not reach the posterior at once); failed candidates dropped only at doublings
+#   ppfast_rt         ppfast_gate with real-time prior splits (design section 19.9; user, 2026-11-15): no prior judgments;
+#                     a candidate is tested once when its two sides together reach 1,000 visits, splits the leaf if it
+#                     passes, else it is replaced (--prior-visits 1000)
 set -euo pipefail
 OUT=$(cd "$1" && pwd); SECS=$2; SEEDS=${3:-"1 2 3"}; P=${4:-4}
 A=$(cd "$(dirname "$0")" && pwd)
@@ -64,7 +65,7 @@ for s in $SEEDS; do
   echo "ppspec_dist_keep $s $SPEC --div-test dist --keep-cands 1" >> "$jobs"
   echo "ppfast_gate $s $SPEC --split-plan separate --prior-eligible all" >> "$jobs"
   echo "ppfast_dist_keep $s $SPEC --split-plan separate --prior-eligible all --div-test dist --keep-cands 1" >> "$jobs"
-  echo "ppfast_rt $s $SPEC --split-plan separate --prior-eligible all --prior-realtime 1" >> "$jobs"
+  echo "ppfast_rt $s $SPEC --split-plan separate --prior-eligible all --prior-visits 1000" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }

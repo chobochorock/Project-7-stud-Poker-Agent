@@ -33,7 +33,7 @@ ARMS = [
     ("ppspec_dist_keep", "ppspec_gate, both"),
     ("ppfast_gate", "ppfast: prior every doubling (all leaves), posterior when window regret <= 0.1"),
     ("ppfast_dist_keep", "ppfast with distance-only divergence and kept candidates"),
-    ("ppfast_rt", "ppfast with prior splits checked every 10,000 iterations"),
+    ("ppfast_rt", "ppfast with real-time prior splits (a candidate tested once at 1,000 visits)"),
     ("pure_a", "pure a, iterates (reference)"),
     ("ppmix_avg_root", "pp mix, avg, root (reference)"),
     ("kmeans_a", "k-means, rule a counts (baseline)"),

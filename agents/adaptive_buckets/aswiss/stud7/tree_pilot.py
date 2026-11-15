@@ -7,6 +7,8 @@ Usage (from this folder; BINARY is aswiss_stud built from this folder's aswiss_s
                                                                                       # start in the background
   python tree_pilot.py BINARY OUT_DIR --status   # progress of every run in OUT_DIR
   python tree_pilot.py BINARY OUT_DIR --status --watch 60   # the same, refreshed every 60 seconds (Ctrl+C ends it)
+  python tree_pilot.py BINARY OUT_DIR --evaluate [--arms ...] [--seeds ...] [--workers 2]
+                                                 # evaluate the snapshots written so far, in the background, now
   python tree_pilot.py BINARY OUT_DIR --table    # the table of what has been evaluated so far
   python tree_pilot.py BINARY OUT_DIR --plot     # the figure of the same: OUT_DIR/pilot.png (also written when a run ends)
   python tree_pilot.py BINARY OUT_DIR --stop     # training processes save a checkpoint and exit; no evaluation starts
@@ -19,6 +21,9 @@ evaluations already made are kept. One background run per OUT_DIR at a time.
 Every arm is one process: `BINARY train ARGS --seed S --roots R --out OUT_DIR/ARM_sS`.
 Starting builds BINARY first when it is missing or older than aswiss_stud.cpp or its headers in this folder (g++ -O3
 -std=c++17 -pthread, -static on Windows; g++ from --gxx, PATH, or the usual MinGW folders).
+--evaluate: a background process (OUT_DIR/eval.pid, eval.log) evaluates every epoch snapshot written so far by the runs
+in OUT_DIR (narrowed by --arms / --seeds), alongside any training; evaluations already made are skipped, so the
+evaluation a start runs after its training skips them too. --status shows whether it runs.
 --status: per run the roots, tables, epoch snapshots and evaluations, the latest evaluated LBR (average / current) with
 its ratio to the baseline run of the same seed at the same roots, and for ppfast_rt the posterior waiting condition
 (pp_post.csv, one row every 10,000 roots: the window regret against the gate, posterior judgments so far, the root of
@@ -102,13 +107,15 @@ mode.add_argument("--foreground", action="store_true", help="run in this window 
 mode.add_argument("--status", action="store_true"); mode.add_argument("--stop", action="store_true")
 mode.add_argument("--table", "--table-only", action="store_true", dest="table")
 mode.add_argument("--plot", action="store_true")
+mode.add_argument("--evaluate", action="store_true", help="evaluate the snapshots written so far, in the background")
 a = ap.parse_args()
 given = [x for arm in a.arms or [] for x in arm.split(",") if x]
 for arm in given + [a.baseline]:
     if arm not in ARMS: sys.exit(f"unknown arm {arm}; arms: {' '.join(ARMS)}")
 os.makedirs(a.out, exist_ok=True)
 PID, LOG, STOP = (os.path.join(a.out, f) for f in ("pilot.pid", "pilot.log", "STOP_PILOT"))
-starting = not (a.status or a.stop or a.table or a.plot)
+EPID, ELOG = os.path.join(a.out, "eval.pid"), os.path.join(a.out, "eval.log")
+starting = not (a.status or a.stop or a.table or a.plot or a.evaluate)
 if starting:
     runs = [(arm, s, f"{arm}_s{s}") for s in a.seeds or [1] for arm in given or ["tree", "k256"]]
 else:  # every run in OUT_DIR, narrowed by --arms / --seeds when given
@@ -129,8 +136,8 @@ def alive(pid):
     except OSError: return False
 
 
-def driver_pid():
-    try: pid = int(open(PID).read())
+def driver_pid(path=None):
+    try: pid = int(open(path or PID).read())
     except (OSError, ValueError): return 0
     return pid if alive(pid) else 0
 
@@ -285,6 +292,8 @@ def build_if_needed():
 def status():
     pid = driver_pid()
     print(f"background process: {'running (pid %d)' % pid if pid else 'not running'}; log: {LOG}")
+    epid = driver_pid(EPID)
+    if epid or os.path.exists(ELOG): print(f"evaluation process (--evaluate): {'running (pid %d)' % epid if epid else 'not running'}; log: {ELOG}")
     if os.path.exists(STOP): print("a stop was requested (--stop)")
     print(f"no runs in {a.out}" if not runs else "roots are read from curve.csv, which is written in blocks, so they lag:")
     def rows_of(path):  # a file being written: a partial last line is skipped
@@ -339,15 +348,34 @@ elif a.table:
     table()
 elif a.plot:
     plot(os.path.join(a.out, "pilot.png"))
+elif a.evaluate:
+    epid = driver_pid(EPID)
+    if epid: sys.exit(f"an evaluation is already running in {a.out} (pid {epid}); see --status. If it is not, delete {EPID}")
+    if not runs: sys.exit(f"no runs in {a.out}")
+    if not os.path.exists(a.binary): sys.exit(f"{a.binary} not found (it is built when a run starts)")
+    specs = [f"{name}:{ARMS[arm][1]}:{ARMS[arm][2]}" for arm, _, name in runs]
+    cmd = [sys.executable, "-u", os.path.join(HERE, "evaluate.py"), os.path.abspath(a.binary), a.out, "--runs", *specs,
+           "--kinds", "epoch", "--min-roots", str(a.min_roots), "--workers", str(a.workers),
+           "--pairs", str(a.pairs), "--particles", str(a.particles), "--gap-roots", "2000"]
+    kw = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" \
+        else {"start_new_session": True}
+    with open(ELOG, "a") as log:
+        log.write("\n" + " ".join(cmd) + "\n"); log.flush()
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **kw)
+    with open(EPID, "w") as f: f.write(str(p.pid))
+    here = f"python {os.path.basename(__file__)} {a.binary} {a.out}"
+    print(f"evaluation started in the background (pid {p.pid}, {a.workers} workers): {', '.join(n for _, _, n in runs)}\n"
+          f"  every epoch snapshot written so far from {a.min_roots:,} roots; evaluations already made are skipped\n"
+          f"  progress: {here} --status   (or --status --watch 60)\n  table:    {here} --table\n  log:      {ELOG}")
 elif a.stop:
     open(STOP, "w").close()
     for _, _, name in runs: open(os.path.join(a.out, name, "STOP"), "w").close()
     print(f"stop requested: each training process saves a checkpoint within about 1,000 roots and exits; no evaluation "
           f"starts (one already running finishes its snapshots). Start again with the same command to resume.")
 elif not a.foreground:
-    build_if_needed()
     pid = driver_pid()
     if pid: sys.exit(f"a background run is already working in {a.out} (pid {pid}); see --status. If it is not, delete {PID}")
+    build_if_needed()  # after the check: a running driver's binary is never rebuilt under it
     cmd = [sys.executable, "-u", os.path.abspath(__file__), os.path.abspath(a.binary), a.out, "--foreground",
            "--arms", *(given or ["tree", "k256"]), "--seeds", *map(str, a.seeds or [1]), "--roots", str(a.roots), "--workers", str(a.workers),
            "--min-roots", str(a.min_roots), "--pairs", str(a.pairs), "--particles", str(a.particles), "--baseline", a.baseline,

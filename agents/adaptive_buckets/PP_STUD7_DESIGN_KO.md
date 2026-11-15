@@ -1363,3 +1363,13 @@ seed별 (평균 전략 / 쓰는 표 / prior 잎 / 판정 / prior 분할 / poster
 
 **실험**: `tree_pilot.py`의 `ppfast_rt`, 학습 seed 1–3, 204.7만 roots, `results_data/pp_pilot`의 누적 regret 시범과 같은 폴더(같은 seed의 k-means 256 실행과 평가 딜·LBR seed·입자 2,000쌍 × 64개가 같다).
 
+**노트북에서 돌리기** (사용자: "그냥 나 줘. 그리고 status를 지속적으로 확인할 수 있도록 해줘.")
+```
+python agents\adaptive_buckets\aswiss\stud7\tree_pilot.py agents\adaptive_buckets\aswiss\stud7\aswiss_stud_ppfast.exe ..\pp7_fast --arms ppfast_rt k256 --seeds 1 2 3 --roots 8191000 --workers 4
+python agents\adaptive_buckets\aswiss\stud7\tree_pilot.py agents\adaptive_buckets\aswiss\stud7\aswiss_stud_ppfast.exe ..\pp7_fast --status --watch 60
+```
+- 시작하면 바이너리가 없거나 소스보다 오래됐을 때 g++로 먼저 빌드한다(Windows는 `-static`). 학습과 평가는 백그라운드에서 돈다.
+- `--status`: 실행마다 roots, 표 수, 스냅숏과 평가 수, 가장 최근 LBR(평균 / 현재)과 같은 seed k-means 256 대비 비율, `ppfast_rt`는 posterior 대기 조건(구간 regret 대 기준, 판정 수, 마지막 판정 root, prior 잎 수). `--watch N`은 N초마다 다시 보여 준다. 학습기는 `pp_post.csv`를 1만 roots마다 바로 쓴다(기록만 바뀜).
+- 여기서의 시범(멈춤): 125만 roots까지 posterior 판정 없음, 구간 regret 0.30 / 1.00 / 0.31(seed 1 / 2 / 3), prior 잎 약 3.8만, 100만 roots에서 메모리 약 130 MB. 6.3만 roots에서 LBR 평균 1.983(k-means 256의 0.59배, 표 9개 대 33,764개).
+- 더 길게: 같은 명령을 `--roots 16383000`으로 다시 시작하면 이어서 돈다.
+

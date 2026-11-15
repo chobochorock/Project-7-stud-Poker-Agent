@@ -2275,6 +2275,7 @@ int train(int argc, char** argv) {
                         << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
                         << elapsed() << '\n';
+                ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
         }
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root

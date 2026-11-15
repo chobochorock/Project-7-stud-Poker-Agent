@@ -6,6 +6,7 @@ Usage (from this folder; BINARY is aswiss_stud built from this folder's aswiss_s
                        [--pp-extra "--pp-pass-frac 0.03"]
                                                                                       # start in the background
   python tree_pilot.py BINARY OUT_DIR --status   # progress of every run in OUT_DIR
+  python tree_pilot.py BINARY OUT_DIR --status --watch 60   # the same, refreshed every 60 seconds (Ctrl+C ends it)
   python tree_pilot.py BINARY OUT_DIR --table    # the table of what has been evaluated so far
   python tree_pilot.py BINARY OUT_DIR --plot     # the figure of the same: OUT_DIR/pilot.png (also written when a run ends)
   python tree_pilot.py BINARY OUT_DIR --stop     # training processes save a checkpoint and exit; no evaluation starts
@@ -16,6 +17,12 @@ crash or reboot resumes: an arm already trained to --roots is skipped, an unfini
 evaluations already made are kept. One background run per OUT_DIR at a time.
 
 Every arm is one process: `BINARY train ARGS --seed S --roots R --out OUT_DIR/ARM_sS`.
+Starting builds BINARY first when it is missing or older than aswiss_stud.cpp or its headers in this folder (g++ -O3
+-std=c++17 -pthread, -static on Windows; g++ from --gxx, PATH, or the usual MinGW folders).
+--status: per run the roots, tables, epoch snapshots and evaluations, the latest evaluated LBR (average / current) with
+its ratio to the baseline run of the same seed at the same roots, and for ppfast_rt the posterior waiting condition
+(pp_post.csv, one row every 10,000 roots: the window regret against the gate, posterior judgments so far, the root of
+the last one, prior leaves). --watch N repeats it every N seconds.
 Evaluation is evaluate.py with --kinds epoch: only snapshot_K.bin, which the trainer writes at an epoch end BEFORE
 that epoch's judgment (the partition and tables used during the epoch). The same LBR deals, LBR seed and particles for
 every arm. Snapshot K is at 1000 * (2^(K+1) - 1) roots: 63,000 (K=5), 127,000, 255,000, 511,000, 1,023,000, 2,047,000.
@@ -33,7 +40,7 @@ The figure (needs matplotlib) has the LBR against the training roots, log-log, a
 of the same seed, for the average and the current policy; a run of another training seed has open markers.
 --status, --table, --plot and --stop cover every run found in OUT_DIR (only the --arms / --seeds given, if any).
 """
-import argparse, csv, json, os, re, subprocess, sys
+import argparse, csv, json, os, re, shutil, subprocess, sys, time
 from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +95,8 @@ ap.add_argument("--pairs", type=int, default=2000); ap.add_argument("--particles
 ap.add_argument("--baseline", default="k256")
 ap.add_argument("--epoch-growth", type=int, default=2, help="every arm's next epoch is this many times as long")
 ap.add_argument("--pp-extra", default="", help="more trainer options for the pp / tree arms, in one quoted string")
+ap.add_argument("--gxx", default="", help="g++ to build BINARY with (default: PATH, then the usual MinGW folders)")
+ap.add_argument("--watch", type=float, default=0, help="--status: repeat every this many seconds")
 mode = ap.add_mutually_exclusive_group()
 mode.add_argument("--foreground", action="store_true", help="run in this window (the default starts a background process)")
 mode.add_argument("--status", action="store_true"); mode.add_argument("--stop", action="store_true")
@@ -257,21 +266,75 @@ def plot(path):
     print("figure:", path)
 
 
-if a.status:
+def build_if_needed():
+    srcs = [os.path.join(HERE, f) for f in os.listdir(HERE) if f.endswith(".hpp")] + [os.path.join(HERE, "aswiss_stud.cpp")]
+    if os.path.exists(a.binary) and os.path.getmtime(a.binary) >= max(map(os.path.getmtime, srcs)): return
+    gxx = a.gxx or shutil.which("g++")
+    if not gxx:
+        for c in (r"C:\ProgramData\mingw64\mingw64\bin\g++.exe", r"C:\msys64\ucrt64\bin\g++.exe", r"C:\msys64\mingw64\bin\g++.exe",
+                  r"C:\mingw64\bin\g++.exe"):
+            if os.path.exists(c): gxx = c; break
+    if not gxx: sys.exit("g++ not found: pass --gxx PATH_TO_G++ (or build BINARY yourself)")
+    print(f"building {a.binary} with {gxx} (a few minutes)", flush=True)
+    os.makedirs(os.path.dirname(os.path.abspath(a.binary)), exist_ok=True)
+    env = dict(os.environ); env["PATH"] = os.path.dirname(gxx) + os.pathsep + env.get("PATH", "")
+    subprocess.run([gxx, "-O3", "-std=c++17", "-pthread"] + (["-static"] if os.name == "nt" else []) +
+                   [os.path.join(HERE, "aswiss_stud.cpp"), "-o", a.binary], check=True, env=env)
+
+
+def status():
     pid = driver_pid()
     print(f"background process: {'running (pid %d)' % pid if pid else 'not running'}; log: {LOG}")
     if os.path.exists(STOP): print("a stop was requested (--stop)")
     print(f"no runs in {a.out}" if not runs else "roots are read from curve.csv, which is written in blocks, so they lag:")
+    def rows_of(path):  # a file being written: a partial last line is skipped
+        if not os.path.exists(path): return []
+        out = []
+        for r in csv.DictReader(open(path)):
+            if None not in r.values() and all(v != "" for k, v in r.items() if k in ("roots", "window_regret")): out.append(r)
+        return out
     for arm, seed, name in runs:
         at, tables = 0, "?"
         curve = os.path.join(a.out, name, "curve.csv")
-        if os.path.exists(curve):
-            rows = list(csv.DictReader(open(curve)))
-            if rows: at, tables = int(rows[-1]["roots"]), rows[-1]["buckets"]
+        rows = rows_of(curve)
+        if rows: at, tables = int(rows[-1]["roots"]), rows[-1]["buckets"]
+        post = rows_of(os.path.join(a.out, name, "pp_post.csv"))
+        if post and int(post[-1]["roots"]) >= at: at, tables = int(post[-1]["roots"]), post[-1]["buckets_after"]
         snaps = epoch_rows(name)
         if snaps and int(snaps[-1]["roots"]) >= at: at, tables = int(snaps[-1]["roots"]), snaps[-1]["buckets"]
         want = 2 * sum(int(r["roots"]) >= a.min_roots for r in snaps)
-        print(f"  {name}: {at:,} roots, {tables} tables, {len(snaps)} epoch snapshots, {len(evals(name))} of {want} evaluations")
+        ev = evals(name)
+        print(f"  {name}: {at:,} roots, {tables} tables, {len(snaps)} epoch snapshots, {len(ev)} of {want} evaluations")
+        if ev:  # the latest evaluated roots: LBR (ante) and the ratio to the baseline run of this seed at the same roots
+            last = max(int(r) for r, _ in ev)
+            base = evals(f"{a.baseline}_s{seed}")
+            parts = []
+            for pol in ("average", "current"):
+                e = ev.get((last, pol)) or ev.get((str(last), pol))
+                if not e: continue
+                b = base.get((last, pol)) or base.get((str(last), pol))
+                ratio = f", {e['lbr_ante'] / b['lbr_ante']:.2f}x {a.baseline}" if b and b["lbr_ante"] > 0 and not name.startswith(a.baseline) else \
+                        ("" if name.startswith(a.baseline) else f", no {a.baseline}_s{seed} row at these roots")
+                parts.append(f"{pol} {e['lbr_ante']:.3f} +- {e['lbr_se']:.3f}{ratio}")
+            print(f"      LBR at {last:,} roots: " + "; ".join(parts))
+        if post:  # ppfast_rt: the posterior waiting condition
+            p = post[-1]
+            judged = [r for r in post if r["judged"] == "1"]
+            lastj = f", last at {int(judged[-1]['roots']):,} roots" if judged else ""
+            print(f"      posterior: window regret {float(p['window_regret']):.3f} ante (gate {p['gate']}) over {int(p['window_roots']):,} "
+                  f"roots; {len(judged)} judgments{lastj}; {int(p['live_leaves']):,} prior leaves, {int(p['prior_splits']):,} prior splits")
+
+
+if a.status:
+    while True:
+        if a.watch > 0:
+            if os.name == "nt": os.system("cls")
+            else: print("\033[2J\033[H", end="")
+            print(time.strftime("%Y-%m-%d %H:%M:%S"), f"(every {a.watch:g} s; Ctrl+C ends it)", flush=True)
+        status()
+        if a.watch <= 0: break
+        try: time.sleep(a.watch)
+        except KeyboardInterrupt: break
 elif a.table:
     table()
 elif a.plot:
@@ -282,6 +345,7 @@ elif a.stop:
     print(f"stop requested: each training process saves a checkpoint within about 1,000 roots and exits; no evaluation "
           f"starts (one already running finishes its snapshots). Start again with the same command to resume.")
 elif not a.foreground:
+    build_if_needed()
     pid = driver_pid()
     if pid: sys.exit(f"a background run is already working in {a.out} (pid {pid}); see --status. If it is not, delete {PID}")
     cmd = [sys.executable, "-u", os.path.abspath(__file__), os.path.abspath(a.binary), a.out, "--foreground",

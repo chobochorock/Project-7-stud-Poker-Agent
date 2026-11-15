@@ -1343,3 +1343,23 @@ seed별 (평균 전략 / 쓰는 표 / prior 잎 / 판정 / prior 분할 / poster
 - prior 잎이 약 2.9만 개로 `tree_mse`의 표 수(2만)보다 많다. 표는 8천–9천 개, 표 하나에 잎 약 3.4개.
 - 아직 단일 트리 `tree_mse`(0.093)와는 차이가 크다.
 
+### 19.10 7-stud로 옮긴 `ppfast_rt` (`aswiss_stud --tree-split accum --pp-structure pp`, 2026-11-15)
+
+사용자: "good 이걸로 실제로 7stud에서 돌려볼까?" 대기 조건 기준값은 0.1 ante("그래야 충분히 노이즈가 줄어든 뒤에 분할을 했다는 평가를 할 것 같으니"), 후보 방문 기준은 1000번("실제 방문율이 어느 빈도로 나오는지... 그래서 일단 1000번").
+
+**구현** (mini-stud `ppfast_rt`와 같은 규칙)
+- 셀: (스트리트, 가능한 행동 집합). 특징: 관측 열의 일반 특징. 학습: external-sampling MCCFR, RM+, 선형 가중 평균(7-stud 기존 그대로).
+- prior: 후보 8개의 양쪽 방문 합이 1000이 되면 한 번 MSE 시험(z ≥ 3, 각 쪽 100 이상). 통과하면 그 root가 끝난 뒤 잎을 나누고, 자식은 부모 포인터를 그대로 가진다(표 변화 없음). 실패한 후보는 버리고 새로 뽑는다. epoch 끝의 prior 판정은 없다.
+- posterior: 1만 roots마다 구간 regret = Σ_b max(0, max_a R_b(a)) / 구간 roots를 본다(R_b: 구간 동안 MCCFR가 더한 표본 regret을 RM+로 자르기 전에 합한 값, 두 seat 합, ante). 구간이 1,000 roots 이상이고 0.1 이하이면 판정한다. 판정 규칙은 mini-stud와 같다(잎 기록과 버킷 전체의 방향 괴리, 가장 큰 regret 행동별 묶기, 나뉜 표 모두 재시작, 옮긴 잎만 기록·후보 초기화). 판정 뒤 구간을 다시 시작한다.
+- 7-stud에서 다른 점: RM+는 누적 regret을 0에서 자르므로 표 값의 변화로는 구간 regret을 셀 수 없다. 그래서 자르기 전 합을 표마다 따로 모은다(기존 `--gate-stat iter`와 같은 값의 두 배, 두 seat 합).
+- 기록: `pp_post.csv`(확인마다 한 줄: 구간 roots, 구간 regret, 판정 여부, 분할 표 수, 잎 수, 괴리 잎, 옮긴 잎, prior 분할 누계), `prior_splits.csv`(실시간 prior 분할마다 한 줄).
+- 스냅숏: 분할이 실시간이라 "분할 직전"이 없다. k-means와 같은 epoch 끝(6.3만, 12.7만, …, 204.7만 roots)에서 찍는다.
+
+**시험**
+- 기존 설정이 바뀌기 전 코드와 같다(스냅숏과 prior 분할 기록 비교): 단일 트리 누적 regret, 단일 트리 라벨, 두 겹 라벨, k-means 8.
+- 학습 중 두 번(13,000과 39,000 roots, epoch 중간) 멈췄다 이어도 한 번에 돌린 것과 스냅숏, `prior_splits.csv`, `pp_post.csv`가 같다(posterior를 2,000 roots마다 강제한 설정).
+- posterior 판정 20번에서 불변식 확인: 한 표의 잎은 한 셀, 옮긴 잎의 기록은 0, 포인터 범위.
+- 실제 설정 10만 roots: prior 분할 3,226번 모두 자식이 부모 표를 가리킨다. 후보 방문은 1000–1003번에 몰린다(한 root에서 같은 잎을 여러 번 방문하므로 root 끝에 처리). posterior 판정은 없었다: 구간 regret이 2만 roots 13.9, 5만 5.7, 10만 2.9 ante(표 9개).
+
+**실험**: `tree_pilot.py`의 `ppfast_rt`, 학습 seed 1–3, 204.7만 roots, `results_data/pp_pilot`의 누적 regret 시범과 같은 폴더(같은 seed의 k-means 256 실행과 평가 딜·LBR seed·입자 2,000쌍 × 64개가 같다).
+

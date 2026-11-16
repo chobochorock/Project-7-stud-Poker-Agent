@@ -1272,7 +1272,7 @@ void Model::pp_save(std::ofstream& out, bool full) const {
             put(out, static_cast<uint64_t>(rwn_.size()));
             for (size_t b = 0; b < rwn_.size(); ++b) { put(out, rwq_[b]); put(out, rwn_[b]); }
         }
-        if (full && D.opt.post_time_switch > 0) put(out, static_cast<uint8_t>(D.post_regret_phase));
+        if (full && D.opt.post_time_switch > 0) put(out, static_cast<uint8_t>(D.post_regret_phase | D.post_switch_due << 1));
     }
 }
 
@@ -1342,7 +1342,7 @@ void Model::pp_load(std::ifstream& in, bool full) {
             get(in, n); rwq_.assign(n, {}); rwn_.assign(n, 0.0);
             for (size_t b = 0; b < n; ++b) { get(in, rwq_[b]); get(in, rwn_[b]); }
         }
-        if (full && D.opt.post_time_switch > 0) { uint8_t ph; get(in, ph); D.post_regret_phase = ph; }
+        if (full && D.opt.post_time_switch > 0) { uint8_t ph; get(in, ph); D.post_regret_phase = ph & 1; D.post_switch_due = ph & 2; }
         pp_recount_cap();
     }
 }

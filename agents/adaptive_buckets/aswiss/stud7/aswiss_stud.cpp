@@ -2149,7 +2149,7 @@ int train(int argc, char** argv) {
                           (ppo.inherit_cand ? ";inherit_candidate=1" : "") +
                           (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") +
                           (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") +
-                          (ppo.post_time_switch > 0 ? ";post_time_switch=" + o["--post-time-switch"] : "") : std::string());
+                          (ppo.post_time_switch > 0 ? ";post_time_switch_after_split=" + o["--post-time-switch"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -2342,9 +2342,18 @@ int train(int argc, char** argv) {
                 const double wr = 2 * model.iterate_regret_half(false);
                 // --gate-noise normal: the condition reads only the regret beyond z_d x the window's noise (per bucket)
                 const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
-                // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here
+                // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here; the first
+                // check after such a judgment reads the statistic and switches when it is <= the switch value
                 const bool regret_phase = ppo.post_time_switch <= 0 || model.ppd()->post_regret_phase;
                 const bool judge = regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
+                if (!regret_phase && model.ppd()->post_switch_due) {
+                    model.ppd()->post_switch_due = false;
+                    if (wn <= ppo.post_time_switch) {
+                        model.ppd()->post_regret_phase = true;
+                        std::cerr << "window statistic " << wn << " <= " << ppo.post_time_switch << " right after the judgment (" << wroots
+                                  << " roots after it, root " << s.t << "): later posterior judgments wait for --post-gate " << ppo.post_gate << "\n";
+                    }
+                }
                 const auto live0 = model.live_buckets();
                 uint64_t diverging = 0, moved = 0;
                 int ps = 0;
@@ -2355,7 +2364,7 @@ int train(int argc, char** argv) {
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
                         << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb;
                 if (ppo.gate_noise) ppq_log << ',' << wn;
-                if (ppo.post_time_switch > 0) ppq_log << ',' << (regret_phase ? "regret" : "time");
+                if (ppo.post_time_switch > 0) ppq_log << ',' << (model.ppd()->post_regret_phase ? "regret" : "time");
                 ppq_log << '\n';
                 ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
@@ -2403,8 +2412,7 @@ int train(int argc, char** argv) {
                     splits = model.pp_judge(std::stoull(o["--seed"]), s.k, s.t, s.t - s.epoch_start, fill_steps, ppj_log, ppp_log);
                     if (post_acc && ppo.post_time_switch > 0 && !D.post_regret_phase) {
                         // --post-time-switch, time phase: a posterior judgment at this epoch end, whatever the window
-                        // regret; when the statistic --post-gate reads is <= the switch value, later judgments wait for
-                        // --post-gate. One pp_post.csv row (phase time).
+                        // regret; the first check after it reads the statistic (see above). One pp_post.csv row (phase time).
                         const uint64_t wroots = model.iterate_window_roots();
                         const double wr = 2 * model.iterate_regret_half(false);
                         const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
@@ -2412,11 +2420,7 @@ int train(int argc, char** argv) {
                         uint64_t diverging = 0, moved = 0;
                         const int ps = model.pp_posterior_acc(s.t, diverging, moved);
                         model.iterate_regret_half(true);
-                        if (wn <= ppo.post_time_switch) {
-                            D.post_regret_phase = true;
-                            std::cerr << "window statistic " << wn << " <= " << ppo.post_time_switch << " at the epoch end " << s.t
-                                      << ": later posterior judgments wait for --post-gate " << ppo.post_gate << "\n";
-                        }
+                        D.post_switch_due = true;  // the next check (right after this judgment) reads the statistic
                         const auto live1 = model.live_buckets();
                         ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ",1,"
                                 << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','

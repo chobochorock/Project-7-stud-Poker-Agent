@@ -51,8 +51,10 @@ struct Opts {
     // legal action set, the player's earlier decisions of that constraint in the street).
     int cells = 0;
     // --post-time-switch X (X > 0; user, 2026-11-16): posterior judgments first at the epoch ends (the runner's schedule,
-    // the same roots as the other arms' epoch snapshots), whatever the window regret; when the window statistic at such a
-    // judgment (the one --post-gate reads) is <= X, every later judgment waits for --post-gate instead
+    // the same roots as the other arms' epoch snapshots), whatever the window regret. Right after such a judgment (at the
+    // first --post-check, i.e. --post-check roots later) the window statistic (the one --post-gate reads) is read: if it
+    // is <= X the abstraction is taken as split enough and every later judgment waits for --post-gate instead
+    // ("분할 직후의 regret이 2이하라면 충분히 분할했다고 보고 내리라는 의미")
     double post_time_switch = 0;
     bool two_layer_acc() const { return acc && !tree; }
 };
@@ -218,6 +220,7 @@ struct Data {
     uint64_t post_judgments = 0, post_splits = 0, post_children = 0;  // two-layer accum counters (checkpointed)
     bool prior_frozen = false;  // two-layer accum, --mem-budget-mb reached: no more prior splits, candidates freed (checkpointed)
     bool post_regret_phase = false;  // --post-time-switch: the switch to the --post-gate waiting has happened (checkpointed)
+    bool post_switch_due = false;    // --post-time-switch: a time judgment happened; the next check reads the statistic
     std::vector<LeafOwn> win;   // --div-metric hidden: per leaf, the regret record since the last posterior judgment (checkpointed)
     uint64_t live_count = 0, used_buckets = 0;  // --prior-leaf-ratio: live leaves and buckets some live leaf points to (recounted)
 

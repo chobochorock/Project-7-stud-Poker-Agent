@@ -94,6 +94,7 @@ def show():
                 p = allr[-1]; j = [r for r in allr if r["judged"] == "1"]
                 lastj = f", last at {int(j[-1]['roots']):,} roots" if j else ""
                 frozen = ", prior stopped at the memory budget" if p.get("prior_frozen") == "1" else ""
+                if p.get("phase"): frozen += f", phase {p['phase']} (time: judgments at the epoch ends)"
                 noise = f" (beyond noise {float(p['window_regret_beyond_noise']):.3f}, the condition)" if p.get("window_regret_beyond_noise") else ""
                 print(f"    posterior: window regret {float(p['window_regret']):.3f}{noise} ante (gate {p['gate']}) over "
                       f"{int(p['window_roots']):,} roots; {len(j)} judgments{lastj}; {int(p['buckets_after']):,} tables, "

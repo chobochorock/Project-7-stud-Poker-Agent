@@ -50,6 +50,10 @@ struct Opts {
     // visited in this street goes to a cell B' of the same constraint whose history holds B: (street, actor role,
     // legal action set, the player's earlier decisions of that constraint in the street).
     int cells = 0;
+    // --post-time-switch X (X > 0; user, 2026-11-16): posterior judgments first at the epoch ends (the runner's schedule,
+    // the same roots as the other arms' epoch snapshots), whatever the window regret; when the window statistic at such a
+    // judgment (the one --post-gate reads) is <= X, every later judgment waits for --post-gate instead
+    double post_time_switch = 0;
     bool two_layer_acc() const { return acc && !tree; }
 };
 // a cell key: low byte the legal action mask, high byte street (bits 0-2), actor role (bit 3: second actor of the
@@ -213,6 +217,7 @@ struct Data {
     std::vector<char> ready_flag;
     uint64_t post_judgments = 0, post_splits = 0, post_children = 0;  // two-layer accum counters (checkpointed)
     bool prior_frozen = false;  // two-layer accum, --mem-budget-mb reached: no more prior splits, candidates freed (checkpointed)
+    bool post_regret_phase = false;  // --post-time-switch: the switch to the --post-gate waiting has happened (checkpointed)
     std::vector<LeafOwn> win;   // --div-metric hidden: per leaf, the regret record since the last posterior judgment (checkpointed)
     uint64_t live_count = 0, used_buckets = 0;  // --prior-leaf-ratio: live leaves and buckets some live leaf points to (recounted)
 

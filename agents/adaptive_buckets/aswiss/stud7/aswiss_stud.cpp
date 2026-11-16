@@ -1957,7 +1957,7 @@ int train(int argc, char** argv) {
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
                                 {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
                                 {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
-                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}});
+                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2054,6 +2054,8 @@ int train(int argc, char** argv) {
         ppo.prior_leaf_ratio = std::stod(o["--prior-leaf-ratio"]);
         // --pp-cells street | decision | return: the start cells (pp_tree.hpp, Opts::cells)
         ppo.cells = o["--pp-cells"] == "decision" ? 1 : o["--pp-cells"] == "return" ? 2 : 0;
+        ppo.post_time_switch = std::stod(o["--post-time-switch"]);
+        if (ppo.post_time_switch < 0) throw std::runtime_error("--post-time-switch must be >= 0");
         if (ppo.prior_leaf_ratio < 0) throw std::runtime_error("--prior-leaf-ratio must be >= 0");
         // two layers (--pp-structure pp, section 19.10): prior splits keep the pointer; posterior judgments by the
         // leaves' own records when the window regret (sum_B max(0, max_a R_B(a)) per root, both seats, ante) is at
@@ -2071,6 +2073,7 @@ int train(int argc, char** argv) {
             throw std::runtime_error("--div-metric hidden, --gate-noise, --inherit-candidate and --prior-leaf-ratio need --tree-split accum with --pp-structure pp");
         if (ppo.acc_hidden && !ppo.acc) throw std::runtime_error("--acc-metric hidden needs --tree-split accum");
         if (ppo.inherit_cand && !ppo.div_hidden) throw std::runtime_error("--inherit-candidate is for --div-metric hidden");
+        if (ppo.post_time_switch > 0 && !ppo.two_layer_acc()) throw std::runtime_error("--post-time-switch needs --tree-split accum with --pp-structure pp");
         if (ppo.two_layer_acc() && ppo.fill) throw std::runtime_error("--tree-split accum has no pending leaves: it does not take --pp-assign fill");
         if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
@@ -2145,7 +2148,8 @@ int train(int argc, char** argv) {
                           (ppo.gate_noise ? ";gate_noise=normal;hid_delta=" + o["--hid-delta"] : "") +
                           (ppo.inherit_cand ? ";inherit_candidate=1" : "") +
                           (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") +
-                          (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") : std::string());
+                          (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") +
+                          (ppo.post_time_switch > 0 ? ";post_time_switch=" + o["--post-time-switch"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -2214,7 +2218,8 @@ int train(int argc, char** argv) {
                                        "right_leaf,left_bucket,right_bucket\n";
             if (post_acc) std::ofstream(ppq_path) << "epoch,roots,window_roots,window_regret,gate,judged,buckets_before,buckets_split,"
                                                        "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb"
-                                                    << (ppo.gate_noise ? ",window_regret_beyond_noise" : "") << '\n';
+                                                    << (ppo.gate_noise ? ",window_regret_beyond_noise" : "")
+                                                    << (ppo.post_time_switch > 0 ? ",phase" : "") << '\n';
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2337,7 +2342,9 @@ int train(int argc, char** argv) {
                 const double wr = 2 * model.iterate_regret_half(false);
                 // --gate-noise normal: the condition reads only the regret beyond z_d x the window's noise (per bucket)
                 const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
-                const bool judge = wroots >= 1000 && wn <= ppo.post_gate;
+                // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here
+                const bool regret_phase = ppo.post_time_switch <= 0 || model.ppd()->post_regret_phase;
+                const bool judge = regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
                 const auto live0 = model.live_buckets();
                 uint64_t diverging = 0, moved = 0;
                 int ps = 0;
@@ -2348,6 +2355,7 @@ int train(int argc, char** argv) {
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
                         << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb;
                 if (ppo.gate_noise) ppq_log << ',' << wn;
+                if (ppo.post_time_switch > 0) ppq_log << ',' << (regret_phase ? "regret" : "time");
                 ppq_log << '\n';
                 ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
@@ -2393,6 +2401,31 @@ int train(int argc, char** argv) {
                 const uint64_t fill_steps = model.pp_take_fill_steps();
                 if (judging(s.t) && !D.frozen) {
                     splits = model.pp_judge(std::stoull(o["--seed"]), s.k, s.t, s.t - s.epoch_start, fill_steps, ppj_log, ppp_log);
+                    if (post_acc && ppo.post_time_switch > 0 && !D.post_regret_phase) {
+                        // --post-time-switch, time phase: a posterior judgment at this epoch end, whatever the window
+                        // regret; when the statistic --post-gate reads is <= the switch value, later judgments wait for
+                        // --post-gate. One pp_post.csv row (phase time).
+                        const uint64_t wroots = model.iterate_window_roots();
+                        const double wr = 2 * model.iterate_regret_half(false);
+                        const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
+                        const auto live0 = model.live_buckets();
+                        uint64_t diverging = 0, moved = 0;
+                        const int ps = model.pp_posterior_acc(s.t, diverging, moved);
+                        model.iterate_regret_half(true);
+                        if (wn <= ppo.post_time_switch) {
+                            D.post_regret_phase = true;
+                            std::cerr << "window statistic " << wn << " <= " << ppo.post_time_switch << " at the epoch end " << s.t
+                                      << ": later posterior judgments wait for --post-gate " << ppo.post_gate << "\n";
+                        }
+                        const auto live1 = model.live_buckets();
+                        ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ",1,"
+                                << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
+                                << D.live_leaves() << ',' << diverging << ',' << moved << ',' << D.prior_splits << ','
+                                << elapsed() << ',' << D.prior_frozen << ',' << model.pp_prior_mb();
+                        if (ppo.gate_noise) ppq_log << ',' << wn;
+                        ppq_log << ",time\n";
+                        ppq_log.flush();
+                    }
                 } else {
                     ppj_log << s.k << ',' << s.t << ',' << D.level << std::string(30, ',') << memory_mb(1) << ',' << peak_rss_mb() << ','
                             << fill_steps << ',' << D.frozen << '\n';

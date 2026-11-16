@@ -37,6 +37,8 @@ ARMS = [
     ("ppfast_rt_hid", "ppfast_rt by the hidden-regret test (normal, d = 0.1), wait beyond noise, stored window directions"),
     ("ppfast_rt_hid_inh", "ppfast_rt_hid, new tables start from the leaves' window sums"),
     ("ppfast_rt_hid_ah", "ppfast_rt_hid with the Azuma-Hoeffding noise term"),
+    ("ppfast_rt_hid_ts", "ppfast_rt_hid from the time-step cells (40)"),
+    ("ppfast_rt_hid_ret", "ppfast_rt_hid from the return-rule cells (12)"),
     ("pure_a", "pure a, iterates (reference)"),
     ("ppmix_avg_root", "pp mix, avg, root (reference)"),
     ("kmeans_a", "k-means, rule a counts (baseline)"),

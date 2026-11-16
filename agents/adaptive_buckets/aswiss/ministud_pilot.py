@@ -46,6 +46,9 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
                   gate, leaves grouped by their stored window direction, each group tested against the rest by D
   ppfast_rt_hid_inh  the same, the new tables start from their leaves' window sums
   ppfast_rt_hid_ah   the same with the Azuma-Hoeffding noise term (eps = 0)
+  ppfast_rt_hid_ts   ppfast_rt_hid from the time-step cells (player, legal action set, own decision index; 40)
+  ppfast_rt_hid_ret  ppfast_rt_hid from the user's return-rule cells (a decision coming back to a cell B goes to B' of
+                     the same constraint whose history holds B; 12)
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -95,6 +98,8 @@ ARMS = {
     "ppfast_rt_hid": HID,
     "ppfast_rt_hid_inh": HID + ["--inherit-candidate", "1"],
     "ppfast_rt_hid_ah": HID + ["--hid-bound", "azuma"],
+    "ppfast_rt_hid_ts": HID + ["--start-cells", "timestep"],
+    "ppfast_rt_hid_ret": HID + ["--start-cells", "return"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }

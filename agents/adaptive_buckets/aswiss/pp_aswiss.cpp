@@ -1506,7 +1506,7 @@ int main(int argc, char** argv) try {
                             {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"},
                             {"--hid-bound", "normal"}, {"--hid-delta", "0.1"}, {"--hid-eps", "0"}, {"--hid-range", "0"},
-                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}};
+                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1627,6 +1627,50 @@ int main(int argc, char** argv) try {
         }
     }
     for (int c : constraint_of) n_constraints = max(n_constraints, c + 1);
+    // --start-cells (--mode tree / ppacc; user, 2026-11-16): the coarse cells the prior and posterior start from.
+    // constraint (default): (player, legal action set), the d = 1 constraint; a player can come back to the same cell on
+    // one path. timestep: (player, legal action set, own decision index), bucket_timestep.bin. return (the user's rule):
+    // a decision that comes back to a cell B its player already visited on this path goes to a cell B' of the same
+    // constraint whose history holds B, i.e. (constraint, the player's earlier decisions of this constraint on the path).
+    {
+        const string sc = opt["--start-cells"];
+        if (sc != "constraint" && sc != "timestep" && sc != "return") throw runtime_error("--start-cells must be constraint, timestep or return");
+        if (sc != "constraint" && !tree_mode && !ppacc_mode) throw runtime_error("--start-cells is for --mode tree and ppacc");
+        if (sc == "timestep") {
+            constraint_of = load<int32_t>(dir + "/bucket_timestep.bin");
+            if ((int)constraint_of.size() != nI) throw runtime_error("bucket_timestep.bin does not match the tree");
+        } else if (sc == "return") {
+            vector<int> ret(nI, -1), cnt(2 * n_constraints, 0);
+            map<pair<int, int>, int> ids;
+            vector<pair<int, int>> stack_;  // (node, child index to visit next); counts are kept along the path
+            stack_.push_back({0, 0});
+            auto enter = [&](int h) {
+                if (players[h] == TERMINAL || players[h] == CHANCE) return;
+                const int I = info[h], c = constraint_of[I], r = cnt[players[h] * n_constraints + c];
+                const int id = ids.emplace(make_pair(c, r), (int)ids.size()).first->second;
+                if (ret[I] >= 0 && ret[I] != id) throw runtime_error("--start-cells return: an information set has two histories of its constraint");
+                ret[I] = id;
+            };
+            enter(0);
+            while (!stack_.empty()) {
+                auto& [h, k] = stack_.back();
+                const bool dec = players[h] >= 0;
+                if (players[h] == TERMINAL || k >= degree[h]) {
+                    if (dec && players[h] != TERMINAL) --cnt[players[h] * n_constraints + constraint_of[info[h]]];
+                    stack_.pop_back(); continue;
+                }
+                if (k == 0 && dec) ++cnt[players[h] * n_constraints + constraint_of[info[h]]];  // the children see this decision
+                const int child = edges[start[h] + k]; ++k;
+                enter(child);
+                stack_.push_back({child, 0});
+            }
+            for (int I = 0; I < nI; ++I) if (ret[I] < 0) throw runtime_error("--start-cells return: an information set was not reached");
+            constraint_of = ret;
+        }
+        n_constraints = 0;
+        for (int c : constraint_of) n_constraints = max(n_constraints, c + 1);
+        if (sc != "constraint") cerr << "--start-cells " << sc << ": " << n_constraints << " start cells\n";
+    }
     parent_node.assign(N, -1); parent_slot.assign(N, -1); nodes_of.assign(nI, {});
     for (int h = 0; h < N; ++h) {
         if (players[h] == TERMINAL) continue;
@@ -1673,7 +1717,7 @@ int main(int argc, char** argv) try {
             !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-visits" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0") && !(k == "--hid-bound" && v == "normal") && !(k == "--hid-delta" && v == "0.1") &&
             !(k == "--hid-eps" && v == "0") && !(k == "--hid-range" && v == "0") && !(k == "--gate-noise" && v == "none") &&
-            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0"))  // defaults of later options: old runs resume
+            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",

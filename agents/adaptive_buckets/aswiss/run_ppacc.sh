@@ -40,6 +40,12 @@
 #   ppfast_rt_hid      as above, tables restart
 #   ppfast_rt_hid_inh  the new tables start from their leaves' window sums (--inherit-candidate 1)
 #   ppfast_rt_hid_ah   the noise term by Azuma-Hoeffding (eps = 0, L = 64): the guaranteed bound
+# Start cells (user, 2026-11-16: the d = 1 constraint (player, legal action set) lets a player come back to the same
+# cell on one path, i.e. absent-mindedness): --start-cells timestep (player, legal action set, own decision index; 40
+# cells) and return (the user's rule: a decision that comes back to a cell B goes to a cell B' of the same constraint
+# whose history holds B; 12 cells). ppfast_rt_hid starts from the constraint (6 cells).
+#   ppfast_rt_hid_ts   ppfast_rt_hid from the time-step cells
+#   ppfast_rt_hid_ret  ppfast_rt_hid from the return-rule cells
 # (--prior-leaf-ratio 100 is not run here: on mini-stud live prior leaves stay at ~3x the tables in use, so a cap of
 # 100x never binds and the arm would equal ppfast_rt_hid.)
 set -euo pipefail
@@ -82,6 +88,8 @@ for s in $SEEDS; do
   echo "ppfast_rt_hid $s $HID" >> "$jobs"
   echo "ppfast_rt_hid_inh $s $HID --inherit-candidate 1" >> "$jobs"
   echo "ppfast_rt_hid_ah $s $HID --hid-bound azuma" >> "$jobs"
+  echo "ppfast_rt_hid_ts $s $HID --start-cells timestep" >> "$jobs"
+  echo "ppfast_rt_hid_ret $s $HID --start-cells return" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
 arm() { local n=$1; local l=""; for s in $SEEDS; do l="$l,$OUT/runs/${n}_s$s"; done; echo "${l#,}"; }
@@ -103,6 +111,9 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_rt" --arm "ppfast_gate=$(arm ppfas
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_hid" --arm "ppfast_rt=$(arm ppfast_rt)" --arm "ppfast_rt_hid=$(arm ppfast_rt_hid)" \
   --arm "ppfast_rt_hid_inh=$(arm ppfast_rt_hid_inh)" --arm "ppfast_rt_hid_ah=$(arm ppfast_rt_hid_ah)" --arm "tree_mse=$(arm tree_mse)" \
+  --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
+python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_cells" --arm "ppfast_rt_hid=$(arm ppfast_rt_hid)" --arm "ppfast_rt_hid_ts=$(arm ppfast_rt_hid_ts)" \
+  --arm "ppfast_rt_hid_ret=$(arm ppfast_rt_hid_ret)" --arm "ppfast_rt=$(arm ppfast_rt)" --arm "tree_mse=$(arm tree_mse)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/acc_table.py" "$OUT/runs" > "$OUT/acc_final_table.md"
 echo "done: ppacc runs in $OUT/runs"

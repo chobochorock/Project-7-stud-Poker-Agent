@@ -581,6 +581,7 @@ public:
     void pp_freeze_prior();  // two-layer accum: --mem-budget-mb reached
     void pp_recount_cap();   // --prior-leaf-ratio: live leaves and buckets in use
     bool pp_cap_ok() const;  // --prior-leaf-ratio: a prior split may happen
+    uint16_t pp_cell_key(const State& s, int v) const;  // --pp-cells: the start cell of seat v's decision
     double pp_prior_mb() const;  // two-layer accum: the partition's structures in MB (counted, deterministic)
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
@@ -1288,7 +1289,7 @@ public:
     std::array<size_t, 3> live_buckets() const {
         std::array<std::set<uint32_t>, 3> live;
         if (partition_ == Partition::PP) {  // the buckets the live leaves point to (provisional pointers of pending leaves)
-            for (const auto& L : pp_->leaves) if (L.node >= 0) live[(L.ctx >> 8) - 5].insert(pp_->current(static_cast<int32_t>(&L - pp_->leaves.data())));
+            for (const auto& L : pp_->leaves) if (L.node >= 0) live[pp::cell_street(L.ctx) - 5].insert(pp_->current(static_cast<int32_t>(&L - pp_->leaves.data())));
             return {live[0].size(), live[1].size(), live[2].size()};
         }
         if (partition_ == Partition::History) {  // referenced by a rest or an explicit entry (stale entries included)
@@ -1956,7 +1957,7 @@ int train(int argc, char** argv) {
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
                                 {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
                                 {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
-                                {"--prior-leaf-ratio", "0"}});
+                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2017,7 +2018,7 @@ int train(int argc, char** argv) {
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
         choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"}); choice("--acc-metric", {"mse", "dir", "hidden"});
         choice("--div-metric", {"dir", "hidden"}); choice("--hid-bound", {"normal", "azuma"}); choice("--gate-noise", {"none", "normal"});
-        choice("--inherit-candidate", {"0", "1"});
+        choice("--inherit-candidate", {"0", "1"}); choice("--pp-cells", {"street", "decision", "return"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -2051,6 +2052,8 @@ int train(int argc, char** argv) {
         ppo.hid_zq = pp::inv_normal(1 - ppo.hid_delta);
         ppo.gate_noise = o["--gate-noise"] == "normal"; ppo.inherit_cand = o["--inherit-candidate"] == "1";
         ppo.prior_leaf_ratio = std::stod(o["--prior-leaf-ratio"]);
+        // --pp-cells street | decision | return: the start cells (pp_tree.hpp, Opts::cells)
+        ppo.cells = o["--pp-cells"] == "decision" ? 1 : o["--pp-cells"] == "return" ? 2 : 0;
         if (ppo.prior_leaf_ratio < 0) throw std::runtime_error("--prior-leaf-ratio must be >= 0");
         // two layers (--pp-structure pp, section 19.10): prior splits keep the pointer; posterior judgments by the
         // leaves' own records when the window regret (sum_B max(0, max_a R_B(a)) per root, both seats, ante) is at
@@ -2082,6 +2085,7 @@ int train(int argc, char** argv) {
             throw std::runtime_error("--pp-particles >= 1, --pp-samples >= 2, --pp-min-samples >= 2, --pp-rows >= --pp-m >= 1, --min-leaf >= 1");
         model.pp_setup(ppo, std::stoull(o["--seed"]));
     } else if (o["--online-lbr-schedule"] != "fixed") throw std::runtime_error("--online-lbr-schedule split needs --partition pp");
+    if (!pp_mode && o["--pp-cells"] != "street") throw std::runtime_error("--pp-cells is a --partition pp option");
     if (!pp_mode && (o["--inherit-regret"] != "0" || o["--inherit-avg"] != "0"))
         throw std::runtime_error("--inherit-regret / --inherit-avg are --partition pp options (other partitions: --inherit 0|1)");
     // --log-regret 1: regret.csv, the bucket regret total sum_B max(0, max_a R_B(a)) per root of the current epoch's window
@@ -2140,7 +2144,8 @@ int train(int argc, char** argv) {
                                                                   ";hid_eps=" + o["--hid-eps"] + ";hid_range=" + o["--hid-range"] : "") +
                           (ppo.gate_noise ? ";gate_noise=normal;hid_delta=" + o["--hid-delta"] : "") +
                           (ppo.inherit_cand ? ";inherit_candidate=1" : "") +
-                          (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") : std::string());
+                          (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") +
+                          (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");

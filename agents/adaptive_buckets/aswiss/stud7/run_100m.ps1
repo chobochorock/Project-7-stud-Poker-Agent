@@ -105,6 +105,11 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     ppfast_hid_inh = @("pp_ppfast_hid_inh", "pp", 0, "ppfast_hid, posterior tables inherit the parent's regrets and average sums (no restart)", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1")
     # ppfast_hid_inh_r100 (user, 2026-11-16): ppfast_hid_inh with --prior-leaf-ratio 100
     ppfast_hid_inh_r100 = @("pp_ppfast_hid_inh_r100", "pp", 0, "ppfast_hid_inh with live prior leaves at most 100 x the tables in use", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100")
+    # start cells without absent-mindedness (PP_STUD7_DESIGN_KO.md 22.10; user, 2026-11-16): --pp-cells decision =
+    # (street, first/second actor of the street, the actor's decision index in the street, legal set); return = the user's
+    # rule (a decision coming back to a cell B of its street goes to B' of the same constraint whose history holds B)
+    ppfast_hid_inh_r100_ts = @("pp_ppfast_hid_inh_r100_ts", "pp", 0, "ppfast_hid_inh_r100 from (street, first/second actor, decision index, legal set) cells", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --pp-cells decision")
+    ppfast_hid_inh_r100_ret = @("pp_ppfast_hid_inh_r100_ret", "pp", 0, "ppfast_hid_inh_r100 from the return-rule cells", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --pp-cells return")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

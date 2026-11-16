@@ -36,8 +36,34 @@ void Model::pp_setup(const pp::Opts& o, uint64_t seed) {
     pp_seed_ = seed;
 }
 
+// the start cell of the decision of seat v at s (--pp-cells). The legal action sets of v's earlier decisions in this
+// street are rebuilt from the betting rules (facing a bet; may raise: not checked and under the street's cap); a stack
+// that is too short changes a later mask, never makes two of v's decisions in one street share a cell (index rises).
+uint16_t Model::pp_cell_key(const State& s, int v) const {
+    const uint8_t mask = valid_mask(s, v);
+    const int mode = pp_->opt.cells;
+    if (mode == 0) return static_cast<uint16_t>(s.street << 8 | mask);
+    const int cap = street_cap(s.street);
+    std::array<int, 2> bets{}; std::array<bool, 2> checked{};
+    bool facing = false;
+    int first = -1, decisions = 0;
+    std::vector<int> classes;  // the classes of v's earlier decisions in this street
+    auto cls = [&](int p) { return facing ? (!checked[p] && bets[p] < cap ? 1 : 2) : 0; };
+    for (const Event& e : s.history) {
+        if (e.street != s.street) continue;
+        if (first < 0) first = e.actor;
+        if (e.actor == v) { ++decisions; classes.push_back(cls(v)); }
+        if (aggressive(e.action)) { ++bets[e.actor]; facing = true; }
+        else if (e.action == CHECK) checked[e.actor] = true;
+    }
+    const int role = first < 0 || first == v ? 0 : 1;
+    const int now = cls(v);
+    const int index = mode == 1 ? decisions : static_cast<int>(std::count(classes.begin(), classes.end(), now));
+    return static_cast<uint16_t>((s.street | role << 3 | std::min(index, 7) << 4) << 8 | mask);
+}
+
 uint32_t Model::pp_locate(const State& s, int viewer, int32_t* leaf_out) const {
-    const uint16_t ctx = static_cast<uint16_t>(s.street << 8 | valid_mask(s, viewer));
+    const uint16_t ctx = pp_cell_key(s, viewer);
     const auto it = pp_->cell_of.find(ctx);
     if (it == pp_->cell_of.end()) { if (leaf_out) *leaf_out = -1; return kNone; }
     const pp::Cell& c = pp_->cells[it->second];
@@ -243,7 +269,7 @@ uint32_t Model::pp_route_root(const pp::Cell& cell, const std::vector<const pp::
 // The training lookup: creates a start cell on its first visit. --pp-assign fill: a traverser visit to a pending leaf is
 // routed by its own direction and kept as one of the leaf's m samples; the m-th fixes the pointer.
 uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser, int32_t* leaf_out, pp::Stream* stream_out) {
-    const uint16_t ctx = static_cast<uint16_t>(s.street << 8 | valid_mask(s, v));
+    const uint16_t ctx = pp_cell_key(s, v);
     auto [it, inserted] = pp_->cell_of.try_emplace(ctx, static_cast<int32_t>(pp_->cells.size()));
     if (inserted) {
         pp::Cell c;
@@ -374,7 +400,7 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
             pp_->leaves[nl[side]].ptr = part[side].empty() ? pp_->leaves[it.leaf].ptr : pointer_of(nl[side], part[side], true);
             q.push(evaluate(nl[side], part[side]));
         }
-        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
+        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ','
                         << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << it.signal << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
@@ -460,7 +486,7 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
         pp_->leaves[it.leaf].node = -1;
         ++made; ++pp_->prior_splits;
         if (it.round == 0 && top) ++*top;
-        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ','
+        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ','
                         << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
@@ -935,7 +961,7 @@ void Model::pp_acc_split(int32_t l, int best, const pp::AccTest& bt, uint64_t ep
     if (!O.tree) D.own[l] = pp::LeafOwn{};
     if (O.div_hidden && D.win.size() > static_cast<size_t>(l)) D.win[l] = pp::LeafOwn{};  // the children's windows start at 0
     ++D.prior_splits; ++D.live_count;
-    plog << epoch << ',' << roots << ',' << l << ',' << (ctx >> 8) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
+    plog << epoch << ',' << roots << ',' << l << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
          << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << (O.acc_dir ? bt.dist : bt.gain) << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
          << nl[0] << ',' << nl[1] << ',' << D.leaves[nl[0]].ptr << ',' << D.leaves[nl[1]].ptr << '\n';
 }

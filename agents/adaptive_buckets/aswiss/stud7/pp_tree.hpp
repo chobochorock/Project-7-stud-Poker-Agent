@@ -43,8 +43,18 @@ struct Opts {
     bool gate_noise = false;     // --gate-noise normal: the posterior waiting statistic counts only regret beyond z_d x noise
     bool inherit_cand = false;   // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
     double prior_leaf_ratio = 0; // --prior-leaf-ratio R: a prior split only while live leaves + 1 <= R x buckets in use
+    // --pp-cells (user, 2026-11-16): the start cells. 0 street: (street, legal action set), the d = 1 constraint (a player
+    // can come back to the same cell within a street: raise wars on 6th and 7th street). 1 decision: (street, first or
+    // second actor of the street, the actor's decision index in the street, legal action set). 2 return (the user's
+    // rule): a decision that comes back to a cell B (street, first or second actor, legal action set) its player already
+    // visited in this street goes to a cell B' of the same constraint whose history holds B: (street, actor role,
+    // legal action set, the player's earlier decisions of that constraint in the street).
+    int cells = 0;
     bool two_layer_acc() const { return acc && !tree; }
 };
+// a cell key: low byte the legal action mask, high byte street (bits 0-2), actor role (bit 3: second actor of the
+// street), index (bits 4-6: --pp-cells decision: decision index; return: earlier decisions of the same constraint)
+inline int cell_street(uint16_t ctx) { return (ctx >> 8) & 7; }
 
 struct TNode { Desc d; float thr = 0; int32_t left = -1, right = -1, leaf = -1; };
 struct Split { int32_t level = 0; std::array<uint32_t, A + 1> kid{}; };  // kid[a]: child of label a, kid[A]: the none child

@@ -32,6 +32,9 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | `ppfast_rt_hid` | ppfast_rt by the hidden-regret test (normal, d = 0.1), wait beyond noise, stored window directions | 3 | 96M | 0.2745 [0.2266, 0.3153] | 0.80 | 0.663 [0.658, 0.802] | 0.83 | 5,194–6,024 | 0.4722 | 0.178 [0.142, 0.310] |
 | `ppfast_rt_hid_inh` | ppfast_rt_hid, new tables start from the leaves' window sums | 3 | 106M | 0.6972 [0.6556, 1.2513] | 2.04 | 0.798 [0.654, 1.330] | 1.00 | 83–345 | 0.8160 | 0.579 [0.253, 3.183] |
 | `ppfast_rt_hid_ah` | ppfast_rt_hid with the Azuma-Hoeffding noise term | 3 | 156M | 0.8659 [0.6638, 0.8716] | 2.53 | 0.863 [0.663, 0.909] | 1.08 | 6–6 | 0.7958 | 0.001 [0.000, 0.035] |
+| `ppfast_rt_hid_ts` | ppfast_rt_hid from the time-step cells (40) | 0 | not run | | | | | | | |
+| `ppfast_rt_hid_ret` | ppfast_rt_hid from the return-rule cells (12) | 0 | not run | | | | | | | |
+| `pphist_freedman_rt` | bucket-history start (20), posterior per action by Freedman in real time, full inheritance | 3 | 93M | 0.5451 [0.4916, 0.5486] | 1.59 | 1.027 [0.931, 1.294] | 1.28 | 4,847–5,864 | 0.6205 | 5.466 [3.796, 7.836] |
 | `pure_a` | pure a, iterates (reference) | 3 | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 | – |
 | `ppmix_avg_root` | pp mix, avg, root (reference) | 3 | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 | – |
 | `kmeans_a` | k-means, rule a counts (baseline) | 3 | 224M | 0.3424 [0.3202, 0.3524] | 1.00 | 0.802 [0.745, 0.850] | 1.00 | 9,394–10,808 | 0.3366 | – |

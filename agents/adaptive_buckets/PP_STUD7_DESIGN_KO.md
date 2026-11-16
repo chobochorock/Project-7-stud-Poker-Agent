@@ -1623,3 +1623,4 @@ mini-stud (CPU 900초, seed 1–3, `run_ppacc.sh`): `ppfast_rt_hid`(정규, δ =
 - 원안·옵션 안에서 가능한 것(사용자가 정함): (1) posterior 분할에서 표를 상속(`--inherit-regret 1 --inherit-avg 1`, 기존 옵션; 7-stud 17절에서는 상속이 재시작보다 나았다), (2) 원안의 "분할 시점: Σ bucket.regret < ε 또는 T_k = 2^k × 1000마다"의 뒤쪽(지금 비교군에는 없음), (3) 대기 조건 값을 키움(대기 ∝ 1/값²).
 - 사용자 결정 (2026-11-16): (1) 상속 비교군을 `runs_fair`에 추가 → `ppfast_hid_inh`(`ppfast_hid` + `--inherit-regret 1 --inherit-avg 1`). (2) 원안의 "Σ bucket.regret < ε 또는 T_k = 2^k × 1000마다"는 둘 중 하나의 조건만 쓴다는 뜻이므로 지금 비교군(regret 조건)이 의도에 맞다.
 - 시험(대기 조건 3으로 낮춰 판정을 일찍 일으킴, 30만 roots): 상속에서는 첫 판정(10만) 뒤 구간 regret이 2만 roots에 3.93, 18만 roots에 3.25이고 29만에서 둘째 판정(14 → 28표). 같은 시험의 재시작은 첫 판정 뒤 10만 roots에 8.88로 30만까지 둘째 판정이 없었다. 대기 조건 0.5의 결과는 노트북 실행에서 본다.
+- 사용자 (2026-11-16, `ppfast_hid_inh` 표 34개에 prior 잎 18,133개를 보고): 100배 제한도 함께 → `ppfast_hid_inh_r100`(`ppfast_hid_inh` + `--prior-leaf-ratio 100`).

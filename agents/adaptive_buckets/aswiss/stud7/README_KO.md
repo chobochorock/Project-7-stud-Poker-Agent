@@ -1768,3 +1768,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
   ```
   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh -ExeName aswiss_hid_i.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
   ```
+- `ppfast_hid_inh_r100`(실행 이름 `pp_ppfast_hid_inh_r100_s1`, 2026-11-16 추가): `ppfast_hid_inh` + `--prior-leaf-ratio 100`(살아 있는 prior 잎 + 1 ≤ 100 × 쓰이는 표). exe는 `aswiss_hid_r.exe`.
+  ```
+  powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh_r100 -ExeName aswiss_hid_r.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+  ```

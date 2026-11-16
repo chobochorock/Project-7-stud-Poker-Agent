@@ -100,6 +100,10 @@ ARMS = {
     "ppfast_rt_hid_ah": HID + ["--hid-bound", "azuma"],
     "ppfast_rt_hid_ts": HID + ["--start-cells", "timestep"],
     "ppfast_rt_hid_ret": HID + ["--start-cells", "return"],
+    "pphist_freedman_rt": ["--mode", "ppacc", "--acc-metric", "hidden", "--div-metric", "hidden", "--post-bound", "freedman",
+                           "--post-realtime", "1", "--inherit-regret", "1", "--inherit-avg", "1", "--schedule", "regret",
+                           "--regret-gate", str(a.gate), "--split-plan", "separate", "--prior-eligible", "all",
+                           "--prior-visits", "1000", "--start-cells", "history", "--measure", "1"],
     "pure_a": ["--mode", "pure", "--outlier", "label", "--esd-table", ESD, "--measure", "1"],
     "mccfr": ["--mode", "pure", "--p0", os.path.join(TREE, "bucket_identity.bin"), "--split", "0"],
 }

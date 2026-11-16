@@ -403,6 +403,10 @@ vector<int> prior_ready; vector<char> prior_ready_flag;  // --prior-visits: leav
 bool acc_hidden = false;      // --acc-metric hidden: prior candidates by the hidden-regret test (best candidate: largest D / t)
 bool div_hidden = false;      // --div-metric hidden: posterior judgments split each bucket's leaves by their window directions
 bool hid_azuma = false;       // --hid-bound azuma: noise = L (sqrt(n1 ln(1/d) / 2) + sqrt(n2 ln(1/d) / 2)); normal: z (s1 sqrt(n1) + s2 sqrt(n2))
+bool hid_freedman = false;    // --hid-bound freedman: per side the solution x of x^2 = 2 ln(1/d) (V + L x / 3) (Freedman's
+                              // inequality, increments bounded by L): x = c + sqrt(c^2 + 2 V ln(1/d)), c = L ln(1/d) / 3, V the side's
+                              // largest sum of squared deviations over the actions (the empirical variance in place of the predictable one)
+int post_bound = -1;          // --post-bound normal|azuma|freedman: the posterior test's noise term (-1: as --hid-bound)
 double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // --hid-delta d, --hid-eps eps, --hid-range L; hid_zq = Phi^-1(1 - d)
 bool inherit_cand = false;    // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
 bool gate_noise = false;      // --gate-noise normal: the waiting statistic subtracts z x the window's noise per bucket and action
@@ -444,7 +448,8 @@ struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain
 // --acc-min-visits. gain = D / t (the best candidate's), z = (D - eps t - noise) / t, d2 = D. The noise of a side is one
 // action's (one-sided): normal, z_d x the side's largest per-visit standard deviation over the actions x sqrt(visits);
 // Azuma-Hoeffding, L sqrt(visits ln(1/d) / 2). A split with D = 0 never passes.
-AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1, const double* q1, double n1, int na) {
+AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1, const double* q1, double n1, int na, int bound = -1) {
+    const bool azuma = bound < 0 ? hid_azuma : bound == 1, freedman = bound < 0 ? hid_freedman : bound == 2;
     AccTest t;
     if (n0 < acc_min || n1 < acc_min) return t;
     t.testable = true;
@@ -455,8 +460,11 @@ AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1
         sd0 = max(sd0, sqrt(max(0.0, q0[a] / n0 - u0 * u0))); sd1 = max(sd1, sqrt(max(0.0, q1[a] / n1 - u1 * u1)));
     }
     const double D = m0 + m1 - mb, tt = n0 + n1;
-    const double noise = hid_azuma ? hid_range * (sqrt(n0 * log(1 / hid_delta) / 2) + sqrt(n1 * log(1 / hid_delta) / 2))
-                                   : hid_zq * (sd0 * sqrt(n0) + sd1 * sqrt(n1));
+    const double lg = log(1 / hid_delta);
+    const double c = hid_range * lg / 3;
+    const double noise = azuma ? hid_range * (sqrt(n0 * lg / 2) + sqrt(n1 * lg / 2))
+                       : freedman ? c + sqrt(c * c + 2 * n0 * sd0 * sd0 * lg) + c + sqrt(c * c + 2 * n1 * sd1 * sd1 * lg)
+                                  : hid_zq * (sd0 * sqrt(n0) + sd1 * sqrt(n1));
     t.d2 = D; t.gain = D / tt; t.z = (D - hid_eps * tt - noise) / tt;
     t.pass = D > 0 && D >= hid_eps * tt + noise;
     return t;
@@ -716,7 +724,7 @@ double es(int h, int p) {
                 LeafOwn& o = lown[l];
                 for (int a = 0; a < d; ++a) { o.s[a] += r[a]; o.q[a] += r[a] * r[a]; }
                 o.n += 1;
-                if (div_hidden) {
+                if (div_hidden && !post_realtime) {
                     if ((int)lwin.size() <= l) lwin.resize(leaves.size());
                     LeafOwn& w = lwin[l];
                     for (int a = 0; a < d; ++a) { w.s[a] += r[a]; w.q[a] += r[a] * r[a]; }
@@ -1143,13 +1151,15 @@ int ppacc_posterior_pass() {
         if (users[b].size() < 2) continue;
         const int n = bucket_n[b];
         if (div_hidden) {  // --div-metric hidden: groups by the leaves' stored window directions, one test per action
+            // (--post-realtime 1: the records since the leaves' pointers were set, lown, tested every --gate-check iterations)
+            const vector<LeafOwn>& rec = post_realtime ? lown : lwin;
             // B_a: the leaves whose window record has >= --acc-min-visits visits and a positive largest sum, at action a
             // (its argmax); the others stay. B_a is tested against the rest of the bucket (b minus B_a) with the
             // hidden-regret test; every passing group moves to a new bucket, the rest keeps b.
             map<int, vector<int>> grp;
             double tot_s[W] = {}, tot_q[W] = {}, tot_n = 0;
             for (int l : users[b]) {
-                const LeafOwn& o = lwin[l];
+                const LeafOwn& o = rec[l];
                 for (int a = 0; a < n; ++a) { tot_s[a] += o.s[a]; tot_q[a] += o.q[a]; }
                 tot_n += o.n;
                 if (o.n < acc_min) continue;
@@ -1159,9 +1169,9 @@ int ppacc_posterior_pass() {
             vector<pair<int, vector<int>>> pass;
             for (auto& [lab, ls] : grp) {
                 double gs[W] = {}, gq[W] = {}, gn = 0, rs[W], rq[W];
-                for (int l : ls) { for (int a = 0; a < n; ++a) { gs[a] += lwin[l].s[a]; gq[a] += lwin[l].q[a]; } gn += lwin[l].n; }
+                for (int l : ls) { for (int a = 0; a < n; ++a) { gs[a] += rec[l].s[a]; gq[a] += rec[l].q[a]; } gn += rec[l].n; }
                 for (int a = 0; a < n; ++a) { rs[a] = tot_s[a] - gs[a]; rq[a] = max(0.0, tot_q[a] - gq[a]); }
-                const AccTest t = hid_test(gs, gq, gn, rs, rq, tot_n - gn, n);
+                const AccTest t = hid_test(gs, gq, gn, rs, rq, tot_n - gn, n, post_bound);
                 n_acc_tested += t.testable;
                 if (t.pass) { pass.push_back({lab, ls}); ++n_diverging; }
             }
@@ -1171,7 +1181,7 @@ int ppacc_posterior_pass() {
             auto start_tables = [&](int nb, const vector<int>& ls) {  // --inherit-candidate 1: the group's window sums
                 if (!inherit_cand) return;
                 for (int a = 0; a < W; ++a) Q[(size_t)nb * W + a] = 0;
-                for (int l : ls) for (int a = 0; a < n; ++a) Q[(size_t)nb * W + a] += lwin[l].s[a];
+                for (int l : ls) for (int a = 0; a < n; ++a) Q[(size_t)nb * W + a] += rec[l].s[a];
             };
             for (auto& [lab, ls] : pass) {
                 const int nb = B++;
@@ -1506,7 +1516,7 @@ int main(int argc, char** argv) try {
                             {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"},
                             {"--hid-bound", "normal"}, {"--hid-delta", "0.1"}, {"--hid-eps", "0"}, {"--hid-range", "0"},
-                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}};
+                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}, {"--post-bound", "same"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1524,8 +1534,8 @@ int main(int argc, char** argv) try {
         if (dr != "rest" && dr != "bucket") throw runtime_error("--div-ref must be rest or bucket");
         div_metric = dm == "same" || dm == "hidden" ? -1 : dm == "dir" ? 1 : 0; div_ref_bucket = dr == "bucket";
         div_hidden = dm == "hidden";
-        if (div_hidden && (dr != "rest" || opt["--reset-moved-only"] == "1" || opt["--post-from-leaves"] == "1" || post_realtime))
-            throw runtime_error("--div-metric hidden has its own groups and resets (moved leaves only): no --div-ref, --reset-moved-only, --post-from-leaves or --post-realtime");
+        if (div_hidden && (dr != "rest" || opt["--reset-moved-only"] == "1" || opt["--post-from-leaves"] == "1"))
+            throw runtime_error("--div-metric hidden has its own groups and resets (moved leaves only): no --div-ref, --reset-moved-only or --post-from-leaves");
         reset_moved_only = opt["--reset-moved-only"] == "1"; post_from_leaves = opt["--post-from-leaves"] == "1";
         if ((dm != "same" || dr != "rest" || reset_moved_only || post_from_leaves) && !ppacc_mode)
             throw runtime_error("--div-metric, --div-ref, --reset-moved-only and --post-from-leaves are for --mode ppacc");
@@ -1547,8 +1557,11 @@ int main(int argc, char** argv) try {
     if (opt["--acc-metric"] != "mse" && !acc_dir && !acc_hidden) throw runtime_error("--acc-metric must be mse, dir or hidden");
     {
         const string hb = opt["--hid-bound"], gn = opt["--gate-noise"];
-        if (hb != "normal" && hb != "azuma") throw runtime_error("--hid-bound must be normal or azuma");
-        hid_azuma = hb == "azuma"; hid_delta = stod(opt["--hid-delta"]); hid_eps = stod(opt["--hid-eps"]); hid_range = stod(opt["--hid-range"]);
+        if (hb != "normal" && hb != "azuma" && hb != "freedman") throw runtime_error("--hid-bound must be normal, azuma or freedman");
+        hid_azuma = hb == "azuma"; hid_freedman = hb == "freedman";
+        const string pb = opt["--post-bound"];
+        if (pb != "same" && pb != "normal" && pb != "azuma" && pb != "freedman") throw runtime_error("--post-bound must be same, normal, azuma or freedman");
+        post_bound = pb == "same" ? -1 : pb == "normal" ? 0 : pb == "azuma" ? 1 : 2; hid_delta = stod(opt["--hid-delta"]); hid_eps = stod(opt["--hid-eps"]); hid_range = stod(opt["--hid-range"]);
         if (!(hid_delta > 0 && hid_delta < 1) || hid_eps < 0 || hid_range < 0) throw runtime_error("--hid-delta in (0, 1), --hid-eps >= 0, --hid-range >= 0");
         hid_zq = inv_normal(1 - hid_delta);
         if (gn != "none" && gn != "normal") throw runtime_error("--gate-noise must be none or normal");
@@ -1634,21 +1647,31 @@ int main(int argc, char** argv) try {
     // constraint whose history holds B, i.e. (constraint, the player's earlier decisions of this constraint on the path).
     {
         const string sc = opt["--start-cells"];
-        if (sc != "constraint" && sc != "timestep" && sc != "return") throw runtime_error("--start-cells must be constraint, timestep or return");
+        if (sc != "constraint" && sc != "timestep" && sc != "return" && sc != "history")
+            throw runtime_error("--start-cells must be constraint, timestep, return or history");
         if (sc != "constraint" && !tree_mode && !ppacc_mode) throw runtime_error("--start-cells is for --mode tree and ppacc");
         if (sc == "timestep") {
             constraint_of = load<int32_t>(dir + "/bucket_timestep.bin");
             if ((int)constraint_of.size() != nI) throw runtime_error("bucket_timestep.bin does not match the tree");
-        } else if (sc == "return") {
+        } else if (sc == "return" || sc == "history") {
+            // history (user, 2026-11-16: "다른 bucket이력을 가지는 bucket도 거친 추상화에서 쪼개져 있어야"): the cell is the
+            // player's own constraint sequence on the path up to this decision, (player, c_1, ..., c_k)
+            const bool hist = sc == "history";
             vector<int> ret(nI, -1), cnt(2 * n_constraints, 0);
             map<pair<int, int>, int> ids;
+            map<vector<int>, int> hids;
+            vector<int> seq[2];
             vector<pair<int, int>> stack_;  // (node, child index to visit next); counts are kept along the path
             stack_.push_back({0, 0});
             auto enter = [&](int h) {
                 if (players[h] == TERMINAL || players[h] == CHANCE) return;
                 const int I = info[h], c = constraint_of[I], r = cnt[players[h] * n_constraints + c];
-                const int id = ids.emplace(make_pair(c, r), (int)ids.size()).first->second;
-                if (ret[I] >= 0 && ret[I] != id) throw runtime_error("--start-cells return: an information set has two histories of its constraint");
+                int id;
+                if (hist) {
+                    vector<int> key = seq[players[h]]; key.push_back(c); key.insert(key.begin(), players[h]);
+                    id = hids.emplace(key, (int)hids.size()).first->second;
+                } else id = ids.emplace(make_pair(c, r), (int)ids.size()).first->second;
+                if (ret[I] >= 0 && ret[I] != id) throw runtime_error("--start-cells " + sc + ": an information set has two histories of its constraint");
                 ret[I] = id;
             };
             enter(0);
@@ -1656,15 +1679,15 @@ int main(int argc, char** argv) try {
                 auto& [h, k] = stack_.back();
                 const bool dec = players[h] >= 0;
                 if (players[h] == TERMINAL || k >= degree[h]) {
-                    if (dec && players[h] != TERMINAL) --cnt[players[h] * n_constraints + constraint_of[info[h]]];
+                    if (dec && players[h] != TERMINAL) { --cnt[players[h] * n_constraints + constraint_of[info[h]]]; seq[players[h]].pop_back(); }
                     stack_.pop_back(); continue;
                 }
-                if (k == 0 && dec) ++cnt[players[h] * n_constraints + constraint_of[info[h]]];  // the children see this decision
+                if (k == 0 && dec) { ++cnt[players[h] * n_constraints + constraint_of[info[h]]]; seq[players[h]].push_back(constraint_of[info[h]]); }
                 const int child = edges[start[h] + k]; ++k;
                 enter(child);
                 stack_.push_back({child, 0});
             }
-            for (int I = 0; I < nI; ++I) if (ret[I] < 0) throw runtime_error("--start-cells return: an information set was not reached");
+            for (int I = 0; I < nI; ++I) if (ret[I] < 0) throw runtime_error("--start-cells " + sc + ": an information set was not reached");
             constraint_of = ret;
         }
         n_constraints = 0;
@@ -1717,7 +1740,7 @@ int main(int argc, char** argv) try {
             !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-visits" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0") && !(k == "--hid-bound" && v == "normal") && !(k == "--hid-delta" && v == "0.1") &&
             !(k == "--hid-eps" && v == "0") && !(k == "--hid-range" && v == "0") && !(k == "--gate-noise" && v == "none") &&
-            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint"))  // defaults of later options: old runs resume
+            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint") && !(k == "--post-bound" && v == "same"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1734,7 +1757,9 @@ int main(int argc, char** argv) try {
     const string split_plan = opt["--split-plan"];
     if (split_plan != "alternate" && split_plan != "separate") throw runtime_error("--split-plan must be alternate or separate");
     const bool split_separate = split_plan == "separate";
-    if (split_separate && (!ppacc_mode || schedule != "regret" || post_realtime))
+    // (--div-metric hidden with --post-realtime 1: the posterior is tested every --gate-check iterations on the leaves'
+    // records since their pointers were set, and splits at once; the waiting condition only resets the windows)
+    if (split_separate && (!ppacc_mode || schedule != "regret" || (post_realtime && !div_hidden)))
         throw runtime_error("--split-plan separate needs --mode ppacc and --schedule regret (posterior waiting), without --post-realtime");
     if (div_hidden && !split_separate) throw runtime_error("--div-metric hidden needs --split-plan separate (posterior judgments at the waiting condition)");
     prior_visits = stoll(opt["--prior-visits"]);
@@ -2203,7 +2228,7 @@ int main(int argc, char** argv) try {
                 const bool frozen = freeze_at > 0 && run.t >= freeze_at;
                 if (prior_end) { if (!frozen) splits += ppacc_epoch_end(0); ++run.k; }  // prior: tables unchanged
                 if (is_end) {
-                    if (!frozen) splits += ppacc_posterior_pass();
+                    if (!frozen && !post_realtime) splits += ppacc_posterior_pass();
                     window_start(); run.epoch_start = run.t;  // the next posterior window starts here
                 }
             } else if (is_end && (run.curK > 0 || tree_mode || ppacc_mode) && split_on) {

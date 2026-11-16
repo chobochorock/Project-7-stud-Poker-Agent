@@ -1764,3 +1764,7 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
 - 비교군 `ppfast_hid`(실행 이름 `pp_ppfast_hid_s1`): `--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000`. prior 후보는 방문 1,000에 한 번 Δ 시험(정규 근사, δ = 0.1, ε = 0)으로 나뉜다. posterior는 대기 조건(구간 regret에서 버킷마다 z_δ × 잡음을 뺀 값의 합 ≤ 0.5 ante per root)에서만 판정하고, 잎의 구간 방향으로 무리를 지어 무리마다 Δ 시험을 한다.
 - `ppfast_hid_r100`(실행 이름 `pp_ppfast_hid_r100_s1`): 위 + `--prior-leaf-ratio 100`(살아 있는 prior 잎 + 1 ≤ 100 × 쓰이는 표).
 - 상태 화면의 posterior 줄: `window regret A (beyond noise B, the condition)`에서 B가 0.5 이하가 되면 판정한다. A는 보정 전 값이다.
+- `ppfast_hid_inh`(실행 이름 `pp_ppfast_hid_inh_s1`, 2026-11-16 추가): `ppfast_hid` + `--inherit-regret 1 --inherit-avg 1`. posterior 분할 때 새 표(와 남는 표)가 부모의 regret과 평균 합을 그대로 가진다(다시 시작하지 않음). `ppfast_hid`는 둘째 판정 뒤 다시 시작한 7th street 표들의 과도기로 대기 조건이 사실상 멈췄다(`PP_STUD7_DESIGN_KO.md` 22.7). exe는 `aswiss_hid_i.exe`로 따로 준다.
+  ```
+  powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh -ExeName aswiss_hid_i.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+  ```

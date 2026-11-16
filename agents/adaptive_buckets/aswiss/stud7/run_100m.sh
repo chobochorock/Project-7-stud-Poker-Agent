@@ -33,12 +33,12 @@ declare -A NAME=([aswiss]=aswiss_k1024_z2 [aswiss_b]=aswiss_b_k1024_z2 [aswiss_w
                  [hist]=history_street [hist_b]=history_b_street [hist_wb]=history_wb_street [hist_every]=history_every
                  [hist_bb]=history_bb_street [hist_bbf]=history_bbf_street
                  [k341]=atom_k341 [k512]=atom_k512 [k1024]=atom_k1024 [pp]=pp_particle [pp_poker]=pp_particle_poker
-                 [ppfast_rt]=pp_ppfast_rt [ppfast_hid]=pp_ppfast_hid [ppfast_hid_r100]=pp_ppfast_hid_r100 [pp_fill]=pp_particle_fill [pp_parent]=pp_particle_parent [pp_inh]=pp_particle_inherit_avg [pp_tree]=pp_tree [pp_tree_inh]=pp_tree_inherit_avg [pp_full]=pp_particle_inherit_full [pp_parent_full]=pp_particle_parent_inherit_full [pp_tree_full]=pp_tree_inherit_full [pp_tree_acc]=pp_tree_accum [pp_tree_acc_full]=pp_tree_accum_inherit_full [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
+                 [ppfast_rt]=pp_ppfast_rt [ppfast_hid]=pp_ppfast_hid [ppfast_hid_r100]=pp_ppfast_hid_r100 [ppfast_hid_inh]=pp_ppfast_hid_inh [pp_fill]=pp_particle_fill [pp_parent]=pp_particle_parent [pp_inh]=pp_particle_inherit_avg [pp_tree]=pp_tree [pp_tree_inh]=pp_tree_inherit_avg [pp_full]=pp_particle_inherit_full [pp_parent_full]=pp_particle_parent_inherit_full [pp_tree_full]=pp_tree_inherit_full [pp_tree_acc]=pp_tree_accum [pp_tree_acc_full]=pp_tree_accum_inherit_full [mmd]=net_mmd [escher]=net_escher [escher_m1m]=net_escher_m1m [escher_gpu]=net_escher_gpu [rebel]=rebel)
 declare -A PART=([aswiss]=aswiss [aswiss_b]=aswiss [aswiss_wb]=aswiss [k256]=atom [k341]=atom [k512]=atom [k1024]=atom
                  [hist]=history [hist_b]=history [hist_wb]=history [hist_every]=history [hist_bb]=history [hist_bbf]=history
-                 [ppfast_rt]=pp [ppfast_hid]=pp [ppfast_hid_r100]=pp [pp]=pp [pp_poker]=pp [pp_fill]=pp [pp_parent]=pp [pp_inh]=pp [pp_tree]=pp [pp_tree_inh]=pp [pp_full]=pp [pp_parent_full]=pp [pp_tree_full]=pp [pp_tree_acc]=pp [pp_tree_acc_full]=pp [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
+                 [ppfast_rt]=pp [ppfast_hid]=pp [ppfast_hid_r100]=pp [ppfast_hid_inh]=pp [pp]=pp [pp_poker]=pp [pp_fill]=pp [pp_parent]=pp [pp_inh]=pp [pp_tree]=pp [pp_tree_inh]=pp [pp_full]=pp [pp_parent_full]=pp [pp_tree_full]=pp [pp_tree_acc]=pp [pp_tree_acc_full]=pp [mmd]=net [escher]=net [escher_m1m]=net [escher_gpu]=net [rebel]=rebel)
 declare -A K=([aswiss]=1024 [aswiss_b]=1024 [aswiss_wb]=1024 [k256]=256 [k341]=341 [k512]=512 [k1024]=1024 [hist]=1024
-              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [ppfast_rt]=0 [ppfast_hid]=0 [ppfast_hid_r100]=0 [pp]=0 [pp_poker]=0 [pp_fill]=0 [pp_parent]=0 [pp_inh]=0 [pp_tree]=0 [pp_tree_inh]=0 [pp_full]=0 [pp_parent_full]=0 [pp_tree_full]=0 [pp_tree_acc]=0 [pp_tree_acc_full]=0
+              [hist_b]=1024 [hist_wb]=1024 [hist_every]=1024 [hist_bb]=1024 [hist_bbf]=1024 [ppfast_rt]=0 [ppfast_hid]=0 [ppfast_hid_r100]=0 [ppfast_hid_inh]=0 [pp]=0 [pp_poker]=0 [pp_fill]=0 [pp_parent]=0 [pp_inh]=0 [pp_tree]=0 [pp_tree_inh]=0 [pp_full]=0 [pp_parent_full]=0 [pp_tree_full]=0 [pp_tree_acc]=0 [pp_tree_acc_full]=0
               [mmd]=1024 [escher]=1024 [escher_m1m]=1024 [escher_gpu]=1024 [rebel]=1024)
 # history arms: label samples capped at 2.56M roots per epoch (history keys do not saturate; bounds the memory)
 declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [hist]="--history-cards street --label-cap 2560000"
@@ -60,6 +60,7 @@ declare -A EXTRA=([aswiss_b]="--label avg" [aswiss_wb]="--label window+avg" [his
                   [ppfast_rt]="--tree-split accum --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000"
                   [ppfast_hid]="--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000"
                   [ppfast_hid_r100]="--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --prior-leaf-ratio 100"
+                  [ppfast_hid_inh]="--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1"
                   [pp_tree_acc_full]="--epoch0 1000 --online-lbr-schedule split --pp-structure tree --tree-split accum --inherit-regret 1 --inherit-avg 1"
                   [mmd]="--algo mmd" [escher]="--algo escher" [escher_m1m]="--algo escher --escher-capacity 1000000" [escher_gpu]="--algo escher"
                   [rebel]="--roots 1000000 --epoch0 64 --checkpoint-every 500 --snapshot-every 0 --curve-every 100")  # rebel: own budget (hands)
@@ -68,6 +69,7 @@ declare -A LABEL=([aswiss]="ASWISS (context start, K=1024 atoms, z=2)" [aswiss_b
                   [ppfast_rt]="prior-posterior ASWISS, accumulated regret: real-time prior, posterior when window regret <= 0.1"
                   [ppfast_hid]="prior-posterior ASWISS, hidden-regret splits: real-time prior, posterior when window regret beyond noise <= 0.5"
                   [ppfast_hid_r100]="ppfast_hid with live prior leaves at most 100 x the tables in use"
+                  [ppfast_hid_inh]="ppfast_hid, posterior tables inherit the parent's regrets and average sums (no restart)"
                   [k341]="k-means 341 (matched to ASWISS at 10M)" [k512]="k-means 512" [k1024]="k-means 1024 = atoms trained directly"
                   [hist]="bucket-history keys, window labels"
                   [hist_b]="bucket-history keys, method B labels (average policy)"

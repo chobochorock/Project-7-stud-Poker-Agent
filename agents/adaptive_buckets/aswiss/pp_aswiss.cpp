@@ -377,7 +377,8 @@ int leaf_of(int I) {
 }
 
 // ======================= --mode tree: accumulated regrets on candidate tests =======================
-struct AccCand { Desc d; double thr = 0; double s[2][W] = {}, q[2][W] = {}, n[2] = {}; };
+struct AccCand { Desc d; double thr = 0; double s[2][W] = {}, q[2][W] = {}, n[2] = {}; long long t0 = 0; };  // t0: iteration it was drawn
+extern long long cur_t;
 struct LeafAcc { vector<AccCand> cand; vector<int32_t> pool; uint64_t seen = 0; uint32_t gen = 0; };
 vector<LeafAcc> lacc;
 long long n_acc_tested = 0;
@@ -407,6 +408,11 @@ bool hid_freedman = false;    // --hid-bound freedman: per side the solution x o
                               // inequality, increments bounded by L): x = c + sqrt(c^2 + 2 V ln(1/d)), c = L ln(1/d) / 3, V the side's
                               // largest sum of squared deviations over the actions (the empirical variance in place of the predictable one)
 int post_bound = -1;          // --post-bound normal|azuma|freedman: the posterior test's noise term (-1: as --hid-bound)
+// --post-eps E --post-eps-unit visit|root (user, 2026-11-17): the posterior test's eps (default: --hid-eps per visit). root:
+// the hidden regret per iteration, D >= E T + noise, T the iterations the bucket's records cover (now minus the earliest
+// start of its leaves' records), the unit of MCCFR's average regret (and of the waiting statistic)
+double post_eps = -1; bool post_eps_root = false;
+vector<long long> lown_t0;    // each leaf's record start (its pointer set; a prior child: the candidate's draw)
 double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // --hid-delta d, --hid-eps eps, --hid-range L; hid_zq = Phi^-1(1 - d)
 bool inherit_cand = false;    // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
 bool gate_noise = false;      // --gate-noise normal: the waiting statistic subtracts z x the window's noise per bucket and action
@@ -448,7 +454,8 @@ struct AccTest { bool testable = false, pass = false; double d2 = 0, z = 0, gain
 // --acc-min-visits. gain = D / t (the best candidate's), z = (D - eps t - noise) / t, d2 = D. The noise of a side is one
 // action's (one-sided): normal, z_d x the side's largest per-visit standard deviation over the actions x sqrt(visits);
 // Azuma-Hoeffding, L sqrt(visits ln(1/d) / 2). A split with D = 0 never passes.
-AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1, const double* q1, double n1, int na, int bound = -1) {
+AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1, const double* q1, double n1, int na, int bound = -1,
+                 double need = -1) {  // need >= 0: the margin D must exceed besides the noise (default eps x visits)
     const bool azuma = bound < 0 ? hid_azuma : bound == 1, freedman = bound < 0 ? hid_freedman : bound == 2;
     AccTest t;
     if (n0 < acc_min || n1 < acc_min) return t;
@@ -465,8 +472,9 @@ AccTest hid_test(const double* s0, const double* q0, double n0, const double* s1
     const double noise = azuma ? hid_range * (sqrt(n0 * lg / 2) + sqrt(n1 * lg / 2))
                        : freedman ? c + sqrt(c * c + 2 * n0 * sd0 * sd0 * lg) + c + sqrt(c * c + 2 * n1 * sd1 * sd1 * lg)
                                   : hid_zq * (sd0 * sqrt(n0) + sd1 * sqrt(n1));
-    t.d2 = D; t.gain = D / tt; t.z = (D - hid_eps * tt - noise) / tt;
-    t.pass = D > 0 && D >= hid_eps * tt + noise;
+    const double margin = need >= 0 ? need : hid_eps * tt;
+    t.d2 = D; t.gain = D / tt; t.z = (D - margin - noise) / tt;
+    t.pass = D > 0 && D >= margin + noise;
     return t;
 }
 AccTest acc_test(const AccCand& c, int n, int metric = -1) {  // metric: -1 --acc-metric, 0 mse, 1 dir
@@ -545,7 +553,7 @@ void acc_fill(int l) {
         bool dup = false;
         for (const AccCand& c : L.cand) if (!(c.d < d) && !(d < c.d) && c.thr == thr) { dup = true; break; }
         if (dup) continue;
-        AccCand c; c.d = d; c.thr = thr;
+        AccCand c; c.d = d; c.thr = thr; c.t0 = cur_t;
         L.cand.push_back(c);
     }
 }
@@ -1081,6 +1089,7 @@ void ppacc_split_leaf(int l, int best, const AccTest& bt) {
         K.seen = K.pool.size();
         lacc.push_back(K);
         LeafOwn o; for (int a = 0; a < W; ++a) { o.s[a] = c.s[side][a]; o.q[a] = c.q[side][a]; } o.n = c.n[side];
+        lown_t0.resize(leaves.size(), 0); lown_t0.back() = c.t0;  // the child's record is its side of the candidate
         if (post_from_leaves) {  // the parent's record is split, so that the bucket's sums do not change: each side
             // keeps its own sums and a visit share of the part from before the candidate existed
             const double share = c.n[0] + c.n[1] > 0 ? c.n[side] / (c.n[0] + c.n[1]) : 0.5;
@@ -1171,7 +1180,13 @@ int ppacc_posterior_pass() {
                 double gs[W] = {}, gq[W] = {}, gn = 0, rs[W], rq[W];
                 for (int l : ls) { for (int a = 0; a < n; ++a) { gs[a] += rec[l].s[a]; gq[a] += rec[l].q[a]; } gn += rec[l].n; }
                 for (int a = 0; a < n; ++a) { rs[a] = tot_s[a] - gs[a]; rq[a] = max(0.0, tot_q[a] - gq[a]); }
-                const AccTest t = hid_test(gs, gq, gn, rs, rq, tot_n - gn, n, post_bound);
+                double need = post_eps >= 0 ? post_eps * (tot_n) : -1;  // per visit: eps x the bucket's visits t
+                if (post_eps_root) {  // per iteration: eps x the iterations the records cover
+                    long long t0 = cur_t;
+                    for (int l : users[b]) t0 = min(t0, (size_t)l < lown_t0.size() ? lown_t0[l] : 0LL);
+                    need = post_eps * (double)max(1LL, cur_t - t0);
+                }
+                const AccTest t = hid_test(gs, gq, gn, rs, rq, tot_n - gn, n, post_bound, need);
                 n_acc_tested += t.testable;
                 if (t.pass) { pass.push_back({lab, ls}); ++n_diverging; }
             }
@@ -1197,7 +1212,8 @@ int ppacc_posterior_pass() {
             if (Qwin.size() >= (size_t)(b + 1) * W) for (int a = 0; a < W; ++a) Qwin[(size_t)b * W + a] *= inherit_r;
             vector<int> stay; for (int l : users[b]) if (!moved[l]) stay.push_back(l);
             start_tables(b, stay);
-            for (int l : users[b]) if (moved[l]) { lown[l] = LeafOwn{}; lacc[l].cand.clear(); acc_fill(l); }  // the moved leaves restart
+            lown_t0.resize(leaves.size(), 0);
+            for (int l : users[b]) if (moved[l]) { lown[l] = LeafOwn{}; lown_t0[l] = cur_t; lacc[l].cand.clear(); acc_fill(l); }  // the moved leaves restart
             fprintf(evf_global, "%d,%lld,%d,%zu,,%s,%s\n", level_now, cur_t, b, users[b].size(), labs.c_str(), kids.c_str());
             ++splits; ++n_post_splits;
             continue;
@@ -1516,7 +1532,7 @@ int main(int argc, char** argv) try {
                             {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"},
                             {"--hid-bound", "normal"}, {"--hid-delta", "0.1"}, {"--hid-eps", "0"}, {"--hid-range", "0"},
-                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}, {"--post-bound", "same"}};
+                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}, {"--post-bound", "same"}, {"--post-eps", "-1"}, {"--post-eps-unit", "visit"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1561,7 +1577,14 @@ int main(int argc, char** argv) try {
         hid_azuma = hb == "azuma"; hid_freedman = hb == "freedman";
         const string pb = opt["--post-bound"];
         if (pb != "same" && pb != "normal" && pb != "azuma" && pb != "freedman") throw runtime_error("--post-bound must be same, normal, azuma or freedman");
-        post_bound = pb == "same" ? -1 : pb == "normal" ? 0 : pb == "azuma" ? 1 : 2; hid_delta = stod(opt["--hid-delta"]); hid_eps = stod(opt["--hid-eps"]); hid_range = stod(opt["--hid-range"]);
+        post_bound = pb == "same" ? -1 : pb == "normal" ? 0 : pb == "azuma" ? 1 : 2;
+        post_eps = stod(opt["--post-eps"]);
+        const string pu = opt["--post-eps-unit"];
+        if (pu != "visit" && pu != "root") throw runtime_error("--post-eps-unit must be visit or root");
+        post_eps_root = pu == "root";
+        if (post_eps_root && post_eps < 0) throw runtime_error("--post-eps-unit root needs --post-eps E >= 0");
+        if (post_eps_root && !(div_hidden && post_realtime)) throw runtime_error("--post-eps-unit root is for --div-metric hidden with --post-realtime 1");
+ hid_delta = stod(opt["--hid-delta"]); hid_eps = stod(opt["--hid-eps"]); hid_range = stod(opt["--hid-range"]);
         if (!(hid_delta > 0 && hid_delta < 1) || hid_eps < 0 || hid_range < 0) throw runtime_error("--hid-delta in (0, 1), --hid-eps >= 0, --hid-range >= 0");
         hid_zq = inv_normal(1 - hid_delta);
         if (gn != "none" && gn != "normal") throw runtime_error("--gate-noise must be none or normal");
@@ -1740,7 +1763,8 @@ int main(int argc, char** argv) try {
             !(k == "--keep-cands" && v == "0") && !(k == "--split-plan" && v == "alternate") && !(k == "--prior-eligible" && v == "share") && !(k == "--prior-visits" && v == "0") && !(k == "--div-ref" && v == "rest") && !(k == "--reset-moved-only" && v == "0") &&
             !(k == "--post-from-leaves" && v == "0") && !(k == "--hid-bound" && v == "normal") && !(k == "--hid-delta" && v == "0.1") &&
             !(k == "--hid-eps" && v == "0") && !(k == "--hid-range" && v == "0") && !(k == "--gate-noise" && v == "none") &&
-            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint") && !(k == "--post-bound" && v == "same"))  // defaults of later options: old runs resume
+            !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint") && !(k == "--post-bound" && v == "same") &&
+            !(k == "--post-eps" && v == "-1") && !(k == "--post-eps-unit" && v == "visit"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1822,6 +1846,7 @@ int main(int argc, char** argv) try {
             for (const LeafAcc& L : lacc) { putv(o, L.cand); putv(o, L.pool); put(o, L.seen); put(o, L.gen); }
         }
         if (ppacc_mode) { putv(o, lown); put(o, n_post_splits); put(o, n_diverging); }
+        if (post_eps_root) putv(o, lown_t0);
         if (schedule == "regret") putv(o, Qwin);
         if (post_from_leaves) putv(o, lavg);
         if (div_hidden) putv(o, lwin);
@@ -1872,6 +1897,7 @@ int main(int argc, char** argv) try {
             for (LeafAcc& L : lacc) { getv(in, L.cand); getv(in, L.pool); get(in, L.seen); get(in, L.gen); }
         }
         if (ppacc_mode) { getv(in, lown); get(in, n_post_splits); get(in, n_diverging); }
+        if (post_eps_root) getv(in, lown_t0);
         if (schedule == "regret") getv(in, Qwin);
         if (post_from_leaves) getv(in, lavg);
         if (div_hidden) getv(in, lwin);

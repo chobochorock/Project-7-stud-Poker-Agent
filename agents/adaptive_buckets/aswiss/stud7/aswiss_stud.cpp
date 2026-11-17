@@ -2323,17 +2323,20 @@ int train(int argc, char** argv) {
             model.apply_regrets();
         }
         model.count_root();
-        if (post_acc && judging(s.t) && !model.ppd()->frozen) {
+        if (post_acc) {
             // real-time prior splits (--prior-visits), then every --post-check roots the posterior waiting condition: the
             // window regret sum_B max(0, max_a R_B(a)) / window roots (both seats, ante) at most --post-gate, over a window
-            // of at least 1,000 roots; a judgment restarts the window
-            if (ppo.prior_visits > 0) model.pp_visit_checks(s.k, s.t, ppp_log);
+            // of at least 1,000 roots; a judgment restarts the window. With the splits frozen (--freeze-splits-at) there
+            // are no checks and no judgments, but the pp_post.csv row is still written every --post-check roots (the
+            // window keeps growing from the last judgment; logging only, user 2026-11-17: "이거 줄어드는 거는 확인하고 싶었는데")
+            const bool splitting = judging(s.t) && !model.ppd()->frozen;
+            if (splitting && ppo.prior_visits > 0) model.pp_visit_checks(s.k, s.t, ppp_log);
             if (s.t % ppo.post_check == 0) {
                 // --mem-budget-mb (two-layer accum): when the partition's structures (counted, so the root is the same on
                 // every machine and on resume) reach the budget, the prior stops growing (candidates freed); the
                 // posterior goes on
                 const double prior_mb = model.pp_prior_mb();
-                if (ppo.mem_budget_mb > 0 && !model.ppd()->prior_frozen && prior_mb >= ppo.mem_budget_mb) {
+                if (splitting && ppo.mem_budget_mb > 0 && !model.ppd()->prior_frozen && prior_mb >= ppo.mem_budget_mb) {
                     model.pp_freeze_prior();
                     std::cerr << "memory budget " << ppo.mem_budget_mb << " MB (partition structures, counted) reached: prior splits stop from root " << s.t
                               << " (posterior judgments go on)\n";
@@ -2345,8 +2348,8 @@ int train(int argc, char** argv) {
                 // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here; the first
                 // check after such a judgment reads the statistic and switches when it is <= the switch value
                 const bool regret_phase = ppo.post_time_switch <= 0 || model.ppd()->post_regret_phase;
-                const bool judge = regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
-                if (!regret_phase && model.ppd()->post_switch_due) {
+                const bool judge = splitting && regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
+                if (splitting && !regret_phase && model.ppd()->post_switch_due) {
                     model.ppd()->post_switch_due = false;
                     if (wn <= ppo.post_time_switch) {
                         model.ppd()->post_regret_phase = true;

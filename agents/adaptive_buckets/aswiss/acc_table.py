@@ -39,6 +39,7 @@ ARMS = [
     ("ppfast_rt_hid_ah", "ppfast_rt_hid with the Azuma-Hoeffding noise term"),
     ("ppfast_rt_hid_ts", "ppfast_rt_hid from the time-step cells (40)"),
     ("ppfast_rt_hid_ret", "ppfast_rt_hid from the return-rule cells (12)"),
+    ("ppfast_rt_hid_ret_rw", "ppfast_rt_hid_ret, waiting statistic weighted by own reach"),
     ("pphist_freedman_rt", "bucket-history start (20), posterior per action by Freedman in real time, full inheritance"),
     ("pure_a", "pure a, iterates (reference)"),
     ("ppmix_avg_root", "pp mix, avg, root (reference)"),

@@ -625,6 +625,22 @@ public:
     // reaches?): over the same window as the waiting statistic (reset at every judgment and at the start of a process),
     // each bucket's sampled regret sums plain and weighted by the traverser's own reach pi_i(h) under the iterate
     void enable_reach_log() { reach_log_ = true; }
+    // --gate-reach 1 (user, 2026-11-17): the posterior waiting statistic from the own-reach-weighted window sums
+    // (both seats, per root), with the same noise correction as --gate-noise when z > 0
+    void enable_gate_reach() { gate_reach_ = true; }
+    double iterate_regret_reach(double z) const {
+        double total = 0;
+        for (size_t b = 0; b < gw_.size(); ++b) {
+            const double n = gwn_[b];
+            double m = 0;
+            for (int a = 0; a < A; ++a) {
+                const double w = gw_[b][a];
+                m = std::max(m, z > 0 && n > 0 ? w - z * std::sqrt(std::max(0.0, gwq_[b][a] - w * w / n)) : w);
+            }
+            total += m;
+        }
+        return rwin_roots_ ? total / static_cast<double>(rwin_roots_) : 0;
+    }
     struct ReachStats { uint64_t roots = 0; double raw = 0, weighted = 0, share2 = 0, share4 = 0; uint64_t low2 = 0; };
     ReachStats reach_stats() const {
         ReachStats st; st.roots = rr_roots_;
@@ -652,6 +668,7 @@ public:
         const double v = rwin_roots_ ? total / static_cast<double>(rwin_roots_) / 2 : 0;
         if (reset) {
             rwin_.assign(rwin_.size(), {}); rwin_roots_ = 0;
+            if (gate_reach_) { gw_.assign(gw_.size(), {}); gwq_.assign(gwq_.size(), {}); gwn_.assign(gwn_.size(), 0.0); }
             if (reach_log_) { rr_raw_.assign(rr_raw_.size(), {}); rr_w_.assign(rr_w_.size(), {}); rr_mass_.assign(rr_mass_.size(), 0.0); rr_n_.assign(rr_n_.size(), 0.0); rr_roots_ = 0; }
             if (gate_z_ > 0) { rwq_.assign(rwq_.size(), {}); rwn_.assign(rwn_.size(), 0.0); }
         }
@@ -1519,6 +1536,9 @@ private:
     std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
     uint64_t rwin_roots_ = 0;
     double gate_z_ = 0;                        // --gate-noise normal: z_d (0: off)
+    bool gate_reach_ = false;                  // --gate-reach 1: the waiting statistic weights the regrets by own reach
+    std::vector<std::array<double, A>> gw_, gwq_;  // --gate-reach: window sums of reach x regret and of its squares
+    std::vector<double> gwn_;                  // --gate-reach: window traverser visits per bucket
     bool reach_log_ = false;                   // --log-reach 1
     double own_reach_ = 1;                     // the traverser's own reach of the node being traversed (pp)
     std::vector<std::array<double, A>> rr_raw_, rr_w_;
@@ -1984,7 +2004,7 @@ int train(int argc, char** argv) {
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
                                 {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
                                 {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
-                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}, {"--log-reach", "0"}});
+                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}, {"--log-reach", "0"}, {"--gate-reach", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2137,6 +2157,10 @@ int train(int argc, char** argv) {
     const bool log_reach = o["--log-reach"] == "1";
     if (log_reach && !post_acc) throw std::runtime_error("--log-reach needs --tree-split accum with --pp-structure pp");
     if (log_reach) model.enable_reach_log();
+    if (o["--gate-reach"] != "0" && o["--gate-reach"] != "1") throw std::runtime_error("--gate-reach must be 0 or 1");
+    const bool gate_reach = o["--gate-reach"] == "1";
+    if (gate_reach && !post_acc) throw std::runtime_error("--gate-reach needs --tree-split accum with --pp-structure pp");
+    if (gate_reach) model.enable_gate_reach();
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -2181,7 +2205,8 @@ int train(int argc, char** argv) {
                           (ppo.inherit_cand ? ";inherit_candidate=1" : "") +
                           (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") +
                           (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") +
-                          (ppo.post_time_switch > 0 ? ";post_time_switch_after_split=" + o["--post-time-switch"] : "") : std::string());
+                          (ppo.post_time_switch > 0 ? ";post_time_switch_after_split=" + o["--post-time-switch"] : "") +
+                          (o["--gate-reach"] == "1" ? ";gate_reach=1" : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
     if (online.on() && learn_h4) throw std::runtime_error("--online-lbr-every needs the heuristic H4");
@@ -2251,7 +2276,8 @@ int train(int argc, char** argv) {
             if (post_acc) std::ofstream(ppq_path) << "epoch,roots,window_roots,window_regret,gate,judged,buckets_before,buckets_split,"
                                                        "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb"
                                                     << (ppo.gate_noise ? ",window_regret_beyond_noise" : "")
-                                                    << (ppo.post_time_switch > 0 ? ",phase" : "") << '\n';
+                                                    << (ppo.post_time_switch > 0 ? ",phase" : "")
+                                                    << (o["--gate-reach"] == "1" ? ",window_regret_own_reach" : "") << '\n';
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2376,7 +2402,9 @@ int train(int argc, char** argv) {
                 const uint64_t wroots = model.iterate_window_roots();
                 const double wr = 2 * model.iterate_regret_half(false);
                 // --gate-noise normal: the condition reads only the regret beyond z_d x the window's noise (per bucket)
-                const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
+                // --gate-reach 1: the condition reads the own-reach-weighted statistic instead (noise-corrected with --gate-noise)
+                const double wreach = gate_reach ? model.iterate_regret_reach(ppo.gate_noise ? ppo.hid_zq : 0.0) : 0.0;
+                const double wn = gate_reach ? wreach : ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
                 // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here; the first
                 // check after such a judgment reads the statistic and switches when it is <= the switch value
                 const bool regret_phase = ppo.post_time_switch <= 0 || model.ppd()->post_regret_phase;
@@ -2398,8 +2426,11 @@ int train(int argc, char** argv) {
                         << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
                         << model.ppd()->live_leaves() << ',' << diverging << ',' << moved << ',' << model.ppd()->prior_splits << ','
                         << elapsed() << ',' << model.ppd()->prior_frozen << ',' << prior_mb;
-                if (ppo.gate_noise) ppq_log << ',' << wn;
+                // window_regret_beyond_noise is the unweighted statistic beyond noise also under --gate-reach (whose
+                // condition is the last column)
+                if (ppo.gate_noise) ppq_log << ',' << (gate_reach ? 2 * model.iterate_regret_noise_half() : wn);
                 if (ppo.post_time_switch > 0) ppq_log << ',' << (model.ppd()->post_regret_phase ? "regret" : "time");
+                if (gate_reach) ppq_log << ',' << wreach;
                 ppq_log << '\n';
                 ppq_log.flush();
                 if (log_reach) {
@@ -2458,7 +2489,9 @@ int train(int argc, char** argv) {
                         // regret; the first check after it reads the statistic (see above). One pp_post.csv row (phase time).
                         const uint64_t wroots = model.iterate_window_roots();
                         const double wr = 2 * model.iterate_regret_half(false);
-                        const double wn = ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
+                        // --gate-reach 1: the condition reads the own-reach-weighted statistic instead (noise-corrected with --gate-noise)
+                        const double wreach = gate_reach ? model.iterate_regret_reach(ppo.gate_noise ? ppo.hid_zq : 0.0) : 0.0;
+                        const double wn = gate_reach ? wreach : ppo.gate_noise ? 2 * model.iterate_regret_noise_half() : wr;
                         const auto live0 = model.live_buckets();
                         uint64_t diverging = 0, moved = 0;
                         const int ps = model.pp_posterior_acc(s.t, diverging, moved);
@@ -2469,8 +2502,8 @@ int train(int argc, char** argv) {
                                 << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
                                 << D.live_leaves() << ',' << diverging << ',' << moved << ',' << D.prior_splits << ','
                                 << elapsed() << ',' << D.prior_frozen << ',' << model.pp_prior_mb();
-                        if (ppo.gate_noise) ppq_log << ',' << wn;
-                        ppq_log << ",time\n";
+                        if (ppo.gate_noise) ppq_log << ',' << (gate_reach ? 2 * model.iterate_regret_noise_half() : wn);
+                        ppq_log << ",time"; if (gate_reach) ppq_log << ',' << wreach; ppq_log << '\n';
                         ppq_log.flush();
                     }
                 } else {

@@ -416,6 +416,11 @@ vector<long long> lown_t0;    // each leaf's record start (its pointer set; a pr
 double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // --hid-delta d, --hid-eps eps, --hid-range L; hid_zq = Phi^-1(1 - d)
 bool inherit_cand = false;    // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
 bool gate_noise = false;      // --gate-noise normal: the waiting statistic subtracts z x the window's noise per bucket and action
+// --gate-reach 1 (user, 2026-11-17): the waiting statistic weights every sampled regret by the traverser's own reach pi_i(h)
+// of its node under the iterate (the plain sum counts the nodes the player itself hardly reaches in full)
+bool gate_reach = false;
+double own_reach = 1;         // the traverser's own reach of the node being traversed
+vector<double> Ww, Wwq, Wwn;  // --gate-reach: window sums of reach x regret, of its squares (per action), visits (per bucket)
 double prior_leaf_ratio = 0;  // --prior-leaf-ratio R: a prior split only while live prior leaves + 1 <= R x buckets in use
 vector<LeafOwn> lwin;         // --div-metric hidden: each leaf's regret record since the last posterior judgment
 vector<double> Wq, Wn;        // --gate-noise normal: each bucket's window sums of squared regrets (per action) and visits
@@ -709,9 +714,16 @@ double es(int h, int p) {
     strategy(b, d, s);
     if (pl == p) {
         double v[W], node = 0;
-        for (int a = 0; a < d; ++a) { v[a] = es(edges[e + a], p); node += s[a] * v[a]; }
+        const double reach = own_reach;
+        for (int a = 0; a < d; ++a) { own_reach = reach * s[a]; v[a] = es(edges[e + a], p); node += s[a] * v[a]; }
+        own_reach = reach;
         touch(b);
         for (int a = 0; a < d; ++a) Rtmp[(size_t)b * W + a] += v[a] - node;
+        if (gate_reach) {
+            if (Wwn.size() <= (size_t)b) { Wwn.resize(B, 0.0); Ww.resize((size_t)B * W, 0.0); Wwq.resize((size_t)B * W, 0.0); }
+            for (int a = 0; a < d; ++a) { const double x = reach * (v[a] - node); Ww[(size_t)b * W + a] += x; Wwq[(size_t)b * W + a] += x * x; }
+            Wwn[b] += 1;
+        }
         if (gate_noise) {
             if ((int)Wn.size() <= b) { Wn.resize(B, 0.0); Wq.resize((size_t)B * W, 0.0); }
             for (int a = 0; a < d; ++a) Wq[(size_t)b * W + a] += (v[a] - node) * (v[a] - node);
@@ -1532,7 +1544,7 @@ int main(int argc, char** argv) try {
                             {"--split-plan", "alternate"}, {"--prior-eligible", "share"}, {"--prior-visits", "0"},
                             {"--div-ref", "rest"}, {"--reset-moved-only", "0"}, {"--post-from-leaves", "0"},
                             {"--hid-bound", "normal"}, {"--hid-delta", "0.1"}, {"--hid-eps", "0"}, {"--hid-range", "0"},
-                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}, {"--post-bound", "same"}, {"--post-eps", "-1"}, {"--post-eps-unit", "visit"}};
+                            {"--gate-noise", "none"}, {"--inherit-candidate", "0"}, {"--prior-leaf-ratio", "0"}, {"--start-cells", "constraint"}, {"--post-bound", "same"}, {"--post-eps", "-1"}, {"--post-eps-unit", "visit"}, {"--gate-reach", "0"}};
     for (int i = 1; i + 1 < argc; i += 2) {
         const string k = argv[i];
         if (!opt.count(k) && k != "--tree" && k != "--out") throw runtime_error("unknown option " + k);
@@ -1589,6 +1601,8 @@ int main(int argc, char** argv) try {
         hid_zq = inv_normal(1 - hid_delta);
         if (gn != "none" && gn != "normal") throw runtime_error("--gate-noise must be none or normal");
         gate_noise = gn == "normal";
+        if (opt["--gate-reach"] != "0" && opt["--gate-reach"] != "1") throw runtime_error("--gate-reach must be 0 or 1");
+        gate_reach = opt["--gate-reach"] == "1";
         inherit_cand = opt["--inherit-candidate"] == "1";
         if (inherit_cand && !div_hidden) throw runtime_error("--inherit-candidate is for --div-metric hidden");
         prior_leaf_ratio = stod(opt["--prior-leaf-ratio"]);
@@ -1620,6 +1634,7 @@ int main(int argc, char** argv) try {
     if (schedule != "static" && schedule != "eps" && schedule != "regret") throw runtime_error("--schedule must be static, eps or regret");
     if (schedule == "regret" && !tree_mode && !ppacc_mode) throw runtime_error("--schedule regret is for --mode tree and ppacc");
     if (gate_noise && schedule != "regret") throw runtime_error("--gate-noise is for --schedule regret");
+    if (gate_reach && schedule != "regret") throw runtime_error("--gate-reach is for --schedule regret");
     if (prior_split != "immediate" && prior_split != "epoch") throw runtime_error("--prior-split must be immediate or epoch");
     if (prior_start != "equal" && prior_start != "length" && prior_start != "identity") throw runtime_error("bad --prior-start");
     if (features != "general" && features != "poker") throw runtime_error("--features must be general or poker");
@@ -1764,7 +1779,8 @@ int main(int argc, char** argv) try {
             !(k == "--post-from-leaves" && v == "0") && !(k == "--hid-bound" && v == "normal") && !(k == "--hid-delta" && v == "0.1") &&
             !(k == "--hid-eps" && v == "0") && !(k == "--hid-range" && v == "0") && !(k == "--gate-noise" && v == "none") &&
             !(k == "--inherit-candidate" && v == "0") && !(k == "--prior-leaf-ratio" && v == "0") && !(k == "--start-cells" && v == "constraint") && !(k == "--post-bound" && v == "same") &&
-            !(k == "--post-eps" && v == "-1") && !(k == "--post-eps-unit" && v == "visit"))  // defaults of later options: old runs resume
+            !(k == "--post-eps" && v == "-1") && !(k == "--post-eps-unit" && v == "visit") &&
+            !(k == "--gate-reach" && v == "0"))  // defaults of later options: old runs resume
             cfg << ";" << k << "=" << v;
     filesystem::create_directories(out);
     const string state_path = out + "/state.bin", log_path = out + "/log.csv", ev_path = out + "/events.csv",
@@ -1851,6 +1867,7 @@ int main(int argc, char** argv) try {
         if (post_from_leaves) putv(o, lavg);
         if (div_hidden) putv(o, lwin);
         if (gate_noise) { putv(o, Wq); putv(o, Wn); }
+        if (gate_reach) { putv(o, Ww); putv(o, Wwq); putv(o, Wwn); }
         fflush(prior_log);
         log_bytes = fsize(log_path); ev_bytes = fsize(ev_path); pr_bytes = fsize(pr_path); ds_bytes = fsize(ds_path);
         put(o, log_bytes); put(o, ev_bytes); put(o, pr_bytes); put(o, ds_bytes);
@@ -1902,6 +1919,7 @@ int main(int argc, char** argv) try {
         if (post_from_leaves) getv(in, lavg);
         if (div_hidden) getv(in, lwin);
         if (gate_noise) { getv(in, Wq); getv(in, Wn); }
+        if (gate_reach) { getv(in, Ww); getv(in, Wwq); getv(in, Wwn); }
         get(in, log_bytes); get(in, ev_bytes); get(in, pr_bytes); get(in, ds_bytes);
         if (!in) throw runtime_error("truncated state.bin");
         filesystem::resize_file(log_path, log_bytes); filesystem::resize_file(ev_path, ev_bytes);
@@ -2014,7 +2032,14 @@ int main(int argc, char** argv) try {
             for (int a = 0; a < bucket_n[b]; ++a) {
                 const double base = (size_t)b * W + a < Qwin.size() ? Qwin[(size_t)b * W + a] : 0.0;
                 double w = Q[(size_t)b * W + a] - base;
-                if (gate_noise) {
+                if (gate_reach) {  // the own-reach-weighted sum, with its own noise correction
+                    w = (size_t)b * W + a < Ww.size() ? Ww[(size_t)b * W + a] : 0.0;
+                    if (gate_noise) {
+                        const double nb = (size_t)b < Wwn.size() ? Wwn[b] : 0.0;
+                        const double sq = (size_t)b * W + a < Wwq.size() ? Wwq[(size_t)b * W + a] : 0.0;
+                        w -= nb > 0 ? hid_zq * sqrt(max(0.0, sq - w * w / nb)) : 0.0;
+                    }
+                } else if (gate_noise) {
                     const double nb = (size_t)b < Wn.size() ? Wn[b] : 0.0;
                     const double sq = (size_t)b * W + a < Wq.size() ? Wq[(size_t)b * W + a] : 0.0;
                     w -= nb > 0 ? hid_zq * sqrt(max(0.0, sq - w * w / nb)) : 0.0;
@@ -2029,6 +2054,7 @@ int main(int argc, char** argv) try {
     auto window_start = [&] {
         Qwin = Q;
         if (gate_noise) { Wq.assign((size_t)B * W, 0.0); Wn.assign(B, 0.0); }
+        if (gate_reach) { Ww.assign((size_t)B * W, 0.0); Wwq.assign((size_t)B * W, 0.0); Wwn.assign(B, 0.0); }
         if (div_hidden) lwin.assign(leaves.size(), LeafOwn{});
     };
     double row_window_regret = NAN;  // --schedule regret: the window statistic of the row being written (before its judgment)
@@ -2221,7 +2247,7 @@ int main(int argc, char** argv) try {
                 if (j < run.Kk) { const auto tab = strategy_table(); copy(tab.begin(), tab.end(), run.cur_tables.begin() + (size_t)j * B * W); }
             }
         }
-        for (int p = 0; p < 2; ++p) { es(0, p); apply_regrets(); }
+        for (int p = 0; p < 2; ++p) { own_reach = 1; es(0, p); apply_regrets(); }
         if (post_realtime && split_on && run.t % gate_check == 0 && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_posterior_pass();
         if (prior_visits > 0 && split_on && !(freeze_at > 0 && run.t >= freeze_at)) ppacc_visit_checks();
         if (pp_mode && !to_finalize.empty()) {

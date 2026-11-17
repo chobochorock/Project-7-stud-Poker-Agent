@@ -115,6 +115,10 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # (--post-time-switch 2); ppfast_hid_inh_r100_ret_tr: the same from the user's return-rule cells (--pp-cells return)
     ppfast_hid_inh_r100_tr = @("pp_ppfast_hid_inh_r100_tr", "pp", 0, "ppfast_hid_inh_r100, posterior judgments at the epoch ends until the statistic right after one is <= 2, then <= 0.5", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --post-time-switch 2")
     ppfast_hid_inh_r100_ret_tr = @("pp_ppfast_hid_inh_r100_ret_tr", "pp", 0, "ppfast_hid_inh_r100_tr from the return-rule cells", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --pp-cells return --post-time-switch 2")
+    # ppfast_hid_inh_r100_ret_rw (user, 2026-11-17): ppfast_hid_inh_r100_ret with the waiting statistic weighted by own
+    # reach (every sampled regret in the window counts with the traverser's own reach pi_i(h) under the iterate,
+    # --gate-reach 1) and the gate 0.1
+    ppfast_hid_inh_r100_ret_rw = @("pp_ppfast_hid_inh_r100_ret_rw", "pp", 0, "ppfast_hid_inh_r100_ret, posterior when the own-reach-weighted window regret beyond noise <= 0.1", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --pp-cells return --gate-reach 1")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

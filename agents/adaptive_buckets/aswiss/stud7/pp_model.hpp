@@ -575,6 +575,11 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) rwq_[b][a] += rv[a] * rv[a];
         rwn_[b] += 1;
     }
+    if (gate_reach_ && track_rwin_) {  // --gate-reach: own-reach-weighted window sums of this bucket
+        if (gwn_.size() <= b) { gw_.resize(buckets_.size()); gwq_.resize(buckets_.size()); gwn_.resize(buckets_.size(), 0.0); }
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) { const double x = reach * rv[a]; gw_[b][a] += x; gwq_[b][a] += x * x; }
+        gwn_[b] += 1;
+    }
     if (reach_log_) {  // --log-reach: plain and own-reach-weighted window sums of this bucket
         if (rr_n_.size() <= b) { rr_raw_.resize(buckets_.size()); rr_w_.resize(buckets_.size()); rr_mass_.resize(buckets_.size(), 0.0); rr_n_.resize(buckets_.size(), 0.0); }
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) { rr_raw_[b][a] += rv[a]; rr_w_[b][a] += reach * rv[a]; }
@@ -1281,6 +1286,10 @@ void Model::pp_save(std::ofstream& out, bool full) const {
             for (size_t b = 0; b < rwn_.size(); ++b) { put(out, rwq_[b]); put(out, rwn_[b]); }
         }
         if (full && D.opt.post_time_switch > 0) put(out, static_cast<uint8_t>(D.post_regret_phase | D.post_switch_due << 1));
+        if (full && gate_reach_) {
+            put(out, static_cast<uint64_t>(gwn_.size()));
+            for (size_t b = 0; b < gwn_.size(); ++b) { put(out, gw_[b]); put(out, gwq_[b]); put(out, gwn_[b]); }
+        }
     }
 }
 
@@ -1351,6 +1360,10 @@ void Model::pp_load(std::ifstream& in, bool full) {
             for (size_t b = 0; b < n; ++b) { get(in, rwq_[b]); get(in, rwn_[b]); }
         }
         if (full && D.opt.post_time_switch > 0) { uint8_t ph; get(in, ph); D.post_regret_phase = ph & 1; D.post_switch_due = ph & 2; }
+        if (full && gate_reach_) {
+            get(in, n); gw_.assign(n, {}); gwq_.assign(n, {}); gwn_.assign(n, 0.0);
+            for (size_t b = 0; b < n; ++b) { get(in, gw_[b]); get(in, gwq_[b]); get(in, gwn_[b]); }
+        }
         pp_recount_cap();
     }
 }

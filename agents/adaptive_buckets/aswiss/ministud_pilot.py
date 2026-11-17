@@ -49,6 +49,8 @@ Arms (--mode tree arms: every leaf its own table, accumulated-regret split, tabl
   ppfast_rt_hid_ts   ppfast_rt_hid from the time-step cells (player, legal action set, own decision index; 40)
   ppfast_rt_hid_ret  ppfast_rt_hid from the user's return-rule cells (a decision coming back to a cell B goes to B' of
                      the same constraint whose history holds B; 12)
+  ppfast_rt_hid_ret_rw  ppfast_rt_hid_ret with the waiting statistic weighted by own reach (user, 2026-11-17): every
+                     sampled regret in the window counts with the traverser's own reach of its node (--gate-reach 1)
   pure_a      pure ASWISS, rule (a) labels (the 900-second runs' reference)
   mccfr       no abstraction (every information set its own table)
 """
@@ -100,6 +102,7 @@ ARMS = {
     "ppfast_rt_hid_ah": HID + ["--hid-bound", "azuma"],
     "ppfast_rt_hid_ts": HID + ["--start-cells", "timestep"],
     "ppfast_rt_hid_ret": HID + ["--start-cells", "return"],
+    "ppfast_rt_hid_ret_rw": HID + ["--start-cells", "return", "--gate-reach", "1"],
     "pphist_freedman_rt": ["--mode", "ppacc", "--acc-metric", "hidden", "--div-metric", "hidden", "--post-bound", "freedman",
                            "--post-realtime", "1", "--inherit-regret", "1", "--inherit-avg", "1", "--schedule", "regret",
                            "--regret-gate", str(a.gate), "--split-plan", "separate", "--prior-eligible", "all",

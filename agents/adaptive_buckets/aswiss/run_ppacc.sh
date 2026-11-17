@@ -46,6 +46,9 @@
 # whose history holds B; 12 cells). ppfast_rt_hid starts from the constraint (6 cells).
 #   ppfast_rt_hid_ts   ppfast_rt_hid from the time-step cells
 #   ppfast_rt_hid_ret  ppfast_rt_hid from the return-rule cells
+# The waiting statistic weighted by own reach (user, 2026-11-17): every sampled regret in the window counts with the
+# traverser's own reach pi_i(h) of its node under the iterate (--gate-reach 1), gate 0.1, the rest as ppfast_rt_hid_ret.
+#   ppfast_rt_hid_ret_rw
 # The user's plan (2026-11-16): start from the bucket-history cells (--start-cells history: the player's own sequence
 # of (player, legal action set) cells on the path, 20 cells), real-time prior as ppfast_rt_hid (normal test), and the
 # posterior tested every 10,000 iterations on the leaves' records since their pointers were set: for each action a,
@@ -96,6 +99,7 @@ for s in $SEEDS; do
   echo "ppfast_rt_hid_ah $s $HID --hid-bound azuma" >> "$jobs"
   echo "ppfast_rt_hid_ts $s $HID --start-cells timestep" >> "$jobs"
   echo "ppfast_rt_hid_ret $s $HID --start-cells return" >> "$jobs"
+  echo "ppfast_rt_hid_ret_rw $s $HID --start-cells return --gate-reach 1" >> "$jobs"
   echo "pphist_freedman_rt $s --mode ppacc --acc-metric hidden --div-metric hidden --post-bound freedman --post-realtime 1 --inherit-regret 1 --inherit-avg 1 --schedule regret --regret-gate 0.1 --split-plan separate --prior-eligible all --prior-visits 1000 --start-cells history --measure 1 --judgment-rows split" >> "$jobs"
 done
 xargs -P "$P" -L 1 bash -c 'run "$@"' _ < "$jobs"
@@ -120,7 +124,7 @@ python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_hid" --arm "ppfast_rt=$(arm ppfast
   --arm "ppfast_rt_hid_inh=$(arm ppfast_rt_hid_inh)" --arm "ppfast_rt_hid_ah=$(arm ppfast_rt_hid_ah)" --arm "tree_mse=$(arm tree_mse)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/plot_pp.py" "$OUT/pp_small_ppfast_cells" --arm "ppfast_rt_hid=$(arm ppfast_rt_hid)" --arm "ppfast_rt_hid_ts=$(arm ppfast_rt_hid_ts)" \
-  --arm "ppfast_rt_hid_ret=$(arm ppfast_rt_hid_ret)" --arm "ppfast_rt=$(arm ppfast_rt)" --arm "tree_mse=$(arm tree_mse)" \
+  --arm "ppfast_rt_hid_ret=$(arm ppfast_rt_hid_ret)" --arm "ppfast_rt_hid_ret_rw=$(arm ppfast_rt_hid_ret_rw)" --arm "ppfast_rt=$(arm ppfast_rt)" --arm "tree_mse=$(arm tree_mse)" \
   --ref "kmeans_a (rule a counts)=$(arm kmeans_a)" --ref "mccfr (no abstraction)=$(arm mccfr)" --kmeans "kmeans_a (rule a counts)"
 python3 "$A/plot_pp.py" "$OUT/pp_small_pphist" --arm "pphist_freedman_rt=$(arm pphist_freedman_rt)" --arm "ppfast_rt_hid=$(arm ppfast_rt_hid)" \
   --arm "ppfast_rt=$(arm ppfast_rt)" --arm "tree_mse=$(arm tree_mse)" \

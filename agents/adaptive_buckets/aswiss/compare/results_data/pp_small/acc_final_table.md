@@ -34,6 +34,7 @@ Median over seeds [min, max]. Ratio: to the k-means baseline's median (its bucke
 | `ppfast_rt_hid_ah` | ppfast_rt_hid with the Azuma-Hoeffding noise term | 3 | 156M | 0.8659 [0.6638, 0.8716] | 2.53 | 0.863 [0.663, 0.909] | 1.08 | 6–6 | 0.7958 | 0.001 [0.000, 0.035] |
 | `ppfast_rt_hid_ts` | ppfast_rt_hid from the time-step cells (40) | 0 | not run | | | | | | | |
 | `ppfast_rt_hid_ret` | ppfast_rt_hid from the return-rule cells (12) | 0 | not run | | | | | | | |
+| `ppfast_rt_hid_ret_rw` | ppfast_rt_hid_ret, waiting statistic weighted by own reach | 3 | 96M | 0.7118 [0.6141, 1.0386] | 2.08 | 0.790 [0.602, 1.097] | 0.99 | 14–56 | 0.7107 | 0.145 [0.127, 0.169] |
 | `pphist_freedman_rt` | bucket-history start (20), posterior per action by Freedman in real time, full inheritance | 3 | 93M | 0.5451 [0.4916, 0.5486] | 1.59 | 1.027 [0.931, 1.294] | 1.28 | 4,847–5,864 | 0.6205 | 5.466 [3.796, 7.836] |
 | `pure_a` | pure a, iterates (reference) | 3 | 216M | 0.0075 [0.0068, 0.0101] | 0.02 | 0.357 [0.330, 0.376] | 0.45 | 17,262–18,592 | 0.0480 | – |
 | `ppmix_avg_root` | pp mix, avg, root (reference) | 3 | 94M | 0.0343 [0.0255, 0.0483] | 0.10 | 0.392 [0.365, 0.395] | 0.49 | 20,137–21,124 | 0.0513 | – |

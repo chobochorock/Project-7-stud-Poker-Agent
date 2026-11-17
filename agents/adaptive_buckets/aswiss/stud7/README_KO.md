@@ -1777,3 +1777,9 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action stop -Arms ppfast_hid_inh_r100_ret_tr -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh_r100_ret_tr -ExeName aswiss_rettr.exe -PpExtra "--freeze-splits-at 1" -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
   ```
+- `ppfast_hid_inh_r100_ret_rw`(실행 이름 `pp_ppfast_hid_inh_r100_ret_rw_s1`, 2026-11-17 추가, 사용자: "가중한 값으로 대기 조건 바꾸는 비교군", "도달 가중하여 ε=0.1"): `ppfast_hid_inh_r100_ret`(return 칸)에서 posterior 대기 통계를 자기 도달확률 가중 구간 regret으로(`--gate-reach 1`), 대기 조건 0.1(`--post-gate 0.1`). 표본 regret마다 그 노드까지 traverser 자신의 현재 전략 확률 곱 π_i(h)를 곱해 버킷별로 더한다. 잡음 보정(`--gate-noise normal`)은 바탕 비교군처럼 가중 값에 적용한다. 상태 화면의 posterior 줄은 `(beyond noise A; own-reach weighted B, the condition)`이고 B가 0.1 이하가 되면 판정한다(A는 가중하지 않은 값). 설계: `PP_STUD7_DESIGN_KO.md` 22.15. exe는 `aswiss_retrw.exe`.
+  ```
+  git pull
+  powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh_r100_ret_rw -ExeName aswiss_retrw.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+  powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status -Arms ppfast_hid_inh_r100_ret,ppfast_hid_inh_r100_ret_tr,ppfast_hid_inh_r100_ret_rw -Watch 60 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+  ```

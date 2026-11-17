@@ -1723,3 +1723,18 @@ mini-stud (CPU 900초, seed 1–3, `run_ppacc.sh`): `ppfast_rt_hid`(정규, δ =
 - 진단 `--log-reach 1`(기록만, 실행 설정에 들어가지 않음): 같은 구간(판정마다, 프로세스 시작마다 초기화)에서 버킷별 표본 regret 합을 그대로와, 그 노드의 traverser 자기 도달확률 π_i(h)(현재 반복의 전략)로 가중한 것을 함께 쌓아 `pp_reach.csv`에 `--post-check`마다 쓴다. 학습은 같다(스냅숏, prior 기록, `pp_post.csv` 동일 확인). 가중하지 않은 값은 `pp_post.csv`의 `window_regret`와 같다.
 - 측정 (이 기계, seed 1): street 칸 + 상속 + R = 100, 4–6만 roots: 그대로 7.06 / 5.69 / 4.78, 자기 도달확률 가중 0.215 / 0.214 / 0.211. return 칸 + 시간→regret(노트북의 `ppfast_hid_inh_r100_ret_tr`와 같은 설정), 32만 roots까지: 그대로 250–2,400, 가중 0.10–0.35(예: 30만 roots, 구간 15만: 252.9 대 0.107).
 - 읽은 것: 구간 regret의 거의 전부가 플레이어 자신이 거의 가지 않는 노드(자기 레이즈로만 들어가는 깊은 레이즈 싸움 등)에서 나온다. 자기 도달확률 가중 값은 NashConv의 상한이 아니다(가중이 최선 응답이 아니라 현재 전략의 도달확률이다).
+
+### 22.15 대기 조건을 자기 도달확률 가중 구간 regret으로 (`--gate-reach 1`, ε = 0.1, 2026-11-17)
+
+사용자: "가중한 값으로 대기 조건 바꾸는 비교군 실험해 봐. 이번에는 다시 전체 누적 평균 regret에 대해서 도달 가중하여 ε=0.1로 하는 것을 실험해보자."
+- 구조: posterior 판정을 기다리는 통계를 Σ_B max_a [Σ_구간 π_i(h)·r(h, a)] / 구간 roots로 바꾼다. π_i(h)는 그 traverser 노드까지 자기 행동들의 현재 반복 전략 확률의 곱이다(22.14의 진단과 같은 값). 판정 시점의 처리(무리 나누기, Δ 시험, 상속)는 바탕 비교군과 같다. 구간은 판정마다 초기화하고, 7-stud에서는 checkpoint에 들어가 이어 달리기에서도 이어진다.
+- 옵션 `--gate-reach 1`(두 학습기, 기본 0: 기본 경로의 학습은 이전과 같음을 확인). 7-stud `pp_post.csv`에 `window_regret_own_reach` 열(조건 값)이 붙고, `window_regret_beyond_noise`는 가중하지 않은 잡음 보정 값 그대로다. 상태 화면은 `own-reach weighted X, the condition`으로 보인다.
+- 비교군(고정 ID):
+  - mini-stud `ppfast_rt_hid_ret_rw` = `ppfast_rt_hid_ret` + `--gate-reach 1`(대기 0.1, return 칸 12개, 표 재시작). CPU 900초, seed 1–3, `run_ppacc.sh`/`ministud_pilot.py`.
+  - 7-stud `ppfast_hid_inh_r100_ret_rw` = `ppfast_hid_inh_r100_ret`에서 `--post-gate 0.5`를 0.1로 + `--gate-reach 1`(실행 이름 `pp_ppfast_hid_inh_r100_ret_rw_s1`, `runs_fair`).
+- 내가 정한 것:
+  1. 잡음 보정은 바탕 비교군처럼 남겼다(`--gate-noise normal`): 버킷·행동마다 가중 표본의 합에서 z_δ × (가중 표본의 표준편차 × √n)를 뺀다. 보정 없이 가중 합만 보는 쪽이 원하는 것이면 `--gate-noise none`으로 바꾼 비교군을 따로 둔다.
+  2. 가중은 현재 반복 전략의 자기 도달확률이다(평균 전략의 도달확률이 아니다).
+  3. ε(대기 조건) 0.1을 두 게임 모두에 썼다. 7-stud의 다른 pp 비교군은 0.5다.
+  4. 시작 칸은 두 게임 모두 return 칸이다. mini-stud 바탕(`ppfast_rt_hid_ret`)은 표를 다시 시작하고, 7-stud 바탕(`ppfast_hid_inh_r100_ret`)은 상속한다. 각 게임에서 이미 있는 return 칸 비교군과 대기 통계만 다르다.
+- 이 가중 값은 NashConv의 상한이 아니다(22.14). 가중 regret 합은 regret matching이 줄여 주는 양이 아니므로, 고정 추상화에서도 0으로 간다는 보장이 없다.

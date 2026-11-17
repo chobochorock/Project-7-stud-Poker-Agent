@@ -1013,6 +1013,9 @@ python tree_pilot.py BINARY OUT_DIR --status | --table | --stop
 | `ppfast_rt_hid` | `ppfast_rt` + 숨은 regret 기준 (22절) | prior: 후보 방문 1000번에 한 번 Δ 시험(정규, δ = 0.1, ε = 0); posterior: 잎 구간 방향 무리마다 Δ 시험 | 재시작, 옮긴 잎만 기록 초기화 | prior는 실시간, posterior는 잡음 보정 대기 조건 ≤ 0.1 | 0.275 | 5,194–6,024 (잎 약 1.6만) |
 | `ppfast_rt_hid_inh` | `ppfast_rt_hid` + 구간 합 상속 | 위와 같음 | 새 표가 무리 잎의 구간 합에서 시작 | 위와 같음 | 0.697 | 83–345 |
 | `ppfast_rt_hid_ah` | `ppfast_rt_hid`, 잡음 항 Azuma–Hoeffding | Δ ≥ L·Σ√(n_i ln(1/δ)/2), L = 64 | 재시작 | 위와 같음 | 0.866 | 6 (분할 없음) |
+| `ppfast_rt_hid_ts` | `ppfast_rt_hid`, 시작 칸 time-step 40개 (22.10) | 위와 같음 | 재시작 | 위와 같음 | 끊김, 두 seed (22.11) | – |
+| `ppfast_rt_hid_ret` | `ppfast_rt_hid`, 시작 칸 return 12개 (22.10) | 위와 같음 | 재시작 | 위와 같음 | 끊김, 두 seed (22.11) | – |
+| `ppfast_rt_hid_ret_rw` | `ppfast_rt_hid_ret`, 대기 통계를 자기 도달확률 가중 (22.15) | 위와 같음 | 재시작 | posterior는 가중·잡음 보정 대기 조건 ≤ 0.1 | 0.712 | 14–56 |
 | `pure_a` (기존) | pure ASWISS | 판정 시점 방향 라벨(규칙 a) | 재시작 | 2배마다, 끝까지 | 0.0075 | 약 1.8만 |
 | `ppmix_avg_root` (기존) | 기존 pp | 판정 시점 방향 라벨 | 재시작 | 2배마다, 끝까지 | 0.034 | 약 2.1만 |
 | `kmeans_a` (기존) | k-means 고정 분할 | – | – | – | 0.342 | 약 1만 |

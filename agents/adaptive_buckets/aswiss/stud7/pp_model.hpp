@@ -548,13 +548,16 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
     }
     std::array<double, A> v{};
     double node = 0;
+    const double reach = own_reach_;  // the traverser's own reach of this node (--log-reach)
     for (int a = 0; a < A; ++a) {
         if (!(mask & (1u << a))) continue;
         State child = state;
         step(child, actor, static_cast<Action>(a));
+        own_reach_ = reach * sigma[a];
         v[a] = traverse_pp(std::move(child), traverser, weight, rng);
         node += sigma[a] * v[a];
     }
+    own_reach_ = reach;
     Bucket& bucket = buckets_[b];
     if (!bucket.dirty) { bucket.dirty = true; touched_.push_back(b); }
     double best = -std::numeric_limits<double>::infinity();
@@ -571,6 +574,11 @@ double Model::traverse_pp(State state, int traverser, double weight, std::mt1993
         if (rwn_.size() <= b) { rwn_.resize(buckets_.size(), 0.0); rwq_.resize(buckets_.size()); }
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) rwq_[b][a] += rv[a] * rv[a];
         rwn_[b] += 1;
+    }
+    if (reach_log_) {  // --log-reach: plain and own-reach-weighted window sums of this bucket
+        if (rr_n_.size() <= b) { rr_raw_.resize(buckets_.size()); rr_w_.resize(buckets_.size()); rr_mass_.resize(buckets_.size(), 0.0); rr_n_.resize(buckets_.size(), 0.0); }
+        for (int a = 0; a < A; ++a) if (mask & (1u << a)) { rr_raw_[b][a] += rv[a]; rr_w_[b][a] += reach * rv[a]; }
+        rr_mass_[b] += reach; rr_n_[b] += 1;
     }
     if (acc) pp_acc_visit(leaf, *st, state, actor, rv, mask);
     return node;

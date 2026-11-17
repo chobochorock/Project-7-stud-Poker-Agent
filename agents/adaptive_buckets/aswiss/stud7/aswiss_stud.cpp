@@ -620,7 +620,28 @@ public:
     static std::pair<uint64_t, uint64_t> take_fill_counts() {
         const auto r = std::make_pair(avg_nodes_, filled_nodes_); avg_nodes_ = filled_nodes_ = 0; return r;
     }
-    void count_root() { if (track_rwin_) ++rwin_roots_; }
+    void count_root() { if (track_rwin_) ++rwin_roots_; if (reach_log_) ++rr_roots_; }
+    // --log-reach 1 (logging only; user 2026-11-17: is the window regret inflated by buckets the player itself hardly
+    // reaches?): over the same window as the waiting statistic (reset at every judgment and at the start of a process),
+    // each bucket's sampled regret sums plain and weighted by the traverser's own reach pi_i(h) under the iterate
+    void enable_reach_log() { reach_log_ = true; }
+    struct ReachStats { uint64_t roots = 0; double raw = 0, weighted = 0, share2 = 0, share4 = 0; uint64_t low2 = 0; };
+    ReachStats reach_stats() const {
+        ReachStats st; st.roots = rr_roots_;
+        if (!rr_roots_) return st;
+        double raw = 0, w = 0, low2 = 0, low4 = 0;
+        for (size_t b = 0; b < rr_raw_.size(); ++b) {
+            const double mr = std::max(0.0, *std::max_element(rr_raw_[b].begin(), rr_raw_[b].end()));
+            const double mw = std::max(0.0, *std::max_element(rr_w_[b].begin(), rr_w_[b].end()));
+            raw += mr; w += mw;
+            const double reach = rr_n_[b] > 0 ? rr_mass_[b] / rr_n_[b] : 1.0;  // the bucket's mean own reach per visit
+            if (reach < 1e-2) { low2 += mr; ++st.low2; }
+            if (reach < 1e-4) low4 += mr;
+        }
+        st.raw = raw / static_cast<double>(rr_roots_); st.weighted = w / static_cast<double>(rr_roots_);
+        st.share2 = raw > 0 ? low2 / raw : 0; st.share4 = raw > 0 ? low4 / raw : 0;
+        return st;
+    }
     // --log-splits: rows of the next hsplit / hbackward go to `log`, tagged with this epoch and root count
     void set_split_log(std::ostream* log, uint64_t epoch, uint64_t roots) { split_log_ = log; split_epoch_ = epoch; split_roots_ = roots; }
     uint64_t iterate_window_roots() const { return rwin_roots_; }
@@ -631,6 +652,7 @@ public:
         const double v = rwin_roots_ ? total / static_cast<double>(rwin_roots_) / 2 : 0;
         if (reset) {
             rwin_.assign(rwin_.size(), {}); rwin_roots_ = 0;
+            if (reach_log_) { rr_raw_.assign(rr_raw_.size(), {}); rr_w_.assign(rr_w_.size(), {}); rr_mass_.assign(rr_mass_.size(), 0.0); rr_n_.assign(rr_n_.size(), 0.0); rr_roots_ = 0; }
             if (gate_z_ > 0) { rwq_.assign(rwq_.size(), {}); rwn_.assign(rwn_.size(), 0.0); }
         }
         return v;
@@ -661,7 +683,7 @@ public:
     // here, linear weight); the traverser enumerates its 12 actions, each followed by the betting traversal on the same
     // cards; the H4 regrets are applied with the betting regrets after the traversal (apply_regrets).
     double traverse_root(const std::vector<Card>& deck, int traverser, double weight, std::mt19937_64& rng, bool track) {
-        if (partition_ == Partition::PP) return traverse_pp(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng);
+        if (partition_ == Partition::PP) { own_reach_ = 1; return traverse_pp(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng); }
         if (partition_ == Partition::History)
             return traverse_h(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), Trail{}, traverser, weight, rng, track);
         if (!h4_) return traverse(sample_fifth_street_root(deck, kAnte, kEffectiveStackAnte), traverser, weight, rng, track);
@@ -1497,6 +1519,11 @@ private:
     std::vector<std::array<double, A>> rwin_;  // see track_iterate_regret
     uint64_t rwin_roots_ = 0;
     double gate_z_ = 0;                        // --gate-noise normal: z_d (0: off)
+    bool reach_log_ = false;                   // --log-reach 1
+    double own_reach_ = 1;                     // the traverser's own reach of the node being traversed (pp)
+    std::vector<std::array<double, A>> rr_raw_, rr_w_;
+    std::vector<double> rr_mass_, rr_n_;
+    uint64_t rr_roots_ = 0;
     std::vector<std::array<double, A>> rwq_;   // --gate-noise: window sums of squared per-visit regrets per bucket
     std::vector<double> rwn_;                  // --gate-noise: window traverser visits per bucket
     HMap hatoms_;
@@ -1957,7 +1984,7 @@ int train(int argc, char** argv) {
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
                                 {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
                                 {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
-                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}});
+                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}, {"--log-reach", "0"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2105,6 +2132,11 @@ int train(int argc, char** argv) {
     const bool post_acc = pp_mode && ppo.two_layer_acc();  // two-layer accum: the posterior window regret
     model.track_iterate_regret(std::stod(o["--gate-eps"]) > 0 || log_regret || post_acc);
     if (post_acc && ppo.gate_noise) model.set_gate_noise(ppo.hid_zq);
+    // --log-reach 1 (logging only, not part of the run's settings): OUT/pp_reach.csv every --post-check roots
+    if (o["--log-reach"] != "0" && o["--log-reach"] != "1") throw std::runtime_error("--log-reach must be 0 or 1");
+    const bool log_reach = o["--log-reach"] == "1";
+    if (log_reach && !post_acc) throw std::runtime_error("--log-reach needs --tree-split accum with --pp-structure pp");
+    if (log_reach) model.enable_reach_log();
     if (avg_fill) model.enable_avg_fill(std::stod(o["--avg-fill-reach"]));
     const std::string out = o.at("--out");
     if (out.empty()) throw std::runtime_error("--out is required");
@@ -2369,7 +2401,15 @@ int train(int argc, char** argv) {
                 if (ppo.gate_noise) ppq_log << ',' << wn;
                 if (ppo.post_time_switch > 0) ppq_log << ',' << (model.ppd()->post_regret_phase ? "regret" : "time");
                 ppq_log << '\n';
-                ppq_log.flush();  // one row per check, read by tree_pilot.py --status while training runs (logging only)
+                ppq_log.flush();
+                if (log_reach) {
+                    const std::string rp = out + "/pp_reach.csv";
+                    const bool fresh = !std::filesystem::exists(rp);
+                    std::ofstream rl(rp, std::ios::app);
+                    if (fresh) rl << "roots,window_roots,window_regret,window_regret_own_reach,share_buckets_reach_below_1e-2,share_buckets_reach_below_1e-4,buckets_reach_below_1e-2\n";
+                    const auto rs = model.reach_stats();
+                    rl << s.t << ',' << rs.roots << ',' << rs.raw << ',' << rs.weighted << ',' << rs.share2 << ',' << rs.share4 << ',' << rs.low2 << '\n';
+                }  // one row per check, read by tree_pilot.py --status while training runs (logging only)
             }
         }
         const double gap = model.take_traversal_gap() / 2;  // mean of the two seats, this root

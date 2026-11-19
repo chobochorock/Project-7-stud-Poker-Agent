@@ -119,6 +119,13 @@ $Arm = @{   # name, partition, atlas K, label, extra trainer arguments
     # reach (every sampled regret in the window counts with the traverser's own reach pi_i(h) under the iterate,
     # --gate-reach 1) and the gate 0.1
     ppfast_hid_inh_r100_ret_rw = @("pp_ppfast_hid_inh_r100_ret_rw", "pp", 0, "ppfast_hid_inh_r100_ret, posterior when the own-reach-weighted window regret beyond noise <= 0.1", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.1 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --prior-leaf-ratio 100 --pp-cells return --gate-reach 1")
+    # pphist_freedman_rt (user, 2026-11-19: the eps = 0 setting on 7-stud too): the mini-stud long run of design 22.12/22.13 with
+    # eps = 0 on 7-stud: start cells = the player's own constraints (street, first/second actor, legal action set) on the
+    # path from 5th street (--pp-cells history), real-time prior (1,000 visits, normal), posterior tested every 10,000 roots
+    # on every bucket with the leaves' records since their pointers were set, Freedman noise term (--post-realtime 1
+    # --post-bound freedman, L = 4,004 ante), new tables inherit regrets and average sums; --post-gate 0.5 only restarts
+    # the window shown by -Action status
+    pphist_freedman_rt = @("pp_pphist_freedman_rt", "pp", 0, "7-stud port of mini-stud pphist_freedman_rt (eps = 0): bucket-history start cells, real-time Freedman posterior, full inheritance", "--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --pp-cells history --post-realtime 1 --post-bound freedman")
     pp_tree_full = @("pp_tree_inherit_full", "pp", 0, "single tree, new leaves inherit regrets and the average table", "--epoch0 1000 --online-lbr-schedule split --pp-structure tree --inherit-regret 1 --inherit-avg 1")
     # SOTA baseline: MMD self-play with a policy network (sota/mmd.hpp; the atlas K is unused)
     mmd       = @("net_mmd", "net", 1024, "MMD self-play (policy network)", "--algo mmd")

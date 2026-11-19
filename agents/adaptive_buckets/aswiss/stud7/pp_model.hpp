@@ -43,6 +43,10 @@ uint16_t Model::pp_cell_key(const State& s, int v) const {
     const uint8_t mask = valid_mask(s, v);
     const int mode = pp_->opt.cells;
     if (mode == 0) return static_cast<uint16_t>(s.street << 8 | mask);
+    if (mode == 3) {  // --pp-cells history: the index of the full key's cell (0xffff: not created yet)
+        const auto it = pp_->hist_of.find(pp_history_key(s, v));
+        return it == pp_->hist_of.end() ? static_cast<uint16_t>(0xffff) : it->second;
+    }
     const int cap = street_cap(s.street);
     std::array<int, 2> bets{}; std::array<bool, 2> checked{};
     bool facing = false;
@@ -60,6 +64,34 @@ uint16_t Model::pp_cell_key(const State& s, int v) const {
     const int now = cls(v);
     const int index = mode == 1 ? decisions : static_cast<int>(std::count(classes.begin(), classes.end(), now));
     return static_cast<uint16_t>((s.street | role << 3 | std::min(index, 7) << 4) << 8 | mask);
+}
+
+// --pp-cells history: seat v's own constraints on the path from 5th street, c = (street, first or second actor of the
+// street, legal action class), the earlier ones rebuilt from the betting rules as for return (class 0: no bet to face,
+// 1: facing a bet and may raise, 2: facing a bet and may not raise: checked or at the street's cap), each coded
+// 1 + (street - 5) * 6 + role * 3 + class in 5 bits (at most 8 earlier decisions: 2 on 5th, 3 on 6th, 3 before the
+// last on 7th). Key = prefix << 16 | (street | role << 3) << 8 | mask of the current decision.
+uint64_t Model::pp_history_key(const State& s, int v) const {
+    uint64_t prefix = 0;
+    int len = 0, cur = -1, first = -1, cap = 0;
+    std::array<int, 2> bets{}; std::array<bool, 2> checked{};
+    bool facing = false;
+    for (const Event& e : s.history) {
+        if (e.street < 5) continue;
+        if (e.street != cur) { cur = e.street; first = -1; cap = street_cap(cur); bets = {}; checked = {}; facing = false; }
+        if (first < 0) first = e.actor;
+        if (e.actor == v) {
+            const int role = first == v ? 0 : 1;
+            const int cls = facing ? (!checked[v] && bets[v] < cap ? 1 : 2) : 0;
+            if (len >= 8) throw std::runtime_error("--pp-cells history: more than 8 earlier decisions of one player");
+            prefix |= static_cast<uint64_t>(1 + (cur - 5) * 6 + role * 3 + cls) << (5 * len);
+            ++len;
+        }
+        if (aggressive(e.action)) { ++bets[e.actor]; facing = true; }
+        else if (e.action == CHECK) checked[e.actor] = true;
+    }
+    const int role = cur != s.street || first < 0 || first == v ? 0 : 1;
+    return prefix << 16 | static_cast<uint64_t>(s.street | role << 3) << 8 | valid_mask(s, v);
 }
 
 uint32_t Model::pp_locate(const State& s, int viewer, int32_t* leaf_out) const {
@@ -269,7 +301,18 @@ uint32_t Model::pp_route_root(const pp::Cell& cell, const std::vector<const pp::
 // The training lookup: creates a start cell on its first visit. --pp-assign fill: a traverser visit to a pending leaf is
 // routed by its own direction and kept as one of the leaf's m samples; the m-th fixes the pointer.
 uint32_t Model::pp_train_bucket(const State& s, int v, bool traverser, int32_t* leaf_out, pp::Stream* stream_out) {
-    const uint16_t ctx = pp_cell_key(s, v);
+    uint16_t ctx;
+    if (pp_->opt.cells == 3) {  // --pp-cells history: a new full key gets the next index (cells are created in order)
+        const uint64_t key = pp_history_key(s, v);
+        auto [h, fresh] = pp_->hist_of.try_emplace(key, static_cast<uint16_t>(pp_->cells.size()));
+        if (fresh) {
+            if (pp_->cells.size() >= 0xffff) throw std::runtime_error("--pp-cells history: more than 65,535 cells");
+            pp_->cell_key.push_back(key);
+        }
+        ctx = h->second;
+    } else {
+        ctx = pp_cell_key(s, v);
+    }
     auto [it, inserted] = pp_->cell_of.try_emplace(ctx, static_cast<int32_t>(pp_->cells.size()));
     if (inserted) {
         pp::Cell c;
@@ -400,7 +443,7 @@ int Model::pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, in
             pp_->leaves[nl[side]].ptr = part[side].empty() ? pp_->leaves[it.leaf].ptr : pointer_of(nl[side], part[side], true);
             q.push(evaluate(nl[side], part[side]));
         }
-        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ','
+        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp_->street_of(ctx) << ',' << +pp_->mask_of(ctx) << ',' << depth << ','
                         << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << it.signal << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
@@ -486,7 +529,7 @@ int Model::pp_tree_split(const std::vector<std::pair<int32_t, std::vector<int>>>
         pp_->leaves[it.leaf].node = -1;
         ++made; ++pp_->prior_splits;
         if (it.round == 0 && top) ++*top;
-        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ','
+        if (plog) *plog << epoch << ',' << pp_root_now_ << ',' << it.leaf << ',' << pp_->street_of(ctx) << ',' << +pp_->mask_of(ctx) << ',' << depth << ','
                         << '"' << pp::desc_name(it.cand.d) << '"' << ',' << it.cand.thr << ',' << it.cand.gainA << ',' << it.cand.gainB << ','
                         << it.idx.size() << ',' << 1 << ',' << nl[0] << ',' << nl[1] << ',' << pp_->leaves[nl[0]].ptr << ','
                         << pp_->leaves[nl[1]].ptr << '\n';
@@ -662,7 +705,7 @@ int Model::pp_visit_checks(uint64_t epoch, uint64_t roots, std::ostream& plog) {
         if (!pp_cap_ok()) continue;
         if (D.leaves[l].node < 0) continue;
         pp::LeafAcc& LA = D.acc[l];
-        const uint8_t mask = static_cast<uint8_t>(D.leaves[l].ctx & 0xff);
+        const uint8_t mask = D.mask_of(D.leaves[l].ctx);
         int best = -1;
         pp::AccTest bt;
         std::vector<char> due(LA.cand.size(), 0);
@@ -722,10 +765,12 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
         if (D.leaves[l].node >= 0) users[D.leaves[l].ptr].push_back(l);
     int splits = 0;
     diverging = 0; moved = 0;
-    if (O.div_hidden) D.win.resize(D.leaves.size());
+    if (O.div_hidden && !O.post_realtime) D.win.resize(D.leaves.size());
+    // --post-realtime 1: the records since the leaves' pointers were set (D.own), tested every --post-check roots
+    const std::vector<pp::LeafOwn>& rec = O.post_realtime ? D.own : D.win;
     for (uint32_t b = 0; b < B0; ++b) {
         if (users[b].size() < 2) continue;
-        const uint8_t mask = static_cast<uint8_t>(D.leaves[users[b][0]].ctx & 0xff);
+        const uint8_t mask = D.mask_of(D.leaves[users[b][0]].ctx);
         if (O.div_hidden) {  // --div-metric hidden: groups by the leaves' stored window directions, one test per action
             // B_a: the leaves whose window record has >= --acc-min-visits visits and a positive largest sum, at action a
             // (its legal argmax); the others stay. B_a is tested against the rest of the bucket (b minus B_a) by the
@@ -733,7 +778,7 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
             std::map<int, std::vector<int32_t>> grp;
             pp::LeafOwn tot;
             for (int32_t l : users[b]) {
-                const pp::LeafOwn& w = D.win[l];
+                const pp::LeafOwn& w = rec[l];
                 for (int a = 0; a < A; ++a) { tot.s[a] += w.s[a]; tot.q[a] += w.q[a]; }
                 tot.n += w.n;
                 if (w.n < O.acc_min) continue;
@@ -744,16 +789,16 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
             std::vector<std::vector<int32_t>> pass;
             for (auto& [lab, ls] : grp) {
                 pp::LeafOwn g, rest;
-                for (int32_t l : ls) { for (int a = 0; a < A; ++a) { g.s[a] += D.win[l].s[a]; g.q[a] += D.win[l].q[a]; } g.n += D.win[l].n; }
+                for (int32_t l : ls) { for (int a = 0; a < A; ++a) { g.s[a] += rec[l].s[a]; g.q[a] += rec[l].q[a]; } g.n += rec[l].n; }
                 for (int a = 0; a < A; ++a) { rest.s[a] = tot.s[a] - g.s[a]; rest.q[a] = std::max(0.0, tot.q[a] - g.q[a]); }
                 rest.n = tot.n - g.n;
-                if (pp::hid_test(g.s, g.q, g.n, rest.s, rest.q, rest.n, mask, O.acc_min, O).pass) { pass.push_back(ls); ++diverging; }
+                if (pp::hid_test(g.s, g.q, g.n, rest.s, rest.q, rest.n, mask, O.acc_min, O, O.post_bound).pass) { pass.push_back(ls); ++diverging; }
             }
             if (pass.empty()) continue;
             auto start_tables = [&](uint32_t nb, const std::vector<int32_t>& ls) {  // --inherit-candidate 1 (RM+: clipped at 0)
                 if (!O.inherit_cand) return;
                 std::array<double, A> q{};
-                for (int32_t l : ls) for (int a = 0; a < A; ++a) q[a] += D.win[l].s[a];
+                for (int32_t l : ls) for (int a = 0; a < A; ++a) q[a] += rec[l].s[a];
                 for (int a = 0; a < A; ++a) buckets_[nb].q[a] = (mask & (1u << a)) ? std::max(0.0, q[a]) : 0.0;
             };
             std::vector<char> mv(users[b].size(), 0);
@@ -825,7 +870,7 @@ int Model::pp_posterior_acc(uint64_t roots, uint64_t& diverging, uint64_t& moved
     }
     ++D.post_judgments;
     if (splits) { ++D.level; D.post_splits += static_cast<uint64_t>(splits); }
-    if (O.div_hidden) D.win.assign(D.leaves.size(), pp::LeafOwn{});  // the next window starts here
+    if (O.div_hidden && !O.post_realtime) D.win.assign(D.leaves.size(), pp::LeafOwn{});  // the next window starts here
     pp_recount_cap();
     return splits;
 }
@@ -848,7 +893,7 @@ bool Model::pp_cap_ok() const {
 // state falls on, and the state is offered to the leaf's sample reservoir (Algorithm R with a deterministic draw)
 void Model::pp_acc_visit(int32_t l, const pp::Stream& st, const State& s, int v, const std::array<double, A>& r, uint8_t mask) {
     pp::Data& D = *pp_;
-    if (D.opt.div_hidden) {  // --div-metric hidden: the leaf's window record (the posterior groups by its direction)
+    if (D.opt.div_hidden && !D.opt.post_realtime) {  // --div-metric hidden: the leaf's window record (the posterior groups by its direction)
         if (D.win.size() <= static_cast<size_t>(l)) D.win.resize(D.leaves.size());
         pp::LeafOwn& w = D.win[l];
         for (int a = 0; a < A; ++a) if (mask & (1u << a)) { w.s[a] += r[a]; w.q[a] += r[a] * r[a]; }
@@ -974,7 +1019,7 @@ void Model::pp_acc_split(int32_t l, int best, const pp::AccTest& bt, uint64_t ep
     if (!O.tree) D.own[l] = pp::LeafOwn{};
     if (O.div_hidden && D.win.size() > static_cast<size_t>(l)) D.win[l] = pp::LeafOwn{};  // the children's windows start at 0
     ++D.prior_splits; ++D.live_count;
-    plog << epoch << ',' << roots << ',' << l << ',' << pp::cell_street(ctx) << ',' << (ctx & 0xff) << ',' << depth << ',' << '"'
+    plog << epoch << ',' << roots << ',' << l << ',' << D.street_of(ctx) << ',' << +D.mask_of(ctx) << ',' << depth << ',' << '"'
          << pp::desc_name(c.d) << '"' << ',' << c.thr << ',' << (O.acc_dir ? bt.dist : bt.gain) << ',' << bt.z << ',' << c.n[0] + c.n[1] << ',' << 1 << ','
          << nl[0] << ',' << nl[1] << ',' << D.leaves[nl[0]].ptr << ',' << D.leaves[nl[1]].ptr << '\n';
 }
@@ -999,7 +1044,7 @@ int Model::pp_judge_acc(uint64_t epoch, uint64_t roots, uint64_t fill_steps, std
         if (O.two_layer_acc() && !pp_cap_ok()) break;  // --prior-leaf-ratio: at the cap the remaining leaves keep their candidates
         if (D.leaves[l].node < 0) continue;
         pp::LeafAcc& LA = D.acc[l];
-        const uint8_t mask = static_cast<uint8_t>(D.leaves[l].ctx & 0xff);
+        const uint8_t mask = D.mask_of(D.leaves[l].ctx);
         int best = -1;
         pp::AccTest bt;
         std::vector<pp::AccTest> ts(LA.cand.size());
@@ -1242,6 +1287,7 @@ void Model::pp_save(std::ofstream& out, bool full) const {
     put(out, D.level);
     put(out, static_cast<uint64_t>(D.cells.size()));
     for (const auto& c : D.cells) { put(out, c.ctx); put(out, c.root); put(out, c.bucket); }
+    if (D.opt.cells == 3) for (uint64_t k : D.cell_key) put(out, k);  // --pp-cells history: the cells' full keys
     put(out, static_cast<uint64_t>(D.nodes.size()));
     for (const auto& n : D.nodes) { put(out, n.d); put(out, n.thr); put(out, n.left); put(out, n.right); put(out, n.leaf); }
     put(out, static_cast<uint64_t>(D.leaves.size()));
@@ -1300,6 +1346,11 @@ void Model::pp_load(std::ifstream& in, bool full) {
     uint64_t n; get(in, n);
     D.cells.assign(n, {}); D.cell_of.clear();
     for (uint64_t i = 0; i < n; ++i) { auto& c = D.cells[i]; get(in, c.ctx); get(in, c.root); get(in, c.bucket); D.cell_of[c.ctx] = static_cast<int32_t>(i); }
+    D.cell_key.clear(); D.hist_of.clear();
+    if (D.opt.cells == 3) {
+        D.cell_key.assign(n, 0);
+        for (uint64_t i = 0; i < n; ++i) { get(in, D.cell_key[i]); D.hist_of[D.cell_key[i]] = D.cells[i].ctx; }
+    }
     get(in, n);
     D.nodes.assign(n, {});
     for (auto& x : D.nodes) { get(in, x.d); get(in, x.thr); get(in, x.left); get(in, x.right); get(in, x.leaf); }

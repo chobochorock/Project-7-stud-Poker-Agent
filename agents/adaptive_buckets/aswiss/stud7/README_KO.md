@@ -1783,3 +1783,29 @@ powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\ru
   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms ppfast_hid_inh_r100_ret_rw -ExeName aswiss_retrw.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
   powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status -Arms ppfast_hid_inh_r100_ret,ppfast_hid_inh_r100_ret_tr,ppfast_hid_inh_r100_ret_rw -Watch 60 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
   ```
+
+
+## `runs_fair`에 `pphist_freedman_rt` 추가 (2026-11-19)
+
+mini-stud에서 끝까지 내려간 ε = 0 장기 실행(`PP_STUD7_DESIGN_KO.md` 22.12, 22.13)의 설정을 7-stud로 옮긴 비교군이다(설계 22.16). `runs_fair`와 같은 조건(학습 CPU 24시간, 온라인 LBR 1,000 roots마다 64파티클, 같은 deal, 평균 정책 평가)으로 같은 폴더에서 돌린다. 다른 비교군이 쓰는 exe를 덮지 않게 exe 이름을 따로 준다.
+
+```
+# 코드 받기 (exe는 첫 실행 때 새 이름으로 만들어진다)
+git pull
+# 시작 (백그라운드, 창은 바로 돌아온다)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Arms pphist_freedman_rt -ExeName aswiss_pphist.exe -Roots 1000000000 -BudgetCpuSeconds 86400 -OnlineLbrEvery 1000 -OnlineLbrParticles 64 -SnapshotEvery 0 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 상태 (60초마다, Ctrl+C로 끝)
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action status -Arms hist_bbf,k256,pphist_freedman_rt -BudgetCpuSeconds 86400 -Watch 60 -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+# 예산이 끝난 뒤: epoch 스냅숏(2,000 pair), 예산 스냅숏(20,000 pair), 그림, 묶음
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action eval -Arms pphist_freedman_rt -AverageOnly -ExeName aswiss_pphist.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action final -Arms pphist_freedman_rt -AverageOnly -ExeName aswiss_pphist.exe -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action plot -Arms hist_bbf,k256,pphist_freedman_rt -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+powershell -ExecutionPolicy Bypass -File agents\adaptive_buckets\aswiss\stud7\run_100m.ps1 -Action pack -Out agents\adaptive_buckets\aswiss\stud7\data\runs_fair
+```
+- 비교군 `pphist_freedman_rt`(실행 이름 `pp_pphist_freedman_rt_s1`): `--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --pp-cells history --post-realtime 1 --post-bound freedman`.
+  - 시작 칸은 플레이어가 5th street부터 지나온 자기 칸 (스트리트, 첫/둘째 행동자, 합법 행동 집합)의 순서다(규칙으로 284칸).
+  - prior는 `ppfast_hid`와 같다(후보 방문 1,000에 한 번, 정규 근사, δ = 0.1).
+  - posterior는 1만 roots마다 모든 버킷을 잎 기록(포인터가 정해진 뒤)의 방향 무리로 Freedman 시험해 통과하면 바로 나눈다(L = 4,004 ante, ε = 0). 새 표는 부모의 regret과 평균 합을 그대로 가진다.
+- 상태 화면의 posterior 줄은 `posterior (real time, every check): 나뉜 버킷 수, 나뉜 확인 수 / 전체 확인 수, 마지막 분할 root; 표, prior 잎; window regret ...`이다. 구간 regret은 보여 주기만 하고 분할에 쓰지 않는다(0.5 이하가 되면 창만 다시 시작).
+- history snapshot은 판 번호 `ASWSTUD3`로 칸 방식을 함께 저장해 `eval`/`final`이 같은 칸으로 찾는다. 이전 exe로는 이 snapshot을 읽지 못하므로 평가에도 `-ExeName aswiss_pphist.exe`를 준다.
+- 이 기계의 짧은 실행(40만 roots, seed 1): 표 182(1만) → 3,006(10만) → 10,080(40만), prior 잎 22,398, 학습 CPU root당 평균 0.56 ms. 설계 22.16.

@@ -39,6 +39,13 @@ struct Opts {
     bool div_hidden = false;     // --div-metric hidden: a posterior judgment groups each bucket's leaves by their stored
                                  // window direction and tests each group against the rest of its bucket
     bool hid_azuma = false;      // --hid-bound azuma: noise L (sqrt(n1 ln(1/d) / 2) + sqrt(n2 ln(1/d) / 2)); normal: z_d (s1 sqrt n1 + s2 sqrt n2)
+    bool hid_freedman = false;   // --hid-bound freedman: per side x = c + sqrt(c^2 + 2 V ln(1/d)), c = L ln(1/d) / 3, V the side's
+                                 // largest per-action sum of squared deviations (Freedman's inequality solved for d)
+    int post_bound = -1;         // --post-bound normal|azuma|freedman: the posterior test's noise term (-1 same: as --hid-bound)
+    // --post-realtime 1 (mini-stud 22.12, user 2026-11-16: "확실하게 분할이 확정적인 경우 그 즉시 분할"): every --post-check roots
+    // the posterior test runs on every bucket with the leaves' own records since their pointers were set (D.own), and a
+    // passing group moves at once; --post-gate then only restarts the window (the pp_post.csv statistic)
+    bool post_realtime = false;
     double hid_delta = 0.1, hid_eps = 0, hid_range = 0, hid_zq = 0;  // d, eps, L (ante), z_d = Phi^-1(1 - d)
     bool gate_noise = false;     // --gate-noise normal: the posterior waiting statistic counts only regret beyond z_d x noise
     bool inherit_cand = false;   // --inherit-candidate 1: the tables of a posterior split start from their leaves' window sums
@@ -48,7 +55,10 @@ struct Opts {
     // second actor of the street, the actor's decision index in the street, legal action set). 2 return (the user's
     // rule): a decision that comes back to a cell B (street, first or second actor, legal action set) its player already
     // visited in this street goes to a cell B' of the same constraint whose history holds B: (street, actor role,
-    // legal action set, the player's earlier decisions of that constraint in the street).
+    // legal action set, the player's earlier decisions of that constraint in the street). 3 history (mini-stud
+    // --start-cells history, 22.12): the player's own constraints c = (street, first or second actor, legal action set) on
+    // the path from 5th street, earlier ones rebuilt from the betting rules (as return), the current one with its mask;
+    // a cell key is then an index into Data::cell_key (the full key does not fit 16 bits).
     int cells = 0;
     // --post-time-switch X (X > 0; user, 2026-11-16): posterior judgments first at the epoch ends (the runner's schedule,
     // the same roots as the other arms' epoch snapshots), whatever the window regret. Right after such a judgment (at the
@@ -148,8 +158,11 @@ AccTest acc_test(const AccCand& c, uint8_t mask, double min_visits, double z_min
 // min_visits. gain = D / t, z = (D - eps t - noise) / t, d2 = D. The noise of a side is one action's (one-sided):
 // normal, z_d x the side's largest per-visit standard deviation over its legal actions x sqrt(visits); Azuma-Hoeffding,
 // L sqrt(visits ln(1/d) / 2). A split with D = 0 never passes.
+// bound: -1 as --hid-bound, 0 normal, 1 Azuma-Hoeffding, 2 Freedman (per side c + sqrt(c^2 + 2 V ln(1/d)), c = L ln(1/d) / 3,
+// V = visits x the largest per-visit variance, the mini-stud --post-bound freedman).
 AccTest hid_test(const std::array<double, A>& s0, const std::array<double, A>& q0, double n0,
-                 const std::array<double, A>& s1, const std::array<double, A>& q1, double n1, uint8_t mask, double min_visits, const Opts& O) {
+                 const std::array<double, A>& s1, const std::array<double, A>& q1, double n1, uint8_t mask, double min_visits, const Opts& O,
+                 int bound = -1) {
     AccTest t;
     if (n0 < min_visits || n1 < min_visits) return t;
     t.testable = true;
@@ -162,8 +175,15 @@ AccTest hid_test(const std::array<double, A>& s0, const std::array<double, A>& q
         sd1 = std::max(sd1, std::sqrt(std::max(0.0, q1[a] / n1 - u1 * u1)));
     }
     const double D = m0 + m1 - mb, tt = n0 + n1;
-    const double noise = O.hid_azuma ? O.hid_range * (std::sqrt(n0 * std::log(1 / O.hid_delta) / 2) + std::sqrt(n1 * std::log(1 / O.hid_delta) / 2))
-                                     : O.hid_zq * (sd0 * std::sqrt(n0) + sd1 * std::sqrt(n1));
+    const int bd = bound >= 0 ? bound : O.hid_azuma ? 1 : O.hid_freedman ? 2 : 0;
+    double noise;
+    if (bd == 2) {
+        const double lg = std::log(1 / O.hid_delta), c = O.hid_range * lg / 3;
+        noise = c + std::sqrt(c * c + 2 * n0 * sd0 * sd0 * lg) + c + std::sqrt(c * c + 2 * n1 * sd1 * sd1 * lg);
+    } else {
+        noise = bd == 1 ? O.hid_range * (std::sqrt(n0 * std::log(1 / O.hid_delta) / 2) + std::sqrt(n1 * std::log(1 / O.hid_delta) / 2))
+                        : O.hid_zq * (sd0 * std::sqrt(n0) + sd1 * std::sqrt(n1));
+    }
     t.d2 = D; t.gain = D / tt; t.z = (D - O.hid_eps * tt - noise) / tt;
     t.pass = D > 0 && D >= O.hid_eps * tt + noise;
     return t;
@@ -223,6 +243,11 @@ struct Data {
     bool post_switch_due = false;    // --post-time-switch: a time judgment happened; the next check reads the statistic
     std::vector<LeafOwn> win;   // --div-metric hidden: per leaf, the regret record since the last posterior judgment (checkpointed)
     uint64_t live_count = 0, used_buckets = 0;  // --prior-leaf-ratio: live leaves and buckets some live leaf points to (recounted)
+    // --pp-cells history: cell key -> its full key (prefix << 16 | street, role << 8 | mask) and back (checkpointed)
+    std::vector<uint64_t> cell_key;
+    std::unordered_map<uint64_t, uint16_t> hist_of;
+    uint8_t mask_of(uint16_t ctx) const { return opt.cells == 3 ? static_cast<uint8_t>(cell_key[ctx] & 0xff) : static_cast<uint8_t>(ctx & 0xff); }
+    int street_of(uint16_t ctx) const { return opt.cells == 3 ? static_cast<int>((cell_key[ctx] >> 8) & 7) : cell_street(ctx); }
 
     uint32_t ancestor(uint32_t b, int32_t lv, const std::vector<uint32_t>& parent) const {
         while (b != 0xffffffffu && born[b] > lv) b = parent[b];

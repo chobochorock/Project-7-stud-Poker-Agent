@@ -4,7 +4,7 @@ Usage: python run_status.py OUT --runs NAME:LABEL ... [--budget SECONDS] [--watc
 Per arm: whether its process runs (OUT/NAME.pid), training roots, training CPU (and the share of --budget), tables in
 use, resident memory (curve.csv, written every -CurveEvery roots); the online LBR of the average policy, mean of the
 last --last deals with a 90% interval (online_lbr.csv, runs trained with -OnlineLbrEvery); evaluations made
-(eval.jsonl, eval_final.jsonl) with the newest one; and for the two-layer accumulated-regret arms (ppfast_rt, ppfast_hid*) the
+(eval.jsonl, eval_final.jsonl) with the newest one; and for the two-layer accumulated-regret arms (ppfast_rt, ppfast_hid*, pphist_freedman_rt) the
 posterior waiting condition (pp_post.csv, one row every 10,000 roots: the window regret against the gate, judgments,
 the root of the last one, tables, prior leaves, and whether the prior stopped at the memory budget).
 --watch N repeats every N seconds (Ctrl+C ends it). Only reads files: the training is not touched.
@@ -99,9 +99,18 @@ def show():
                 if p.get("window_regret_own_reach"):  # --gate-reach 1: the condition is the own-reach-weighted statistic
                     nb = f"beyond noise {float(p['window_regret_beyond_noise']):.3f}; " if p.get("window_regret_beyond_noise") else ""
                     noise = f" ({nb}own-reach weighted {float(p['window_regret_own_reach']):.3f}, the condition)"
-                print(f"    posterior: window regret {float(p['window_regret']):.3f}{noise} ante (gate {p['gate']}) over "
-                      f"{int(p['window_roots']):,} roots; {len(j)} judgments{lastj}; {int(p['buckets_after']):,} tables, "
-                      f"{int(p['live_leaves']):,} prior leaves{frozen}")
+                if p.get("window_restart") is not None:  # --post-realtime 1: a posterior test at every check, no waiting
+                    sp = [r for r in allr if int(r["buckets_split"]) > 0]
+                    lasts = f", last at {int(sp[-1]['roots']):,} roots" if sp else ""
+                    wn = f", beyond noise {float(p['window_regret_beyond_noise']):.3f}" if p.get("window_regret_beyond_noise") else ""
+                    print(f"    posterior (real time, every check): {sum(int(r['buckets_split']) for r in sp):,} buckets split in "
+                          f"{len(sp)} of {len(allr)} checks{lasts}; {int(p['buckets_after']):,} tables, {int(p['live_leaves']):,} prior "
+                          f"leaves{frozen}; window regret {float(p['window_regret']):.3f}{wn} ante over {int(p['window_roots']):,} roots "
+                          f"(display only: the window restarts when it is <= {p['gate']})")
+                else:
+                    print(f"    posterior: window regret {float(p['window_regret']):.3f}{noise} ante (gate {p['gate']}) over "
+                          f"{int(p['window_roots']):,} roots; {len(j)} judgments{lastj}; {int(p['buckets_after']):,} tables, "
+                          f"{int(p['live_leaves']):,} prior leaves{frozen}")
 
 
 while True:

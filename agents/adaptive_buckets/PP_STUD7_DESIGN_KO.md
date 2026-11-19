@@ -1016,10 +1016,14 @@ python tree_pilot.py BINARY OUT_DIR --status | --table | --stop
 | `ppfast_rt_hid_ts` | `ppfast_rt_hid`, 시작 칸 time-step 40개 (22.10) | 위와 같음 | 재시작 | 위와 같음 | 끊김, 두 seed (22.11) | – |
 | `ppfast_rt_hid_ret` | `ppfast_rt_hid`, 시작 칸 return 12개 (22.10) | 위와 같음 | 재시작 | 위와 같음 | 끊김, 두 seed (22.11) | – |
 | `ppfast_rt_hid_ret_rw` | `ppfast_rt_hid_ret`, 대기 통계를 자기 도달확률 가중 (22.15) | 위와 같음 | 재시작 | posterior는 가중·잡음 보정 대기 조건 ≤ 0.1 | 0.712 | 14–56 |
+| `pphist_freedman_rt` | pp, 버킷 이력 시작 칸 20개 (22.12) | prior: 후보 방문 1000번에 한 번 Δ 시험(정규, δ = 0.1); posterior: 잎 기록 방향 무리마다 Δ 시험(Freedman, ε = 0) | 완전 상속, 옮긴 잎만 기록 초기화 | prior 실시간, posterior 1만 반복마다 실시간 | 0.545 | 4,847–5,864 |
+| `pphist_freedman_rt_root001` / `_root003` / `_root01` | `pphist_freedman_rt`, posterior ε 0.01 / 0.03 / 0.1 (root당, 22.13) | posterior: Δ ≥ ε·T + Freedman 항 | 위와 같음 | 위와 같음 | 긴 실행(seed 1, 시간 제한 없음): 167.77억 반복 0.496 / 0.661 / 0.592 (ε = 0은 0.173) | 962 / 340 / 82 |
 | `pure_a` (기존) | pure ASWISS | 판정 시점 방향 라벨(규칙 a) | 재시작 | 2배마다, 끝까지 | 0.0075 | 약 1.8만 |
 | `ppmix_avg_root` (기존) | 기존 pp | 판정 시점 방향 라벨 | 재시작 | 2배마다, 끝까지 | 0.034 | 약 2.1만 |
 | `kmeans_a` (기존) | k-means 고정 분할 | – | – | – | 0.342 | 약 1만 |
 | `mccfr` (기존) | 추상화 없음 | – | – | – | 0.0022 | 51,114 |
+
+7-stud `runs_fair` 비교군(실행 이름 `pp_<ID>_s1`, `run_100m.ps1`/`.sh`): `ppfast_rt`(19.10), `ppfast_hid`, `ppfast_hid_r100`(22.4), `ppfast_hid_inh`(22.7), `ppfast_hid_inh_r100`, `ppfast_hid_inh_r100_ts`, `ppfast_hid_inh_r100_ret`(22.10), `ppfast_hid_inh_r100_tr`, `ppfast_hid_inh_r100_ret_tr`(22.11), `ppfast_hid_inh_r100_ret_rw`(22.15), `pphist_freedman_rt`(22.16, mini-stud `pphist_freedman_rt`를 옮긴 것).
 
 ### 19.1 mini-stud 결과 (CPU 900초, seed 1–3, 정확한 exploitability, 2026-11-14)
 
@@ -1813,3 +1817,43 @@ mini-stud (CPU 900초, seed 1–3, `run_ppacc.sh`): `ppfast_rt_hid`(정규, δ =
   - 첫 판정 뒤 세 번은 판정 직후 1만 roots 구간에서 다시 조건을 충족했다(판정 네 번이 연달아, 표 20 → 231). 그 뒤 통계는 0.36에서 내려와 29–30만 roots에서 0.165–0.168로 평평하고, prior 잎은 상한(100 × 231 = 23,100)에 닿았다.
 - 읽은 것 (사실): 두 게임 모두 가중 통계가 0.1보다 높은 값(mini 0.13–0.17, 7-stud 0.165–0.168)에서 평평해져 posterior 판정이 멈춘다. mini-stud에서는 같은 버킷의 가중하지 않은 regret 합은 계속 줄어드는데 가중 값은 줄지 않는다. 끝 값은 k-means의 약 2배이고 이미 있는 return 칸 비교군(끊긴 두 seed)과 6칸 비교군보다 높다.
 - 내 설명 (추론, 검증하지 않음): regret matching은 버킷 표의 가중하지 않은 누적 regret만 줄인다. 한 버킷 안의 정보집합들이 서로 다른 행동을 원하면 그 regret들이 버킷 합에서 서로 지워지는데, 자기 도달확률이 정보집합마다 다르면 가중 합에서는 지워지지 않는다. 그러면 가중 합이 반복 수에 비례해 자라 반복당 값이 양수에 머문다. 이 값은 추상화가 섞어 놓은 정보집합 때문에 생기므로, 분할 전에는 0으로 가지 않는다.
+
+### 22.16 7-stud로 옮긴 ε = 0 장기 실행 설정 (`pphist_freedman_rt`, 2026-11-19)
+
+사용자: "ε = 0 설정으로 7-stud에서도 돌릴 수 있는 커맨드를 줘". mini-stud에서 끝까지 내려간 ε = 0 장기 실행(22.12의 `pphist_freedman_rt`, 22.13 그림)의 설정을 7-stud 학습기에 옮기고 `runs_fair` 비교군으로 넣었다.
+- 구조 (mini-stud 22.12와 같게):
+  - 시작 칸 `--pp-cells history`: 결정하는 플레이어가 이 손에서 5th street(학습 시작)부터 지나온 자기 칸 c = (스트리트, 첫/둘째 행동자, 합법 행동 집합)의 순서와 지금 칸. 앞선 결정의 합법 행동 집합은 return 칸(22.10)처럼 베팅 규칙으로 다시 세운다(베팅을 받지 않음 / 받았고 레이즈 가능 / 받았고 레이즈 불가). 지금 결정은 실제 합법 행동 마스크를 쓴다. 규칙으로 센 칸은 284개다(22.12).
+  - prior: `ppfast_hid`와 같다. 후보의 두 쪽 방문 합이 1,000이 되면 한 번 Δ 시험(정규 근사, δ = 0.1, ε = 0).
+  - posterior `--post-realtime 1`: 1만 roots(`--post-check`)마다 모든 버킷에서 잎을 기록(포인터가 정해진 뒤의 regret 합, 제곱합, 방문)의 argmax 행동으로 묶고(방문 ≥ 100, 최댓값 > 0), 행동마다 "B_a 대 버킷의 나머지"를 Δ 시험해 통과하면 그 자리에서 새 표로 옮긴다. 다른 행동의 무리도 따로 시험하고, 남는 잎은 원래 표에서 계속 배운다. 대기 조건을 기다리지 않는다.
+  - posterior 잡음 항 `--post-bound freedman`: 쪽마다 x = c + √(c² + 2V ln(1/δ)), c = L ln(1/δ)/3, V = 그 쪽의 행동별 편차 제곱합 중 최댓값, L = 4,004 ante(`--hid-range` 0의 자동값 4·(스택 + 1)). 통과: Δ > 0이고 Δ ≥ ε·t + x_1 + x_2, ε = 0.
+  - 새 표는 부모의 regret과 평균 합을 그대로 가진다(`--inherit-regret 1 --inherit-avg 1`). 옮긴 잎은 기록과 후보를 다시 시작한다.
+- 옵션 (기본값에서는 이전과 같다): `--pp-cells history`, `--post-realtime 0|1`, `--post-bound same|normal|azuma|freedman`(same: `--hid-bound`를 따름). `--hid-bound freedman`(prior까지 Freedman)도 받지만 비교군에는 쓰지 않는다(mini-stud에서 prior Freedman은 300만 반복 동안 분할이 없었다, 22.12).
+- 비교군 `pphist_freedman_rt`(실행 이름 `pp_pphist_freedman_rt_s1`, `runs_fair`): `--tree-split accum --acc-metric hidden --div-metric hidden --gate-noise normal --prior-visits 1000 --post-gate 0.5 --mem-budget-mb 4000 --inherit-regret 1 --inherit-avg 1 --pp-cells history --post-realtime 1 --post-bound freedman`. 명령은 `aswiss/stud7/README_KO.md`의 "`runs_fair`에 `pphist_freedman_rt` 추가".
+- 내가 정한 것:
+  1. 칸 번호: 전체 키(앞선 결정 최대 8개 × 5비트 + 지금 칸)가 지금의 16비트 칸 번호에 들어가지 않아, history에서는 칸 번호를 처음 나타난 순서로 매기고 번호 → 전체 키 표를 checkpoint와 snapshot에 함께 저장한다. history snapshot은 판 번호가 `ASWSTUD3`이고 칸 방식을 함께 적어, 따로 읽는 평가(`-Action eval/final`)도 같은 키로 찾는다. 다른 칸 방식의 파일 형식은 그대로다.
+  2. `--post-gate 0.5`는 실시간에서 분할에 쓰지 않는다. 상태 화면의 구간 regret 창을 다시 시작하는 데만 쓴다(mini-stud 장기 실행의 `--regret-gate 0.1`이 창만 초기화한 것과 같은 자리). 값은 다른 7-stud pp 비교군의 0.5이고, `--gate-noise normal`도 상태 화면용이다.
+  3. 확인 간격 1만 roots, δ = 0.1, ε = 0, L = 4,004 ante(mini-stud는 1만 반복, L = 64).
+  4. 메모리 상한 4,000 MB(다른 pp 비교군과 같음, 닿으면 prior 분할만 멈추고 posterior는 계속). prior 잎 상한(`--prior-leaf-ratio`)은 두지 않았다(mini-stud 장기 실행에 없었다).
+  5. 실시간에서는 잎의 구간 기록을 두지 않는다(posterior는 포인터가 정해진 뒤의 기록만 읽는다).
+  6. `pp_post.csv`: `judged`는 확인마다 1(시험을 했다는 뜻), 끝 열 `window_restart`는 그 확인에서 창을 다시 시작했는지다. 상태 화면은 "posterior (real time, every check)" 줄로 나뉜 버킷 수, 나뉜 확인 수, 마지막 분할 root, 표, prior 잎을 보여 준다.
+- 시험 (이 기계, seed 1):
+  - 기존 비교군을 바꾸기 전 실행 파일과 비교: `ppfast_rt`, `ppfast_hid_inh_r100_ret`(4만 roots), `ppfast_hid_inh_r100_tr`(4만 roots, 1만 roots에 posterior 판정 9 → 11표)의 snapshot과 `prior_splits.csv`가 같고, `pp_post.csv`는 시간 열 말고 같다. checkpoint는 저장된 시간 값 몇 바이트만 다르다.
+  - 바꾸기 전 실행 파일이 쓴 checkpoint(`ppfast_rt` 4만 roots)를 새 실행 파일로 6만 roots까지 이어 달리면 옛 실행 파일로 이어 달린 것과 snapshot, `pp_post.csv`가 같다.
+  - 새 비교군: 10만 roots에서 멈추고 20만까지 이어 달린 것과 한 번에 달린 것의 20만 roots snapshot(표와 분할 구조)이 같고, `prior_splits.csv`(1만 5,910줄)와 `pp_post.csv`도 epoch 번호(멈춘 실행은 끝에서 epoch를 닫는다)와 시간 열 말고 같다.
+  - history snapshot을 따로 읽은 평가(40 pair): 정책 조회 17,808번 중 칸을 못 찾은 조회 0번. pp-test T1–T3 통과. `run_100m.sh`로 학습 CPU 20초 예산, 온라인 LBR 1,000 roots마다 64파티클로 시작, 예산 정지, 상태 화면을 확인했다. Windows에서는 확인하지 못했다.
+- 짧은 실행 (이 기계, seed 1, 온라인 LBR 없음, CPU를 다른 실행과 나눠 씀, 40만 roots). LBR 평가가 없으므로 동작 확인만이다.
+
+  | roots | 쓰이는 표 | prior 잎 | 그 확인에서 나뉜 버킷 | 학습 CPU |
+  |---:|---:|---:|---:|---:|
+  | 10,000 | 182 | 1,984 | 9 | 10.9초 |
+  | 30,000 | 335 | 5,334 | 59 | 33.9초 |
+  | 50,000 | 1,059 | 8,617 | 279 | 58.9초 |
+  | 100,000 | 3,006 | 11,372 | 223 | 89.6초 |
+  | 200,000 | 5,750 | 16,076 | 258 | 143.1초 |
+  | 300,000 | 8,313 | 19,684 | 229 | 186.5초 |
+  | 400,000 | 10,080 | 22,398 | 99 | 222.1초 |
+
+  - 시작 칸은 1만 roots에 166개가 나타났고 40만 roots까지 그대로다(규칙으로 센 284개 중).
+  - 40번의 확인 모두에서 버킷이 나뉘었다. 구간 regret(보정 전, 창이 한 번도 다시 시작하지 않아 처음부터의 값)은 root당 1,456–2,488 ante로 0.5에 닿지 않았다.
+  - 학습 CPU는 40만 roots까지 root당 평균 0.56 ms, 마지막 5만 roots는 0.33 ms다. 분할 구조(센 값)는 75.6 MB, 상주 메모리는 99 MB.
+- 덧붙여 찾은 것 (고치지 않음): decision·return 칸 snapshot은 칸 방식이 파일에 없어서, 따로 읽는 평가(`-Action eval/final`)가 street 칸 키로 찾는다. `ppfast_hid_inh_r100_ret` 4만 roots snapshot에서 정책 조회 31,536번 중 4,784번(15%)이 칸을 못 찾아 균등 전략으로 대신했다. 학습 프로세스 안의 온라인 LBR은 학습 때의 칸 방식을 쓰므로 상관없다.

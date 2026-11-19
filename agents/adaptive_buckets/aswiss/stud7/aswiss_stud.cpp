@@ -582,6 +582,7 @@ public:
     void pp_recount_cap();   // --prior-leaf-ratio: live leaves and buckets in use
     bool pp_cap_ok() const;  // --prior-leaf-ratio: a prior split may happen
     uint16_t pp_cell_key(const State& s, int v) const;  // --pp-cells: the start cell of seat v's decision
+    uint64_t pp_history_key(const State& s, int v) const;  // --pp-cells history: the full key of seat v's decision
     double pp_prior_mb() const;  // two-layer accum: the partition's structures in MB (counted, deterministic)
     int pp_resolve(int32_t l, const pp::Rows& rows, std::vector<int>& idx, int32_t cur_level, uint64_t salt, size_t cap,
                    size_t ratio_target, uint64_t& steps, std::ostream* plog, uint64_t epoch);
@@ -1328,7 +1329,7 @@ public:
     std::array<size_t, 3> live_buckets() const {
         std::array<std::set<uint32_t>, 3> live;
         if (partition_ == Partition::PP) {  // the buckets the live leaves point to (provisional pointers of pending leaves)
-            for (const auto& L : pp_->leaves) if (L.node >= 0) live[pp::cell_street(L.ctx) - 5].insert(pp_->current(static_cast<int32_t>(&L - pp_->leaves.data())));
+            for (const auto& L : pp_->leaves) if (L.node >= 0) live[pp_->street_of(L.ctx) - 5].insert(pp_->current(static_cast<int32_t>(&L - pp_->leaves.data())));
             return {live[0].size(), live[1].size(), live[2].size()};
         }
         if (partition_ == Partition::History) {  // referenced by a rest or an explicit entry (stale entries included)
@@ -1381,9 +1382,13 @@ public:
 
     void save(const std::string& path) const {
         std::ofstream out(path, std::ios::binary);
-        out.write("ASWSTUD2", 8);
+        // --pp-cells history: version 3 with the start-cell mode (its cell keys are indices into saved full keys); every
+        // other snapshot is written as before
+        const bool v3 = partition_ == Partition::PP && pp_->opt.cells == 3;
+        out.write(v3 ? "ASWSTUD3" : "ASWSTUD2", 8);
         put(out, static_cast<uint8_t>(partition_));
         put(out, static_cast<uint8_t>(h4_ ? 1 : 0));
+        if (v3) put(out, static_cast<uint8_t>(pp_->opt.cells));
         if (partition_ == Partition::PP) { pp_save(out, false); return; }
         if (partition_ == Partition::History) {  // every bucket record is kept: keys refer to retired buckets by id
             put(out, static_cast<uint8_t>(hcards_every_));
@@ -1414,14 +1419,18 @@ public:
         char magic[8];
         in.read(magic, 8);
         const std::string version(magic, 8);
-        if (!in || (version != "ASWSTUD1" && version != "ASWSTUD2")) throw std::runtime_error("not an ASWISS stud snapshot: " + path);
+        if (!in || (version != "ASWSTUD1" && version != "ASWSTUD2" && version != "ASWSTUD3")) throw std::runtime_error("not an ASWISS stud snapshot: " + path);
         uint8_t partition; get(in, partition);
         if (partition != static_cast<uint8_t>(partition_)) throw std::runtime_error("snapshot partition differs from --partition");
         uint8_t with_h4 = 0;
-        if (version == "ASWSTUD2") get(in, with_h4);
+        if (version != "ASWSTUD1") get(in, with_h4);
         h4_.reset();
         if (with_h4) { h4_ = std::make_unique<H4Table>(partition_); h4_->load(in); }
         if (partition_ == Partition::PP) {
+            uint8_t cells = 0;
+            if (version == "ASWSTUD3") get(in, cells);  // --pp-cells history (the cell mode the keys are read with)
+            if (!pp_) pp_ = std::make_unique<pp::Data>();
+            pp_->opt.cells = cells ? cells : pp_->opt.cells;
             pp_load(in, false);
             if (!in) throw std::runtime_error("truncated snapshot: " + path);
             return;
@@ -2004,7 +2013,8 @@ int train(int argc, char** argv) {
                                 {"--acc-metric", "mse"}, {"--acc-dist", "0.5"}, {"--prior-visits", "0"}, {"--post-gate", "0"},
                                 {"--post-check", "10000"}, {"--div-metric", "dir"}, {"--hid-bound", "normal"}, {"--hid-delta", "0.1"},
                                 {"--hid-eps", "0"}, {"--hid-range", "0"}, {"--gate-noise", "none"}, {"--inherit-candidate", "0"},
-                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}, {"--log-reach", "0"}, {"--gate-reach", "0"}});
+                                {"--prior-leaf-ratio", "0"}, {"--pp-cells", "street"}, {"--post-time-switch", "0"}, {"--log-reach", "0"}, {"--gate-reach", "0"},
+                                {"--post-realtime", "0"}, {"--post-bound", "same"}});
     const Partition partition = parse_partition(o["--partition"]);
     if (o["--epoch0"].empty()) o["--epoch0"] = partition == Partition::PP ? "1000" : "10000";  // the spec's 1000 * 2^k for pp
     // --epoch-growth G (default 2): the next epoch is G times as long, so epoch k ends at epoch0 * (G^(k+1) - 1) / (G - 1)
@@ -2064,8 +2074,9 @@ int train(int argc, char** argv) {
         choice("--pp-assign", {"now", "fill"}); choice("--leaf-start", {"parent", "root"});
         choice("--prior-criterion", {"label", "regret"}); choice("--crossfit", {"0", "1"}); choice("--features", {"general", "poker"});
         choice("--online-lbr-schedule", {"fixed", "split"}); choice("--pp-structure", {"pp", "tree"}); choice("--tree-split", {"label", "accum"}); choice("--acc-metric", {"mse", "dir", "hidden"});
-        choice("--div-metric", {"dir", "hidden"}); choice("--hid-bound", {"normal", "azuma"}); choice("--gate-noise", {"none", "normal"});
-        choice("--inherit-candidate", {"0", "1"}); choice("--pp-cells", {"street", "decision", "return"});
+        choice("--div-metric", {"dir", "hidden"}); choice("--hid-bound", {"normal", "azuma", "freedman"}); choice("--gate-noise", {"none", "normal"});
+        choice("--inherit-candidate", {"0", "1"}); choice("--pp-cells", {"street", "decision", "return", "history"});
+        choice("--post-realtime", {"0", "1"}); choice("--post-bound", {"same", "normal", "azuma", "freedman"});
         if (label_rule != "window" || o["--inherit"] != "0") throw std::runtime_error("--partition pp takes neither --label nor --inherit");
         ppo.fill = o["--pp-assign"] == "fill"; ppo.root_start = o["--leaf-start"] == "root";
         ppo.poker = o["--features"] == "poker"; ppo.label_criterion = o["--prior-criterion"] == "label"; ppo.crossfit = o["--crossfit"] == "1";
@@ -2091,7 +2102,7 @@ int train(int argc, char** argv) {
         // --hid-eps eps, --hid-range L (0: 4 x (stack + 1) ante, the range of a sampled regret), --gate-noise normal (the
         // waiting statistic counts only regret beyond z_d x noise), --inherit-candidate 1, --prior-leaf-ratio R
         ppo.acc_hidden = o["--acc-metric"] == "hidden"; ppo.div_hidden = o["--div-metric"] == "hidden";
-        ppo.hid_azuma = o["--hid-bound"] == "azuma"; ppo.hid_delta = std::stod(o["--hid-delta"]); ppo.hid_eps = std::stod(o["--hid-eps"]);
+        ppo.hid_azuma = o["--hid-bound"] == "azuma"; ppo.hid_freedman = o["--hid-bound"] == "freedman"; ppo.hid_delta = std::stod(o["--hid-delta"]); ppo.hid_eps = std::stod(o["--hid-eps"]);
         ppo.hid_range = std::stod(o["--hid-range"]);
         if (!(ppo.hid_delta > 0 && ppo.hid_delta < 1) || ppo.hid_eps < 0 || ppo.hid_range < 0)
             throw std::runtime_error("--hid-delta in (0, 1), --hid-eps >= 0, --hid-range >= 0");
@@ -2099,8 +2110,12 @@ int train(int argc, char** argv) {
         ppo.hid_zq = pp::inv_normal(1 - ppo.hid_delta);
         ppo.gate_noise = o["--gate-noise"] == "normal"; ppo.inherit_cand = o["--inherit-candidate"] == "1";
         ppo.prior_leaf_ratio = std::stod(o["--prior-leaf-ratio"]);
-        // --pp-cells street | decision | return: the start cells (pp_tree.hpp, Opts::cells)
-        ppo.cells = o["--pp-cells"] == "decision" ? 1 : o["--pp-cells"] == "return" ? 2 : 0;
+        // --pp-cells street | decision | return | history: the start cells (pp_tree.hpp, Opts::cells)
+        ppo.cells = o["--pp-cells"] == "decision" ? 1 : o["--pp-cells"] == "return" ? 2 : o["--pp-cells"] == "history" ? 3 : 0;
+        // --post-realtime 1: posterior tests every --post-check roots on the leaves' own records (no waiting; --post-gate
+        // only restarts the window); --post-bound: the posterior test's noise term (same: --hid-bound)
+        ppo.post_realtime = o["--post-realtime"] == "1";
+        ppo.post_bound = o["--post-bound"] == "same" ? -1 : o["--post-bound"] == "normal" ? 0 : o["--post-bound"] == "azuma" ? 1 : 2;
         ppo.post_time_switch = std::stod(o["--post-time-switch"]);
         if (ppo.post_time_switch < 0) throw std::runtime_error("--post-time-switch must be >= 0");
         if (ppo.prior_leaf_ratio < 0) throw std::runtime_error("--prior-leaf-ratio must be >= 0");
@@ -2121,6 +2136,10 @@ int train(int argc, char** argv) {
         if (ppo.acc_hidden && !ppo.acc) throw std::runtime_error("--acc-metric hidden needs --tree-split accum");
         if (ppo.inherit_cand && !ppo.div_hidden) throw std::runtime_error("--inherit-candidate is for --div-metric hidden");
         if (ppo.post_time_switch > 0 && !ppo.two_layer_acc()) throw std::runtime_error("--post-time-switch needs --tree-split accum with --pp-structure pp");
+        if ((ppo.post_realtime || ppo.post_bound >= 0) && !(ppo.two_layer_acc() && ppo.div_hidden))
+            throw std::runtime_error("--post-realtime and --post-bound need --tree-split accum with --pp-structure pp and --div-metric hidden");
+        if (ppo.post_realtime && (ppo.post_time_switch > 0 || ppo.inherit_cand))
+            throw std::runtime_error("--post-realtime takes neither --post-time-switch nor --inherit-candidate (there are no waiting windows to judge)");
         if (ppo.two_layer_acc() && ppo.fill) throw std::runtime_error("--tree-split accum has no pending leaves: it does not take --pp-assign fill");
         if (ppo.acc_k < 1 || ppo.acc_min < 2 || ppo.acc_pool < 2) throw std::runtime_error("--acc-candidates >= 1, --acc-min-visits >= 2, --acc-pool >= 2");
         if (ppo.tree) {
@@ -2206,6 +2225,7 @@ int train(int argc, char** argv) {
                           (ppo.prior_leaf_ratio > 0 ? ";prior_leaf_ratio=" + o["--prior-leaf-ratio"] : "") +
                           (ppo.cells ? ";pp_cells=" + o["--pp-cells"] : "") +
                           (ppo.post_time_switch > 0 ? ";post_time_switch_after_split=" + o["--post-time-switch"] : "") +
+                          (ppo.post_realtime ? ";post_realtime=1" : "") + (ppo.post_bound >= 0 ? ";post_bound=" + o["--post-bound"] : "") +
                           (o["--gate-reach"] == "1" ? ";gate_reach=1" : "") : std::string());
     OnlineLbr online;
     online.setup(o, std::stoull(o["--seed"]), true, true);
@@ -2277,7 +2297,8 @@ int train(int argc, char** argv) {
                                                        "buckets_after,live_leaves,diverging_leaves,moved_leaves,prior_splits,seconds,prior_frozen,partition_mb"
                                                     << (ppo.gate_noise ? ",window_regret_beyond_noise" : "")
                                                     << (ppo.post_time_switch > 0 ? ",phase" : "")
-                                                    << (o["--gate-reach"] == "1" ? ",window_regret_own_reach" : "") << '\n';
+                                                    << (o["--gate-reach"] == "1" ? ",window_regret_own_reach" : "")
+                                                    << (ppo.post_realtime ? ",window_restart" : "") << '\n';
         }
         if (backward) std::ofstream(backward_path) << "epoch,roots,keys,keys_diagnosed,subkeys,subkey_visits_dropped,keys_two_labels,keys_inconsistent,pairs,"
                                                        "backward_splits,peak_rss_mb\n";
@@ -2408,7 +2429,10 @@ int train(int argc, char** argv) {
                 // --post-time-switch: before the switch the judgments are at the epoch ends (below), not here; the first
                 // check after such a judgment reads the statistic and switches when it is <= the switch value
                 const bool regret_phase = ppo.post_time_switch <= 0 || model.ppd()->post_regret_phase;
-                const bool judge = splitting && regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
+                // --post-realtime 1: the posterior test runs at every check (records since the pointers were set); the
+                // waiting condition only restarts the window (pp_post.csv window_restart)
+                const bool window_due = splitting && regret_phase && wroots >= 1000 && wn <= ppo.post_gate;
+                const bool judge = ppo.post_realtime ? splitting : window_due;
                 if (splitting && !regret_phase && model.ppd()->post_switch_due) {
                     model.ppd()->post_switch_due = false;
                     if (wn <= ppo.post_time_switch) {
@@ -2420,7 +2444,8 @@ int train(int argc, char** argv) {
                 const auto live0 = model.live_buckets();
                 uint64_t diverging = 0, moved = 0;
                 int ps = 0;
-                if (judge) { ps = model.pp_posterior_acc(s.t, diverging, moved); model.iterate_regret_half(true); }
+                if (judge) ps = model.pp_posterior_acc(s.t, diverging, moved);
+                if (window_due) model.iterate_regret_half(true);
                 const auto live1 = model.live_buckets();
                 ppq_log << s.k << ',' << s.t << ',' << wroots << ',' << wr << ',' << ppo.post_gate << ',' << judge << ','
                         << live0[0] + live0[1] + live0[2] << ',' << ps << ',' << live1[0] + live1[1] + live1[2] << ','
@@ -2431,6 +2456,7 @@ int train(int argc, char** argv) {
                 if (ppo.gate_noise) ppq_log << ',' << (gate_reach ? 2 * model.iterate_regret_noise_half() : wn);
                 if (ppo.post_time_switch > 0) ppq_log << ',' << (model.ppd()->post_regret_phase ? "regret" : "time");
                 if (gate_reach) ppq_log << ',' << wreach;
+                if (ppo.post_realtime) ppq_log << ',' << window_due;
                 ppq_log << '\n';
                 ppq_log.flush();
                 if (log_reach) {

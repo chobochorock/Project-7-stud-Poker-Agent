@@ -96,7 +96,17 @@ def run(job):
         if partition == "rebel": cmd += ["--threads", str(a.rebel_threads)]
         if a.rho_roots: cmd += ["--rho-roots", str(a.rho_roots)]
     if atlas: cmd += ["--atlas", atlas]
-    row = json.loads(subprocess.run(cmd, check=True, capture_output=True, text=True).stdout)
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    if p.returncode != 0:  # report the evaluator's own message and go on with the other evaluations
+        err = (p.stderr or p.stdout).strip().splitlines()
+        hint = ""
+        if any("not an ASWISS stud snapshot" in line for line in err):
+            hint = (" (this snapshot may be newer than the evaluator: --pp-cells history snapshots need the exe that trained"
+                    " them, e.g. -ExeName aswiss_pphist.exe)")
+        print(f"FAILED {os.path.basename(d)} {file} {policy}: {err[-1] if err else f'exit {p.returncode}'}{hint}", flush=True)
+        failed.append((os.path.basename(d), file, policy))
+        return
+    row = json.loads(p.stdout)
     row.update(run=os.path.basename(d), file=file, roots=roots, kind=kind, epoch=epoch, buckets=buckets)
     with open(os.path.join(d, f"{'rho' if a.rho_only else 'eval'}{suffix}.jsonl"), "a") as out:
         out.write(json.dumps(row) + "\n")
@@ -105,6 +115,10 @@ def run(job):
                 flush=True)
 
 
+failed = []
 print(f"{len(jobs)} evaluations", flush=True)
 with ThreadPoolExecutor(a.workers) as pool:
     list(pool.map(run, jobs))
+if failed:
+    print(f"{len(failed)} of {len(jobs)} evaluations failed (listed above as FAILED); the others were written", flush=True)
+    raise SystemExit(1)

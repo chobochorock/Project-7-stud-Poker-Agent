@@ -1,0 +1,12 @@
+analyze|analyze_double.py ../upload_aswiss_exp/ds_a.jsonl ../upload_aswiss_exp/ds_b.jsonl
+eps_family|eps_family.py
+bound_sequence|bound_sequence.py
+sim3|sim3.py
+search_pathology|search_pathology.py 0
+label_direction|label_direction_test.py
+one_sided|one_sided_search.py 0
+nabla_sign|nabla_sign.py 5 3 2500
+paired_split|paired_split.py 5 3 2500
+public_aligned|public_aligned.py 5 3 1500
+consistency|consistency_test.py 7 4 40 40
+chain_search|chain_search.py 0 4 1500

@@ -1,0 +1,12 @@
+analyze exit=0 0s
+eps_family exit=0 4s
+bound_sequence exit=0 19s
+sim3 exit=0 85s
+nabla_sign exit=0 109s
+one_sided exit=0 207s
+paired_split exit=0 133s
+label_direction exit=0 343s
+public_aligned exit=0 152s
+chain_search exit=0 107s
+search_pathology exit=0 457s
+consistency exit=0 133s

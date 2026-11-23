@@ -1,0 +1,8 @@
+maxgain  games 2892  split steps 6393 (mean 2.21/game, buckets split 2.21/game)
+         steps where the bound rose 856 (13.4% of steps), games with any rise 613 (21.2%), two rises in a row 4
+         ended at bound 0: 2892 (100.0%), mean largest rise above the start 0.0666, macro-step lengths {1: 4670, 2: 833, 3: 19}
+all      games 2892  split steps 4400 (mean 1.52/game, buckets split 2.27/game)
+         steps where the bound rose 312 (7.1% of steps), games with any rise 291 (10.1%), two rises in a row 11
+         ended at bound 0: 2892 (100.0%), mean largest rise above the start 0.0394, macro-step lengths {1: 3777, 2: 280, 3: 21}
+maxgain near/random: rise 100/372, 1.76 steps  near/tied: rise 275/841, 2.26 steps  rand/random: rise 20/368, 1.77 steps  rand/tied: rise 140/638, 2.84 steps  rand3/random: rise 19/370, 1.56 steps  rand3/tied: rise 59/303, 2.62 steps
+all near/random: rise 22/372, 1.23 steps  near/tied: rise 193/841, 1.65 steps  rand/random: rise 7/368, 1.22 steps  rand/tied: rise 53/638, 1.85 steps  rand3/random: rise 3/370, 1.10 steps  rand3/tied: rise 13/303, 1.73 steps

@@ -1,0 +1,5 @@
+{'n': 2576, 'nab_neg': 357, 'gam_neg': 253}
+example nabla'<0: split P1: pre=1.4815 frozen-post=1.0741 post-relearn=0.3333 => Delta=0.4074, nabla'=-0.7407, Gamma=1.1481
+  A0 = [[1, 2], [-3, 2]]
+  A1 = [[0, 0], [1, -1]]
+  A2 = [[3, -3], [-2, -1]]

@@ -1,0 +1,13 @@
+A1=
+ [[ 3. -3.]
+ [-3.  2.]] 
+A2=
+ [[ 2. -3.]
+ [-3.  2.]]
+v_G = -0.3864
+pre-split abstract NE (both tied): x = [0.4762 0.5238]  y = [0.4762 0.5238]
+P1 advantages at I1, I2: [ 0.0624 -0.0567] [-0.0624  0.0567]  labels: [0, 1]
+post-split (P1 untied, P2 tied), best-for-P1 abstract maximin: x1 = [0.9091 0.0909]  x2 = [0. 1.]  y = [0.4545 0.5455]
+P1 exploitability in G: pre 0.1136 -> post 2.3864
+P2 exploitability in G: pre 0.1245 -> post 0.1136
+NashConv in G:          pre 0.2381 -> post 2.5000

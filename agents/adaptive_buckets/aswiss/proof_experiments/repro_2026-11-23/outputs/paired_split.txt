@@ -1,0 +1,4 @@
+games where both players' buckets disagree: 658
+single-player split increases bound: 122/1316 (9.3%)
+paired split increases bound:        24/658 (3.6%)
+games where BOTH single splits increase: 15

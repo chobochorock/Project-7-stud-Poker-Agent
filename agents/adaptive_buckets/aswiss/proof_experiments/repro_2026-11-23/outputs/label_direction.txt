@@ -1,0 +1,11 @@
+avg-label: splits triggered 7009, P1 exploitability INCREASED after small step in 1911 (27.3%)
+br-label: splits triggered 4851, P1 exploitability INCREASED after small step in 0 (0.0%)
+
+Counterexample B: xbar = [0.4762 0.5238]  P2 BR per copy = [1, 0]
+  avg-labels: [0, 1]  br-labels: [1, 0]
+  avg-label step alpha=0.001: P1 worst-case value -0.50000 -> -0.50250
+  avg-label step alpha=0.01: P1 worst-case value -0.50000 -> -0.52500
+  avg-label step alpha=0.03: P1 worst-case value -0.50000 -> -0.57500
+  br-label step alpha=0.001: P1 worst-case value -0.50000 -> -0.49750
+  br-label step alpha=0.01: P1 worst-case value -0.50000 -> -0.47500
+  br-label step alpha=0.03: P1 worst-case value -0.50000 -> -0.42500

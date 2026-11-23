@@ -1,0 +1,6 @@
+P0 (both tied)         T= 10000:  sum_I M^T(I)/T = 0.2442   NashConv(avg) = 0.2380
+P0 (both tied)         T=100000:  sum_I M^T(I)/T = 0.2393   NashConv(avg) = 0.2381
+P1 (P1 split)          T= 10000:  sum_I M^T(I)/T = 2.4961   NashConv(avg) = 2.5001
+P1 (P1 split)          T=100000:  sum_I M^T(I)/T = 2.4998   NashConv(avg) = 2.5000
+P2 (both split = G)    T= 10000:  sum_I M^T(I)/T = 0.0032   NashConv(avg) = 0.0005
+P2 (both split = G)    T=100000:  sum_I M^T(I)/T = 0.0006   NashConv(avg) = 0.0000

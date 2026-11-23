@@ -1,0 +1,6 @@
+eps=1.0    B0(pre)=0.23810  B1(post, best case)=2.5000  ratio=     10.5  labels=[0, 1] max adv=[np.float64(0.06236), np.float64(0.05669)]
+eps=0.3    B0(pre)=0.06912  B1(post, best case)=2.5000  ratio=     36.2  labels=[0, 1] max adv=[np.float64(0.01863), np.float64(0.01593)]
+eps=0.1    B0(pre)=0.02283  B1(post, best case)=2.5000  ratio=    109.5  labels=[0, 1] max adv=[np.float64(0.0062), np.float64(0.00521)]
+eps=0.03   B0(pre)=0.00683  B1(post, best case)=2.5000  ratio=    366.2  labels=[0, 1] max adv=[np.float64(0.00186), np.float64(0.00155)]
+eps=0.01   B0(pre)=0.00227  B1(post, best case)=2.5000  ratio=   1099.5  labels=[0, 1] max adv=[np.float64(0.00062), np.float64(0.00052)]
+eps=0.001  B0(pre)=0.00023  B1(post, best case)=2.5000  ratio=  10999.4  labels=[0, 1] max adv=[np.float64(6e-05), np.float64(5e-05)]

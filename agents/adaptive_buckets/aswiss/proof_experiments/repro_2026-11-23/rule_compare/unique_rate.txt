@@ -1,0 +1,3 @@
+rand: non-unique at the all-tied start 57/400 (14.2%)
+near: non-unique at the all-tied start 46/400 (11.5%)
+rand3: non-unique at the all-tied start 95/400 (23.8%)

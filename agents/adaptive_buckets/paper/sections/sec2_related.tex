@@ -1,0 +1,81 @@
+\section{관련 연구}\label{sec:related}
+
+\subsection{가상 플레이(Fictitious Play)}
+가상 플레이~\citep{brown1951iterative}는 매 반복 상대의 \emph{경험적 평균 전략}에 대한 최선 응답을 두고, 자기 평균 전략을 갱신한다.
+2인 제로섬 행렬 게임에서는 평균 전략이 균형으로 수렴한다~\citep{robinson1951iterative}.
+전개형 게임에서는 정규형으로 바꾸면 전략 수가 지수적으로 커진다. 그래서 Heinrich 외~\citep{heinrich2015fictitious}는 행동 전략 위에서 같은 갱신을 하는 XFP와, 표본과 학습으로 근사하는 FSP를 제안했다.
+NFSP~\citep{heinrich2016deep}는 최선 응답을 강화학습으로, 평균 전략을 지도학습으로 근사한다.
+추상화 세분과 직접 관련된 것은 FPIRA다~\citep{cermak2017algorithm,cermak2020automated}.
+FPIRA는 불완전 기억 추상화 위에서 가상 플레이를 돌리면서, 필요한 정보를 추상화에 되돌려 넣는다. 그래서 원 게임에서 돌린 가상 플레이와 exploitability가 매 반복 정확히 같다~\citep[정리 1]{cermak2020automated}.
+가상 플레이 계열은 매 반복 원 게임의 최선 응답이 필요하다. 큰 게임에서는 이것이 병목이다.
+
+\subsection{후회 최소화와 CFR 계열}
+후회 매칭~\citep{hart2000simple}은 누적 후회의 양수 부분에 비례하는 전략을 두는 온라인 학습 규칙으로, Blackwell 접근성~\citep{blackwell1956analog}에서 나왔다.
+CFR~\citep{zinkevich2007regret}은 전체 후회를 정보집합별 반사실적 후회의 합으로 묶어, 정보집합마다 후회 매칭을 돌리는 것만으로 균형을 근사한다(\ref{sec:bg-cfr}절).
+CFR+~\citep{tammelin2014solving,tammelin2015solving}는 음수 후회를 0에서 자르는 RM+, 반복 번호에 비례하는 평균 가중치, 교대 갱신을 쓴다. 헤즈업 리밋 홀덤을 사실상 풀었다~\citep{bowling2015heads}.
+교대 갱신의 이론은 Burch 외~\citep{burch2019revisiting}가 다시 정리했다.
+DCFR~\citep{brown2019solving}은 과거 후회와 평균을 할인하고, PCFR+~\citep{farina2021faster}는 다음 반복의 후회를 예측해 더 빨리 수렴한다.
+이들은 모두 원 게임(또는 고정된 추상 게임)을 푸는 방법이다. 추상화를 바꾸지 않는다.
+
+\subsection{표본 기반 후회 최소화}
+MCCFR~\citep{lanctot2009monte}은 종료 이력의 일부만 표본으로 뽑아 순회하고, 표본에 뽑힐 확률로 나눈 반사실적 가치로 후회를 갱신한다(\ref{sec:bg-mccfr}절).
+외부 샘플링, 결과 샘플링, 우연 샘플링 같은 방식이 있다. 분산과 수렴의 관계는 Gibson 외~\citep{gibson2012generalized}가 분석했다.
+VR-MCCFR~\citep{schmid2019variance}은 기준값(baseline)으로 분산을 줄이면서도 불편성을 유지한다.
+Farina 외~\citep{farina2020stochastic}는 불편한 기울기 추정량을 쓰는 임의의 후회 최소화기에 대해 높은 확률의 상한을 주었다. 외부 샘플링 MCCFR에서는 실패 확률 $p$에 대한 의존을 $O(\sqrt{1/p})$에서 $O(\sqrt{\log(1/p)})$로 줄였다.
+
+\subsection{함수 근사}
+표 대신 신경망으로 후회나 가치를 근사하면 추상화를 따로 만들 필요가 없다.
+Deep CFR~\citep{brown2019deep}은 외부 샘플링으로 모은 표본 후회를 신경망으로 회귀하고, Single Deep CFR~\citep{steinberger2019single}은 평균 전략 신경망을 없앴다.
+DREAM~\citep{steinberger2020dream}은 결과 샘플링에 기준값을 더해 모델 없이 학습하고, ESCHER~\citep{mcaleer2023escher}는 중요도 가중 없이 가치 신경망으로 후회를 추정한다.
+그보다 앞서 RCFR~\citep{waugh2015solving}은 후회를 특징 위의 회귀로 근사했다.
+이 방법들은 근사 오차가 남기 때문에 원 게임 균형으로의 수렴이 보장되지 않는다.
+
+\subsection{1차 방법과 경사 하강–상승(GDA)}
+2인 제로섬 전개형 게임은 sequence form~\citep{vonstengel1996efficient} 위의 쌍선형 안장점 문제다.
+그래서 경사 하강–상승(gradient descent–ascent, GDA) 같은 1차 방법을 그대로 쓸 수 있다.
+\begin{itemize}
+  \item 단순한 동시 GDA는 쌍선형 문제에서 순환하거나 발산할 수 있다.
+  \item 낙관적 GDA와 extragradient~\citep{daskalakis2018training,mertikopoulos2019optimistic}는 마지막 반복의 수렴을 회복한다.
+  \item 전개형 게임 전용으로는 다음 방법들이 있다.
+    \begin{itemize}
+      \item 확장 정규화(dilated regularizer)를 쓴 평활화와 excessive gap technique~\citep{hoda2010smoothing,kroer2020faster}
+      \item 마지막 반복 수렴을 보인 낙관적 거울 하강~\citep{lee2021last}
+      \item 강화학습과 같은 틀에서 마지막 반복 수렴을 주는 MMD~\citep{sokota2023unified}
+    \end{itemize}
+\end{itemize}
+이들도 원 게임을 직접 다루며, 학습 중에 추상화를 세분하지는 않는다.
+
+\subsection{정보 추상화}
+\begin{itemize}
+  \item \textbf{무손실 추상화.} 무손실 추상화는 GameShrink~\citep{gilpin2007lossless}가 만든다.
+  \item \textbf{손실 추상화.} 손실 추상화는 대개 손패 세기 분포를 군집해 만든다~\citep{johanson2013evaluating,ganzfried2014potential}.
+  \item \textbf{불완전 기억.} 과거 정보를 잊는 불완전 기억 추상화는 같은 메모리로 더 좋은 전략을 준다~\citep{waugh2009practical}. 하지만 CFR의 보장은 특정 조건에서만 유지된다~\citep{lanctot2012no}.
+  \item \textbf{오차 상한.} 추상화 해의 원 게임 오차는 묶인 정보집합들의 보상과 우연 확률이 얼마나 다른지로 묶을 수 있다~\citep{kroer2014extensive,kroer2016imperfect,kroer2018unified}. 이 상한들은 추상화가 고정된 경우에 대한 것이다.
+  \item \textbf{병리 현상.} 추상화를 세밀하게 해도 원 게임 성능이 나빠질 수 있다~\citep{waugh2009abstraction}.
+  \item \textbf{풀이 중 추상화 수정.} 풀이 중에 행동 추상화에 행동을 더하는 방법~\citep{brown2015simultaneous}이 있다. 추상화가 바뀔 때 후회를 옮겨 쓰는 regret transfer~\citep{brown2014regret}도 있다.
+\end{itemize}
+
+\subsection{학습 중 정보 추상화 세분: FPIRA와 CFR+IRA}
+\begin{itemize}
+  \item \textbf{세분 방식.} FPIRA와 CFR+IRA~\citep{cermak2017algorithm,cermak2020automated}는 임의의 불완전 기억 추상화에서 시작해, 학습 중에 추상화를 세분하면서 원 게임 균형으로 수렴한다. 이 논문의 직접적인 선행 연구다(\ref{sec:bg-ira}절).
+  \item \textbf{CFR+IRA의 보장.} 무작위로 감시하는 정보집합의 후회가 후회 매칭이 보장하는 속도보다 느리게 줄면 그 정보집합을 떼어 낸다. 이것으로 확률적 수렴 보장을 얻는다.
+  \item \textbf{휴리스틱 갱신.} 실전 속도를 위해 한 반복의 순간 후회로 비슷한 정보집합끼리 묶는 휴리스틱 갱신을 함께 쓴다. 원문은 이 휴리스틱만으로는 수렴하지 않는 반례도 준다.
+  \item \textbf{한계.} 두 방법 모두 매 반복 원 게임 트리 전체를 순회하거나 원 게임의 최선 응답을 계산한다.
+\end{itemize}
+
+\subsection{실시간 탐색}
+DeepStack~\citep{moravcik2017deepstack}, Libratus~\citep{brown2018superhuman}, Pluribus~\citep{brown2019superhuman}, ReBeL~\citep{brown2020combining}은 학습한 청사진이나 가치 함수 위에서 대국 중에 하위 게임을 다시 푼다.
+상대의 반사실적 가치를 제약으로 두면 다시 푼 전략이 원래보다 나빠지지 않게 할 수 있다(CFR-D~\citep{burch2014solving}, safe subgame solving~\citep{brown2017safe}).
+이 논문은 청사진을 만드는 단계의 추상화를 다룬다. 탐색과는 함께 쓸 수 있다.
+
+\subsection{이 논문의 위치}
+\begin{itemize}
+  \item ASWISS는 CFR+IRA처럼 학습 중에 정보 추상화를 세분해 원 게임 균형으로의 수렴을 노린다. 차이는 셋이다.
+    \begin{enumerate}
+      \item 분할 판정과 학습을 모두 외부 샘플링 추정치로 한다.
+      \item 사람이 고른 특징 없이 게임 구조에서 시작한다.
+      \item 분할 기준이 한 반복의 순간 후회가 아니라 epoch 동안의 \emph{누적} 후회의 라벨이다.
+    \end{enumerate}
+  \item 셋째 차이 때문에 CFR+IRA의 휴리스틱 반례(\ref{sec:bg-ira}절)가 ASWISS의 규칙에는 해당하지 않는다. 누적 후회의 라벨이 같으면 숨은 후회가 0이기 때문이다(보조정리~\ref{lem:label}).
+  \item 표본 기반으로 정보 추상화를 학습 중에 세분하면서 원 게임 수렴을 증명한 선행 연구는 찾지 못했다. \todo{제출 전 문헌 조사를 다시 할 것}
+\end{itemize}

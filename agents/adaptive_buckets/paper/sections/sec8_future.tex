@@ -1,0 +1,87 @@
+\section{한계와 후속 연구}\label{sec:future}
+
+\subsection{한계}
+\begin{itemize}
+  \item \textbf{속도.} 마지막 분할 시점 $t^*$의 상한이 없다. 정리의 속도는 $t^*$ 이후에만 적용된다. 실험의 곡선 대부분은 $t^*$ 이전이다.
+  \item \textbf{가정과 구현의 차이.} 정리는 동시 갱신, RM+, 판정 구간의 균등 혼합을 가정한다. 구현은 교대 순회, 후회 매칭, bucket 평균 표를 쓴다(표~\ref{tab:gap}).
+  \item \textbf{계보 비용.} 정보집합별 표 없는 순수판은 계보 비용이 분할 단계에 대해 곱으로 늘어난다. 큰 게임에는 \ref{sec:derived}절의 파생 기법이 필요하다. 그 기법들은 정리의 가정을 일부 벗어난다.
+  \item \textbf{실험의 범위.} 실험은 seed 1개(일부 4–10개)이고, 정확한 exploitability는 작은 게임에서만 쟀다. 세븐 포커의 지표(LBR)는 exploitability가 아니다.
+\end{itemize}
+
+\subsection{후속 연구}
+\paragraph{1. 더 나은 초기 추상화.}
+\begin{itemize}
+  \item \textbf{구조 서명.} 수렴에 필요한 것은 같은 플레이어, 같은 행동집합뿐이다. 그러나 앞으로의 구조까지 같은 것끼리 묶으면 필요한 분할이 줄 것으로 기대한다.
+    \begin{itemize}
+      \item 정보집합 $I$에서 행동 $a$ 뒤에 같은 플레이어가 다음으로 마주칠 수 있는 정보집합의 집합을 $\mathrm{Next}(I,a)$라 한다.
+      \item 깊이 $d$의 구조 서명을 다음과 같이 재귀적으로 정의한다.
+        \[
+        \sigma_0(I)=(P(I),A(I)),\qquad\sigma_d(I)=\big(\sigma_0(I),\ (a\mapsto\{\sigma_{d-1}(J):J\in\mathrm{Next}(I,a)\})_{a}\big)
+        \]
+      \item 서명이 같은 것끼리 묶으면 게임 지식 없이 시뮬레이터만으로 시작 분할을 만들 수 있다.
+      \item 거리를 $(1-\gamma)\sum_d\gamma^d\mathbb 1[\sigma_d(I)\ne\sigma_d(I')]$로 두면 초거리(ultrametric)가 된다. 그래서 "거리 $\le\varepsilon$"이 동치관계가 되어 그대로 bucket으로 쓸 수 있다.
+    \end{itemize}
+  \item \textbf{보상과 우연 확률.} 보상과 우연 확률의 차이까지 넣는 확장은 고정 추상화의 오차 상한~\citep{kroer2016imperfect,kroer2018unified}과 연결할 수 있다.
+  \item \textbf{이전 실행의 재사용.} 이전 실행의 최종 분할을 다음 실행의 시작점으로 쓰는 것도 후보다.
+\end{itemize}
+
+\paragraph{2. 추상화 분할의 개선.}
+\begin{itemize}
+  \item \textbf{거짓 분할 없애기.} 여유 라벨 집합(보조정리~\ref{lem:slack})을 표본 판정에 넣으면 좋은 사건 위에서는 거짓 분할이 없다. 지금의 argmax와 역치 판정에는 이 성질이 없다.
+  \item \textbf{숨은 후회를 직접 추정하기.} 라벨 항등식으로 $C_W(B)=\min_\ell\sum_{I\in B}e_I(\ell)$을 행동마다 선형인 합으로 바꿀 수 있다. 도달 질량에 비례해 뽑은 구성원으로 중요도 가중 추정을 하면, 표본 수가 bucket 크기와 무관해질 것으로 본다(\ref{sec:derived-theta}절). 증명은 남아 있다.
+  \item \textbf{문턱의 크기.} 문턱을 bucket의 도달 질량에 비례하게 잡으면, 고정 문턱판의 오차가 최종 bucket 수에 비례하지 않게 할 수 있다.
+  \item \textbf{일시적 악화 줄이기.} 1단 게임에서는 라벨이 갈린 bucket을 두 플레이어 모두 한꺼번에 나눌 때 일시적인 악화가 절반으로 줄었다. 사적 정보가 있는 게임에서 같은지 확인해야 한다.
+  \item \textbf{자식 표를 어디서 시작할지.} 0에서 다시 시작할지, 부모 표를 물려줄지(regret transfer~\citep{brown2014regret}) 정해야 한다. RM+에서는 자식의 시작 노름이 부모 이하이면 보장이 유지된다.
+  \item \textbf{평균 전략 방향의 치우침.} $\Omega$는 조건부 평균 표로 없앨 수 있다. $K$를 줄이는 방법은 반복 전략 몇 개를 섞는 것이다.
+  \item \textbf{$t^*$의 상한.} 상위 두 행동의 누적 후회 차이에 대한 margin 조건 아래 $t^*$를 묶어 볼 수 있다.
+\end{itemize}
+
+\paragraph{3. 3인 이상의 게임.}
+\begin{itemize}
+  \item \textbf{성립하는 것.} 보조정리~\ref{lem:decomp}의 첫 부등식(후회 분해)과 라벨 항등식은 플레이어마다 성립한다. 그래서 ASWISS를 그대로 쓰면 각 플레이어의 평균 후회를 0으로 보내는 논증이 그대로 남을 것으로 본다.
+  \item \textbf{성립하지 않는 것.} 2인 제로섬이 아니면 평균 후회가 0이라는 것이 내쉬 균형을 뜻하지 않는다. 반복 프로필들의 균등 분포가 근사 coarse correlated equilibrium이라는 데서 멈춘다.
+  \item \textbf{과제.} 정리해야 할 것은 둘이다.
+    \begin{itemize}
+      \item 어떤 해 개념을 목표로 할지
+      \item 6인 포커처럼 실전에서 쓰이는 설정~\citep{brown2019superhuman}에서 분할 규칙이 무엇을 보장하는지
+    \end{itemize}
+\end{itemize}
+
+\paragraph{4. Absent-mindedness가 있을 때의 전략 개선.}
+\begin{itemize}
+  \item \textbf{지금 보장되는 것.} 시작 분할이나 분할 결과가 absent-minded이면(한 경로가 같은 bucket을 두 번 지나면), 원 게임 NashConv의 상한(5절)은 그대로 성립한다.
+  \item \textbf{문제.} 그러나 추상 게임 안의 학습 목표가 흐려진다.
+    \begin{itemize}
+      \item 계획 단계의 최적과 행동 단계의 최적이 다를 수 있다~\citep{piccione1997interpretation}.
+      \item bucket의 후회 합이 한 경로의 여러 방문을 따로 세기 때문이다.
+    \end{itemize}
+  \item \textbf{지금의 방법.} 지금은 bucket 이력 시작 칸(\ref{sec:derived-history}절)으로 absent-mindedness 자체를 피한다.
+  \item \textbf{과제.} 피할 수 없는 큰 게임을 위해 두 가지가 필요하다.
+    \begin{itemize}
+      \item absent-minded bucket에서 일관된 행동 전략을 학습하는 갱신 규칙
+      \item 그 규칙이 원 게임 상한과 어떻게 맞물리는지에 대한 분석
+    \end{itemize}
+\end{itemize}
+
+\paragraph{5. 관측 분할(옛 prior 추상화)의 구성.}
+\begin{itemize}
+  \item \textbf{이름.} 설계 문서의 "prior 추상화"는 전략을 보기 전에 관측만으로 정하는 분할이라 붙은 이름이다. 베이즈 사전분포와 혼동되므로 이 논문은 \emph{관측 분할}이라 부른다(\ref{sec:derived-pp}절).
+  \item \textbf{지금 방식의 약점.} 지금의 관측 분할은 무작위 후보 자르기(특징, 문턱값)를 시험해 나눈다. 후보가 무작위라서 필요한 자르기를 찾기까지 오래 걸린다.
+  \item \textbf{개선 후보.}
+    \begin{itemize}
+      \item 분할 전 전략으로 얻은 표본의 후회 벡터나 가치 벡터 사이의 거리로 라벨을 붙인다. 그 라벨을 맞히는 결정 트리를 학습해 자르기를 고른다.
+      \item 학습한 관측 임베딩이나 카드 codebook을 특징으로 쓴다.
+      \item 관측 분할이 세분된 뒤 포인터를 다시 배정하는 탐색 기간을 둔다.
+      \item 잎 수에 상한을 둔다.
+    \end{itemize}
+  \item \textbf{필요한 분석.} 관측 분할은 표를 바꾸지 않으므로 수렴 보장과 독립적으로 고칠 수 있다. 다만 관측 분할이 충분히 세밀하지 않으면 전략 분할이 나눌 수 없는 숨은 후회가 남는다. 그 크기에 대한 분석이 필요하다.
+\end{itemize}
+
+\paragraph{6. 그 밖의 과제.}
+\begin{itemize}
+  \item 교대 갱신과 선형 평균으로 증명을 넓힌다.
+  \item 저장한 반복 전략의 혼합으로 정리의 대상인 평균 정책을 내놓는다.
+  \item seed 반복과 신뢰구간을 낸다.
+  \item 같은 크기와 같은 정보를 가진 고정 추상화와 비교한다.
+  \item 신경망 기준선을 GPU에서 비교한다.
+\end{itemize}

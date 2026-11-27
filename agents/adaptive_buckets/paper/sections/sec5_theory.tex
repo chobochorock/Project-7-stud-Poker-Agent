@@ -1,0 +1,168 @@
+\section{이론 결과}\label{sec:theory}
+
+이 절은 결과만 적는다. 증명은 부록~\ref{app:proofs}에 있다.
+
+\subsection{가정과 진단량}
+\begin{assumption}\label{ass:S}
+\begin{description}
+  \item[(S1) 동시 갱신.] 반복 $t$에서 두 traverser의 순회는 같은 프로필 $\sigma_t$를 쓰고, bucket 표는 그 반복의 순회가 모두 끝난 뒤 갱신한다.
+  \item[(S2) 불편 추정.] 방문하지 않으면 $\tilde r_t(I,a)=0$이다. $\cF_{t-1}$을 반복 $t-1$까지의 모든 정보라 하면 $\E[\tilde r_t(I,a)\mid\cF_{t-1}]=r_t(I,a)$이고 $\abs{\tilde r_t(I,a)}\le\Delta_I$다.
+    외부 샘플링은 이를 만족한다(보조정리~\ref{lem:unbiased}와 \ref{sec:bg-mccfr}절).
+  \item[(S3) bucket 표본 후회의 크기.] $\tilde r_t(B)=\sum_{I\in B}\tilde r_t(I)$로 둔다. 한 순회에서 함께 방문될 수 있는 $B$의 멤버들에 대해 $\Delta_I$의 합의 최댓값을 $D_B$라 한다($D_B\le\sum_{I\in B}\Delta_I$). 그러면 $\norm{\tilde r_t(B)}_\infty\le D_B$다.
+\end{description}
+\end{assumption}
+\noindent 학습기는 RM+이고(bucket이 생길 때 $Q_B=0$), 판정과 분할은 \ref{sec:method}절의 규칙을 따른다.
+$\bar\sigma^W$는 구간 $W$ 동안 lifting된 전략들의 균등 평균(식~\eqref{eq:avg})이다.
+$N=\abs\cI$, $N_A=\sum_I\abs{A(I)}$로 둔다.
+
+\begin{definition}[bucket 후회와 숨은 후회]
+\[
+C^W=\sum_B\psi(R_B^W),\qquad H_B^W=\sum_{I\in B}\psi(R_I^W)-\psi(R_B^W)\ \ge0,\qquad H^W=\sum_BH_B^W.
+\]
+\begin{itemize}
+  \item $R_B^W=\sum_{I\in B}R_I^W$다.
+  \item $C$는 bucket이 스스로 느끼는 후회다. 추상 게임을 학습하면 줄어든다.
+  \item $H$는 bucket 안에서 멤버끼리 상쇄되어 bucket이 느끼지 못하는 후회(숨은 후회)다. 추상 게임 학습으로는 줄지 않고, 분할해야만 줄어든다.
+\end{itemize}
+\end{definition}
+
+\subsection{보조정리}
+\begin{lemma}[NashConv 분해]\label{lem:decomp}
+(S1) 아래에서 다음이 성립한다.
+\[
+\NC(\bar\sigma^W)\le\frac1{\abs W}\sum_{I\in\cI}\psi(R_I^W)=\frac{C^W+H^W}{\abs W}.
+\]
+더 정확히는, $\beta_i$가 $\bar\sigma^W_{-i}$에 대한 원 게임의 순수 최선 응답일 때 등식이 된다.
+\[
+\NC(\bar\sigma^W)=\frac1{\abs W}\sum_i\sum_{I\in\cI_i}\pi_i^{\beta_i}(I)\,R_I^W\big(\beta_i(I)\big).
+\]
+\end{lemma}
+
+\begin{lemma}[라벨 항등식]\label{lem:label}
+임의의 bucket $B$와 구간 $W$에 대해 다음이 성립한다.
+\[
+H_B^W=\min_{\ell\in A_B\cup\{\none\}}\sum_{I\in B}e_I(\ell),\qquad e_I(\ell)=\psi(R_I^W)-R_I^W(\ell)\ \ge0.
+\]
+특히 $H_B^W=0$일 필요충분조건은 모든 멤버에서 동시에 $\psi$를 달성하는 공통 라벨이 있는 것이다.
+\end{lemma}
+\noindent $e_I(\ell)$은 멤버 $I$에게 라벨 $\ell$을 강요할 때 잃는 후회다. 그래서 라벨이 갈린 bucket을 라벨별로 나누는 것이 정확히 숨은 후회를 없애는 일이다.
+
+\begin{lemma}[RM+의 구간 상한; 표본 후회]\label{lem:rmplus-window}
+bucket $B$가 시점 $\tau_B$에 생겼고 구간 $W=(s,t]$에서 $s\ge\tau_B$라 하자. 그러면 다음이 성립한다.
+\[
+\psi(\tilde R_B^W)\le\norm{Q_{B,t}}_\infty\le D_B\sqrt{\abs{A_B}(t-\tau_B)}.
+\]
+\end{lemma}
+
+\begin{lemma}[시간 균일 집중]\label{lem:concentration}
+다음과 같이 둔다.
+\[
+\varepsilon_I(t)=4\Delta_I\sqrt{t\ln\frac{\pi^2N_A(1+\log_2t)^2}{3\delta}}.
+\]
+사건 $\cE_\delta$ = {모든 $I,a,t\ge1$에서 $\abs{\sum_{u\le t}(\tilde r_u(I,a)-r_u(I,a))}\le\varepsilon_I(t)$}의 확률은 $1-\delta$ 이상이다.
+$\cE_\delta$ 위에서는 임의의 구간 $W=(s,t]$에 대해 $\norm{R_I^W-\tilde R_I^W}_\infty\le2\varepsilon_I(t)$다. 구간의 끝이 정지시간이어도 성립한다.
+\end{lemma}
+
+\begin{lemma}[라벨이 같은 bucket의 숨은 후회]\label{lem:samelabel}
+$\cE_\delta$ 위에서, 구간 $W=(s,t]$의 판정에서 $B$의 모든 멤버가 같은 라벨을 받았다면 다음이 성립한다.
+\[
+H_B^W\le\sum_{I\in B}\big(\theta_I^W+4\varepsilon_I(t)\big).
+\]
+\end{lemma}
+
+\begin{lemma}[분할 유한성]\label{lem:finite}
+분할은 모든 표본 경로에서 많아야 $N-\abs{\cP_0}$번이다.
+\end{lemma}
+
+\subsection{정리}
+\begin{theorem}[방식 E의 수렴]\label{thm:epoch}
+(S1)–(S3), \eqref{eq:T}, 방식 E, 추적 라벨을 가정한다. $\cE_\delta$ 위에서(확률 $1-\delta$ 이상), 끝에서 분할이 일어나지 않은 \emph{모든} epoch $k$에 대해 다음이 성립한다.
+\[
+\NC(\bar\sigma^{(k)})\le\frac1{L_k}\Big[\sum_{B\in\cP_k}D_B\sqrt{\abs{A_B}\,t_{k+1}}+\sum_{I\in\cI}\big(\theta_I^{(k)}+6\varepsilon_I(t_{k+1})\big)\Big].
+\]
+$k^*$를 마지막으로 분할이 일어난 epoch라 하면, 보조정리~\ref{lem:finite}에 의해 $k^*<\infty$이고 $k>k^*$인 모든 epoch에 위 식이 적용된다.
+정규 검정($\theta\le z\Delta_I\sqrt{L_k}$)과 두 배 epoch($\gamma=2$)를 쓰면 다음이 된다.
+\[
+\NC(\bar\sigma^{(k)})=O\!\left(\sqrt{\frac{\log(kN_A/\delta)}{L_k}}\right).
+\]
+또한 거의 확실하게 $\NC(\bar\sigma^{(k)})\to0$이다.
+\end{theorem}
+
+\begin{corollary}[실행 전체의 평균]\label{cor:wholerun}
+$K>k^*$이고 $T=t_{K+1}$일 때 다음이 성립한다.
+\[
+\NC(\bar\sigma^{(0,T]})=O\!\left(\frac{t_{k^*+1}}{T}+\sqrt{\frac{\log}{T}}\right).
+\]
+\end{corollary}
+
+\begin{theorem}[방식 G의 수렴]\label{thm:gated}
+(S1)–(S3), \eqref{eq:T}, 방식 G를 가정한다. 임의의 $\varepsilon_g>0$, $g,m\ge1$에 대해 다음이 성립한다.
+\begin{enumerate}[label=(\roman*)]
+  \item 판정은 끝없이 미뤄지지 않는다.
+  \item 마지막 분할 시점 $s^*$가 존재한다.
+  \item $\cE_\delta$ 위에서, $s^*$ 이후 분할 없이 판정을 통과한 모든 시점 $t$에 대해 다음이 성립한다.
+  \[
+  \NC(\bar\sigma^{(s^*,t]})\le\frac{\sum_BD_B\sqrt{\abs{A_B}t}+\sum_I(\theta_I+6\varepsilon_I(t))}{t-s^*}\to0.
+  \]
+\end{enumerate}
+\end{theorem}
+
+\begin{theorem}[$\varepsilon$ 정지 인증]\label{thm:certificate}
+(S1)–(S3), 방식 G를 가정한다. $\cE_\delta$ 위에서, 판정 구간 $W=(s,t]$의 판정 통과에서 어떤 bucket도 나뉘지 않았다면 다음이 성립한다.
+\[
+\NC(\bar\sigma^W)\le\frac{\tilde C^W}{\abs W}+\frac1{\abs W}\sum_I\big(\theta_I^W+6\varepsilon_I(t)\big)\le\varepsilon_g+\frac{\sum_I\theta_I^W}{\abs W}+\frac{6\sum_I\varepsilon_I(t)}{\abs W}.
+\]
+일부 bucket $S$가 나뉜 통과에서는 $\frac1{\abs W}\sum_{B\in S}\min_\ell\sum_{I\in B}e_I(\ell)$이 더해진다.
+\end{theorem}
+\noindent 이 인증은 마지막 분할 시점을 몰라도 쓸 수 있는 정지 규칙이다. 다만 모든 정보집합에 대한 합이 들어가므로, mini-stud 크기에서도 수치적으로는 매우 느슨하다(부록~\ref{app:proofs}의 비고).
+
+\paragraph{재생 라벨.}
+순수 ASWISS의 라벨 계산(\ref{sec:estimate}절 (나))에 대한 결과다. 추정 오차가 있어도 참으로 일치하는 bucket을 나누지 않으려면 \emph{여유 라벨 집합}을 쓴다.
+\begin{lemma}[여유 라벨 집합]\label{lem:slack}
+$\norm{\hat x_I-x_I}_\infty\le\eta_I$인 추정치에 대해 여유 라벨 집합을 다음과 같이 둔다.
+\[
+\hat M(I)=\{\ell:\hat x_I(\ell)\ge\max_{\ell'}\hat x_I(\ell')-2\eta_I\}
+\]
+$\bigcap_{I\in B}\hat M(I)=\emptyset$일 때만 나누고, 나눌 때는 각 멤버를 $\hat M(I)$의 대표 라벨(고정 순서의 첫 원소)별로 모은다. 그러면 다음이 성립한다.
+\begin{enumerate}[label=(\roman*)]
+  \item 참 최대 라벨은 늘 $\hat M(I)$에 들어 있다.
+  \item $\ell\in\hat M(I)$이면 $e_I(\ell)\le4\eta_I$다.
+  \item 참으로 일치하는 bucket은 나뉘지 않는다.
+  \item 나뉘지 않은 bucket은 $H_B\le4\sum_{I\in B}\eta_I$다.
+  \item 나뉠 때 각 멤버가 들어가는 자식의 라벨 $\hat c$에 대해 $e_I(\hat c)\le4\eta_I$다.
+\end{enumerate}
+\end{lemma}
+
+\begin{lemma}[재생 추정의 집중]\label{lem:replay}
+다음과 같이 둔다.
+\[
+\eta_I^{(k)}=L_k\Delta_I\sqrt{\frac{2}{K_k}\ln\frac{\pi^2N_A(k+1)^2}{3\delta}}.
+\]
+사건 $\cE'_\delta$ = {모든 $k,I,a$에서 $\abs{\hat R_I^{(k)}(a)-R_I^{(k)}(a)}\le\eta_I^{(k)}$}의 확률은 $1-\delta$ 이상이다.
+\end{lemma}
+
+\begin{theorem}[저장 전략 재생의 수렴]\label{thm:replay}
+(S1)–(S3), 방식 E, 재생 라벨(보조정리~\ref{lem:slack}, $\eta=\eta^{(k)}$)을 가정한다. $\cE_\delta\cap\cE'_\delta$ 위에서(확률 $1-2\delta$ 이상) 다음이 성립한다.
+\begin{enumerate}[label=(\roman*)]
+  \item 참으로 일치하는 bucket은 나뉘지 않는다.
+  \item 분할은 많아야 $N-\abs{\cP_0}$번이다.
+  \item 끝에서 분할이 없었던 모든 epoch $k$에 대해 다음이 성립한다.
+  \begin{align*}
+  \NC(\bar\sigma^{(k)})\le{}&\frac1{L_k}\Big[\sum_BD_B\sqrt{\abs{A_B}\,t_{k+1}}+2\sum_I\varepsilon_I(t_{k+1})\Big]\\
+  &+4\sum_I\Delta_I\sqrt{\frac2{K_k}\ln\frac{\pi^2N_A(k+1)^2}{3\delta}}.
+  \end{align*}
+\end{enumerate}
+따라서 $K_k/\log k\to\infty$이면 마지막 분할 이후 NashConv가 0으로 간다. $K_k\propto L_k$이면 정리~\ref{thm:epoch}와 같은 차수다.
+\end{theorem}
+
+\subsection{보장하지 않는 것}\label{sec:theory-limits}
+\begin{itemize}
+  \item \textbf{마지막 분할 시점 $t^*$의 상한이 없다.} 속도 보장은 $t^*$ 이후에만 있다.
+    CFR+IRA는 $T_{\lim}$을 묶지만, 모든 정보집합을 하나씩 떼어 내야 하는 최악의 경우로 묶기 때문에 그 크기가 정보집합 수에 지수적이다(정리~\ref{thm:ira}).
+  \item \textbf{최종 bucket 수에 보장이 없다.} 최악의 경우 정보집합마다 bucket 하나까지 간다. 그래도 수렴은 유지되지만 압축 이득은 사라진다.
+  \item \textbf{보장 대상은 정보집합별 평균이다.} 구현의 bucket 평균 표는 대상이 아니다(\ref{sec:impl-gap}절).
+  \item \textbf{현재 전략(마지막 반복)에는 보장이 없다.}
+  \item \textbf{충분조건일 뿐이다.} 보조정리~\ref{lem:decomp}의 부등식은 최선 응답이 가지 않는 정보집합의 후회도 센다. 그래서 라벨 규칙이 그런 정보집합 때문에 불필요하게 나눌 수 있다. 정확성의 손해는 없고 효율의 손해만 있다.
+  \item \textbf{실행 사이의 단조성이 없다.} 분할은 이후의 궤적을 바꾼다. 그래서 "bucket이 많을수록 같은 반복에서 더 좋다"가 성립하지 않는다(추상화 병리 현상~\citep{waugh2009abstraction}).
+    1단 행렬 게임에서 라벨 분할 뒤 NashConv가 0.238에서 2.5로 오르는 예를 \ref{sec:derived-theta}절에 적었다.
+\end{itemize}

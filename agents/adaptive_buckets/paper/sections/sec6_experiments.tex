@@ -1,0 +1,209 @@
+\section{실험}\label{sec:experiments}
+
+정확한 exploitability를 잴 수 있는 작은 게임에서 실험했다. 질문은 셋이다.
+\begin{enumerate}
+  \item 누적 후회 라벨로 나누는 규칙이 CFR+IRA, 고정 추상화와 비교해 어떤가?
+  \item 표본만 쓰는 순수 ASWISS의 규칙은 어디까지 내려가는가?
+  \item 정보집합별 표 없이 계보를 따르는 비용은 얼마인가?
+\end{enumerate}
+모든 수치는 seed 1개다(CFR+IRA와 표본 실행 일부는 여러 seed이고 그렇게 적었다).
+exploitability는 정확한 최선 응답으로 잰 $\NC/2$다.
+
+\subsection{설정}\label{sec:exp-setup}
+\paragraph{게임.}
+\begin{itemize}
+  \item Kuhn 포커(정보집합 12개), Leduc 포커(288개)
+  \item mini-stud: 세븐 포커의 규칙을 유지하고 크기를 줄인 2인 게임이다(정보집합 51,114개, 노드 644,579개).
+    \begin{itemize}
+      \item 무늬 없는 Q, K, A 각 4장, 처음 3장을 받고 버림과 공개는 고정 휴리스틱으로 한다.
+      \item 베팅 라운드는 둘이다. 5구(공개 카드)와 7구(비공개 카드)이고, 플레이어당 레이즈 상한은 라운드마다 1이다.
+      \item 행동은 다이, 체크/콜, 삥, 따당, 하프다. 보상은 ante 단위다.
+    \end{itemize}
+\end{itemize}
+\paragraph{비교군.}
+\begin{itemize}
+  \item 추상화 없는 CFR+, DCFR, PCFR+(전체 순회), 추상화 없는 외부 샘플링 MCCFR
+  \item CFR+IRA: 원문 알고리즘 6–10을 따르고, 원문에 보고된 설정 B10H90과 B100H900을 썼다.
+  \item 카드 특징 k-means 고정 추상화: 시점 칸마다 bucket 수를 비교 대상에 맞췄다.
+  \item 시작 분할 $\cP_0$를 고정한 것
+  \item MMD~\citep{sokota2023unified}, ESCHER~\citep{mcaleer2023escher}: 원문 설정, 같은 C++ 신경망 구현
+\end{itemize}
+\paragraph{ASWISS의 판.}
+\begin{itemize}
+  \item \textbf{추적판}: 정리~\ref{thm:epoch}의 규칙이다. 정보집합마다 구간 누적 후회를 쌓아 라벨을 붙인다. 전체 순회판과 외부 샘플링판이 있다.
+  \item \textbf{순수판}: 정리~\ref{thm:replay}의 규칙이다. 정보집합에 대해 아무것도 저장하지 않는다.
+    \begin{itemize}
+      \item 저장한 반복 전략 $K_k$개를 재생해 라벨을 구한다.
+      \item 분할 판정은 bucket마다 저수지 표본 16개로 한다.
+      \item bucket은 계보를 따라 정한다(\ref{sec:impl-gap}절).
+    \end{itemize}
+\end{itemize}
+
+\subsection{전체 순회: CFR+IRA와의 비교}\label{sec:exp-ira}
+모든 비교군이 같은 전체 순회 학습기(교대 갱신, 선형 평균)를 쓴다.
+ASWISS 추적판은 epoch(10, 30, 70, … 반복) 끝마다 정확한 구간 누적 후회로 라벨을 붙인다. 반사실 도달확률 합당 후회가 $10^{-3}$ 이하면 "없음"이다.
+표~\ref{tab:leduc}와 표~\ref{tab:small}은 평균 정책(배포 가능한 bucket 평균)의 exploitability다.
+
+\begin{table}[h]
+\centering\small
+\caption{Leduc(정보집합 288개). CFR+IRA는 seed 10개의 중앙값이다.}\label{tab:leduc}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+비교군 & 최종 bucket & 1,270 & 20,470 & 81,910 & 655,350 \\
+\midrule
+CFR+ (추상화 없음) & 288 & 1.69e-4 & 2.37e-6 & 9.75e-7 & 1.99e-7 \\
+PCFR+ (추상화 없음) & 288 & 5.0e-4 & 1.89e-6 & 2.95e-8 & 5.8e-11 \\
+ASWISS 추적판 ($\cP_0$에서) & 222 & 2.34e-2 & 9.19e-5 & 5.87e-6 & 2.35e-7 \\
+CFR+IRA B10H90 & 287 & 6.8e-4 & 8.7e-6 & 2.6e-6 & 1.87e-7 \\
+k-means 고정 (222개) & 222 & 0.935 & 0.939 & 0.955 & 0.947 \\
+$\cP_0$ 고정 & 18 & 2.35 & 2.35 & 2.35 & 2.35 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\caption{mini-stud(정보집합 51,114개), 81,910반복. CFR+IRA는 seed 5개의 중앙값 [최소, 최대]이다.}\label{tab:small}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+비교군 & bucket & 평균 정책 & 현재 정책 \\
+\midrule
+CFR+ (추상화 없음) & 51,114 & 7.04e-7 & 1.03e-3 \\
+PCFR+ (추상화 없음) & 51,114 & 3.23e-8 & 4.66e-5 \\
+ASWISS 추적판 ($\cP_0$에서) & 14,145 & \textbf{2.05e-3} & 5.37e-3 \\
+ASWISS 추적판 (CFR+IRA 초기 추상화에서) & 21,215 & 6.85e-3 & 6.97e-3 \\
+CFR+IRA B10H90 & 21,066 & 5.64e-2 [5.32e-2, 5.79e-2] & 4.40e-2 \\
+CFR+IRA B100H900 & 22,218 & 5.33e-2 [4.83e-2, 6.20e-2] & 3.84e-2 \\
+k-means 고정 (11,229개) & 11,229 & 0.297 & 0.298 \\
+$\cP_0$ 고정 & 40 & 0.764 & 0.764 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{itemize}
+  \item \textbf{Leduc.} 두 방법 모두 원 게임 정확도에 도달한다.
+    \begin{itemize}
+      \item CFR+IRA는 처음 30반복 안에 휴리스틱 갱신이 288개 중 284–288개로 나눠, 이후로는 사실상 추상화 없는 CFR+다.
+      \item ASWISS 추적판은 bucket 222개(77\%)로 같은 수준(2.35e-7)에 도달했다.
+    \end{itemize}
+  \item \textbf{mini-stud.} 같은 반복에서 ASWISS 추적판이 CFR+IRA보다 26–28배 낮았고, bucket은 3분의 1 적었다.
+    \begin{itemize}
+      \item 같은 출발점(CFR+IRA의 초기 추상화)끼리 비교해도 약 8배 낮았다.
+      \item 출발점 $\cP_0$(시점 분할)이 CFR+IRA의 초기 추상화(자기 행동열 길이와 행동 수, 14개)보다 bucket도 적고 3.3배 낮았다.
+    \end{itemize}
+  \item \textbf{고정 추상화.} k-means 고정 추상화는 추상화 오차의 바닥(Leduc 0.95, mini-stud 0.30)에서 멈췄다.
+  \item \textbf{추상화 없는 풀이기.} 두 게임 모두 원 게임을 바로 풀 수 있는 크기라서 추상화 없는 PCFR+가 가장 낮았다. 추상화의 쓰임은 정보집합 표나 전체 순회를 감당할 수 없는 게임에 있다.
+\end{itemize}
+
+\subsection{같은 학습 시간: 표본판}\label{sec:exp-time}
+CFR+IRA는 전체 순회가 필요하다. ASWISS는 외부 샘플링으로도 돈다.
+\paragraph{같은 시간의 CFR+IRA 비교(mini-stud).}
+\begin{itemize}
+  \item 약 1,000초에서 ASWISS 표본 추적판(seed 4개 중앙값, $z=2$)은 7.67e-3이었고, 전체 순회 CFR+IRA(seed 1)는 9.4e-2였다. 12배 차이다.
+  \item 약 500초에서는 1.20e-2 대 0.155–0.165로 13배 차이였다.
+  \item 같은 ASWISS라도 이 크기에서는 전체 순회판(915초에 3.60e-3, bucket 13,710)이 표본판(1,139초에 7.67e-3, bucket 28,130)보다 낮았다.
+  \item 표본판이 bucket을 더 많이 만든 것은 표본 잡음 때문이다. 정규 검정이 가짜 라벨을 내서 더 많이 나눴다.
+\end{itemize}
+
+\paragraph{같은 시간의 표본 방법 비교.}
+\begin{itemize}
+  \item ASWISS(외부 샘플링, 후회 매칭, 균등 평균)와 같은 순수 MCCFR, 같은 학습기의 k-means, MMD, ESCHER에 같은 학습 시간을 주었다.
+  \item 조건: 같은 기계, 코어 하나, 같은 C++ 구현이다. 학습 시간은 Kuhn 300초, Leduc과 mini-stud 1,800초다.
+\end{itemize}
+\begin{table}[h]
+\centering\small
+\caption{같은 학습 시간 끝의 exploitability(평균 정책; MMD는 마지막 반복)}\label{tab:walltime}
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+게임 & ASWISS & MCCFR & k-means & MMD & ESCHER \\
+\midrule
+Kuhn (300초) & 1.4e-5 & 2.2e-5 & 3.0e-5 & 0.047 & 0.154 \\
+Leduc (1,800초) & 2.6e-4 (206개) & 1.9e-4 & 0.77 (206개) & 0.42 & 2.09 \\
+mini-stud (1,800초) & 0.047 (21,722개) & 1.1e-3 & 0.31 (11,693개) & 0.62 & 2.24 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{itemize}
+  \item \textbf{고정 추상화.} k-means는 추상화 오차의 바닥에 막히고, ASWISS는 그 아래로 계속 내려간다.
+    \begin{itemize}
+      \item 같은 반복의 비율(ASWISS/k-means)은 Leduc에서 순회 $10^9$회에 0.00079, mini-stud에서 0.079였다.
+      \item mini-stud의 아주 짧은 예산(순회 $2\times10^6$회)에서는 ASWISS가 1.7배 높았다.
+    \end{itemize}
+  \item \textbf{추상화 없는 MCCFR.} 원 게임 표를 메모리에 그대로 둘 수 있는 크기에서는 추상화 없는 MCCFR이 더 낮았다.
+    \begin{itemize}
+      \item mini-stud에서 같은 반복의 비율은 15–20배였다.
+      \item ASWISS가 아끼는 것은 메모리다(mini-stud에서 bucket 수가 정보집합의 42\%).
+    \end{itemize}
+  \item \textbf{신경망 방법.} 같은 CPU 시간에서 MMD와 ESCHER는 두 자릿수 이상 높았다.
+    \begin{itemize}
+      \item 신경망 방법은 GPU를 상정한 알고리즘이다. 우리 CPU 구현은 BLAS를 쓰지 않아, 측정상 같은 코어의 numpy보다 2.1–3.6배 느리다.
+      \item 그래서 이 비교는 같은 CPU 조건에서만의 결과다.
+    \end{itemize}
+\end{itemize}
+
+\subsection{순수 ASWISS}\label{sec:exp-pure}
+순수판은 정보집합에 대해 아무것도 저장하지 않는다.
+\begin{itemize}
+  \item 라벨은 저장한 반복 전략 $K_k=\min(64,8(k+1))$개의 재생으로 구한다.
+  \item 분할 판정은 bucket마다 그 epoch에 방문한 정보집합 16개의 저수지 표본으로 한다.
+  \item 학습기는 외부 샘플링 MCCFR(후회 매칭, 균등 평균, 교대 순회)이다.
+  \item bucket을 정하는 방법은 둘이다.
+    \begin{itemize}
+      \item 엄격판: 매번 계보를 따라 다시 계산한다.
+      \item 표판: 분할 뒤 한 번 계산해 표에 둔다.
+    \end{itemize}
+    두 방법은 같은 규칙이다. Leduc 1.5만 반복에서 세 구현(엄격, 반복 안 메모, 표)의 정책 파일이 바이트 단위로 같았다. mini-stud 1,000–7,000반복에서도 같은 값이었다. 그래서 규칙의 품질은 표판으로 잰다.
+\end{itemize}
+
+\begin{table}[h]
+\centering\small
+\caption{mini-stud, 같은 반복의 평균 정책 exploitability(외부 샘플링, seed 1)}\label{tab:pure}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+방법 & 3,280만 & 6,550만 & 1.31억 \\
+\midrule
+순수 ASWISS (재생 라벨, 표판) & \textbf{0.024} & \textbf{0.0177} & \textbf{0.0140} (bucket 17,455) \\
+ASWISS 추적판 (창 라벨) & 0.131 & 0.086 & 0.056 \\
+추상화 없는 MCCFR & 0.0078 & 0.0049 & 0.0032 \\
+k-means 고정 (11,693개) & 0.294 & – & 0.297 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{itemize}
+  \item 같은 반복에서 순수판은 지금까지의 ASWISS 변형 중 가장 낮았다.
+  \item 1.31억 반복(학습 482초, 분할 17단계, bucket 17,455)에서 0.0140이었다. 같은 반복의 k-means 고정 추상화보다 21배 낮았다.
+  \item 추상화 없는 MCCFR보다는 여전히 4.4배 높았다.
+\end{itemize}
+
+\subsection{계보 라우팅의 비용}\label{sec:exp-route}
+정보집합별 표 없이 \textsc{Route}를 부르면, 한 정보집합의 라벨 계산이 상대의 앞선 결정과 이후 결정들의 \textsc{Route}를 연쇄적으로 부른다.
+\begin{table}[h]
+\centering\small
+\caption{mini-stud, 계보 라우팅이 반복 하나에 계산한 트리 노드 수(분할 단계별)}\label{tab:route}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+메모 & 1단계 & 2단계 & 3단계 & 4단계 \\
+\midrule
+없음 & 6.5e3 & 1.4e5 & 1.0e7 & 4.1e8 \\
+500 & 5.4e3 & 5.1e4 & 6.6e5 & 2.4e7 \\
+무제한 (= 정보집합별 표) & 512 & 494 & 377 & 225 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{itemize}
+  \item 메모가 없으면 반복당 비용이 분할 단계마다 20–40배씩 늘었다.
+  \item 노트북에서 순수판 엄격 구현의 반복당 시간은 다음과 같았다. 같은 구간의 표판은 반복당 약 0.07밀리초였다.
+    \begin{itemize}
+      \item 3단계: 약 0.34초
+      \item 4단계: 약 21초(트리 노드 약 40억 개)
+    \end{itemize}
+  \item 이것이 파생 기법(\ref{sec:derived}절)의 동기다. 규칙의 품질은 좋지만 계보를 따르는 비용이 단계에 대해 곱으로 늘어난다.
+\end{itemize}
+
+\subsection{정리와 한계}
+\begin{itemize}
+  \item 누적 후회 라벨로 나누는 규칙은 전체 순회에서 CFR+IRA보다 같은 반복에 26–28배 낮았다. 표본판도 같은 시간에 12–13배 낮았다(mini-stud).
+  \item 순수판의 규칙(재생 라벨 + 구성원 표본 판정)은 같은 반복에서 추적판보다 낮았다.
+  \item 추상화 없는 풀이기와 비교하면, 이 크기의 게임에서는 추상화 없는 쪽이 낮았다. 추상화의 이득은 원 게임 표를 들 수 없는 크기에서만 의미가 있다. 그런 게임(헤즈업 세븐 포커)의 결과는 파생 기법과 함께 \ref{sec:derived-7stud}절에 둔다.
+  \item 모든 비교가 seed 1개(일부 4–10개)이고 게임도 작다. 곡선이 만나는 지점을 기울기로 외삽하지 않았다.
+\end{itemize}

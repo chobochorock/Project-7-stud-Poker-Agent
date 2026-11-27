@@ -1,0 +1,168 @@
+\section{순수 ASWISS}\label{sec:method}
+
+이 절에서 정의하는 순수 ASWISS는 세 가지만 쓴다.
+\begin{itemize}
+  \item 게임 구조만으로 만든 시작 분할
+  \item 반복 전략들의 누적 반사실적 후회로 붙인 라벨
+  \item 분할 사건의 계보
+\end{itemize}
+사람이 고른 특징이나 정보집합별 표는 쓰지 않는다.
+
+\subsection{시작 분할}\label{sec:p0}
+lifting이 정의되려면 같은 bucket의 정보집합이 같은 플레이어의 것이고 행동집합이 같아야 한다. 수렴 정리(5절)에 필요한 조건은 이것뿐이다.
+분할이 정보집합 하나까지 내려갈 수 있으므로, 이 조건을 만족하는 어떤 분할에서 시작해도 증명이 성립한다.
+\begin{itemize}
+  \item 실험의 시작 분할 $\cP_0$는 \emph{시점 분할}이다.
+    \begin{itemize}
+      \item 기준: (플레이어, 베팅 라운드, 그 라운드의 베팅 진행, 합법 행동집합)
+      \item 정보집합 51,114개의 mini-stud에서 40개다.
+      \item 한 경로가 같은 칸을 두 번 지나지 않는다. 즉 absent-mindedness가 없다.
+    \end{itemize}
+  \item 더 깊은 구조까지 같은 것끼리 묶으면 필요한 분할이 줄 것으로 기대한다. 이것은 수렴의 조건이 아니라 효율의 문제다. 일반 게임에서 이런 시작 분할을 만드는 방법은 \ref{sec:future}절에서 다룬다.
+\end{itemize}
+
+\subsection{라벨: 반복 전략들의 누적 반사실적 후회}\label{sec:label}
+판정 구간 $W=(s,t]$($\abs W=t-s$)의 반복 전략 $\sigma^u$($u\in W$)에 대한 정보집합 $I$의 누적 반사실적 후회를 다음과 같이 쓴다.
+\[
+R_I^W(a)=\sum_{u\in W}r^{\sigma^u}(I,a).
+\]
+CFR의 후회 표가 매 반복 $r^{\sigma^u}$를 더하므로, $R_I^W$의 방향은 \emph{그 구간 동안 학습이 실제로 움직인 방향}이다.
+
+행동집합에 "없음" $\none$을 더하고 $x(\none)=0$으로 둔다. 그러면 $\psi(x)=\max_{\ell\in A\cup\{\none\}}x(\ell)$다.
+
+\paragraph{라벨 규칙.}
+추정치 $\tilde R_I^W$(\ref{sec:estimate}절)에서 $\hat a_I=\argmax_a\tilde R_I^W(a)$를 구한다.
+\[
+\ell(I)=\begin{cases}\hat a_I,&\tilde R_I^W(\hat a_I)>\theta_I^W,\\ \none,&\text{그 밖(구간 동안 방문하지 않은 경우 포함)}.\end{cases}
+\]
+역치는 다음 크기 조건만 만족하면 된다.
+\begin{equation}\tag{T}\label{eq:T}
+0\le\theta_I^W\le\Delta_I\,\kappa(W),\qquad\kappa(W)=o(\abs W).
+\end{equation}
+여기서 $\Delta_I$는 $I$ 아래의 효용 폭이다. 실험에 쓴 역치들은 다음과 같다.
+\begin{itemize}
+  \item 정규 검정: $\theta=z\sqrt{\sum_u\tilde r_u(I,\hat a)^2}\le z\Delta_I\sqrt{\abs W}$
+  \item 정확한 계산: 반사실 도달확률 합당 $\mathrm{tol}$
+\end{itemize}
+정규 검정은 사용자 원안의 분할 기준 $R(I,a)/\sqrt{\sum r^2(I,a)}$와 같은 꼴이다.
+
+\subsection{분할 규칙}\label{sec:split}
+판정 시점에, 멤버들의 라벨이 두 종류 이상인 bucket을 라벨별로 나눈다.
+\begin{itemize}
+  \item 자식은 라벨마다 하나다.
+  \item 자식의 후회 표와 평균 표는 0에서 시작한다. 나뉘지 않은 bucket은 표를 그대로 이어 간다.
+  \item 병합은 하지 않는다. 그래서 분할 열은 언제나 세분(refinement)이다.
+\end{itemize}
+
+\subsection{계보 라우팅: 정보집합별 표 없이 bucket 정하기}\label{sec:route}
+ASWISS가 들고 있는 상태는 셋뿐이다.
+\begin{enumerate}
+  \item 시작 분할 $\cP_0$
+  \item 분할 사건 $E_1,E_2,\dots$. 사건 $E_k$는 나뉜 bucket마다 자식 라벨들과, 라벨 계산에 쓸 전략 집합 $\cS_k$를 담는다.
+  \item 현재 bucket들의 후회 표와 평균 표
+\end{enumerate}
+정보집합 $I$의 $k$번째 분할 뒤 bucket은 다음 재귀로 정한다.
+\begin{algorithmic}[1]
+\Function{Route}{$I,k$}
+  \If{$k=0$} \Return $\cP_0(I)$ \EndIf
+  \State $B\gets$ \Call{Route}{$I,k-1$}
+  \If{$E_k$에서 $B$가 나뉘지 않았다} \Return $B$ \EndIf
+  \State $\ell\gets$ $\cS_k$로 계산한 $I$의 라벨(자식 라벨 중에서 고름)
+  \State \Return $E_k$에서 라벨이 $\ell$인 $B$의 자식
+\EndFunction
+\end{algorithmic}
+\begin{itemize}
+  \item 정보집합의 특징이 아니라 분할 시점의 전략이 그 정보집합에 주는 업데이트 방향이 bucket을 정한다.
+  \item 그래서 학습 중 방문한 적이 없는 정보집합도 bucket을 받는다.
+  \item 대가는 비용이다. $I$의 라벨을 정확히 구하려면 다음 결정들의 분할 $k$ 시점 bucket이 필요하다.
+    \begin{itemize}
+      \item $I$에 이르는 상대 결정(반사실 도달확률)
+      \item $I$ 아래의 모든 결정(행동 가치)
+    \end{itemize}
+    이 bucket들도 \textsc{Route}로 다시 찾아야 한다.
+  \item 정보집합별 표 없이는 비용이 분할 단계마다 곱으로 늘어난다(\ref{sec:exp-route}절).
+\end{itemize}
+
+\subsection{라벨 추정: 추적과 재생}\label{sec:estimate}
+이론은 $\tilde R_I^W$를 얻는 두 방법을 다룬다.
+\begin{description}
+  \item[(가) 추적.] 학습 중 외부 샘플링 표본 후회 $\tilde r_u(I)$를 판정 구간 동안 모든 멤버에 대해 쌓는다. 메모리가 정보집합 수에 비례하므로 증명용 기준판이다(정리~\ref{thm:epoch}).
+  \item[(나) 저장 전략 재생.] epoch $W_k$의 반복 중 $K_k$개($\tau_{k,1},\dots,\tau_{k,K_k}$)를 균등하게 뽑아 그 반복의 bucket 전략표만 저장한다.
+    epoch 끝에 저장한 전략마다 원 게임을 정확히 순회해 $r^{\sigma_{\tau}}(I)$를 구하고 다음과 같이 둔다.
+    \[
+    \hat R_I^{(k)}=\frac{L_k}{K_k}\sum_{j=1}^{K_k}r^{\sigma_{\tau_{k,j}}}(I).
+    \]
+    학습 중에는 정보집합에 대해 아무것도 저장하지 않으며, 방문하지 않은 정보집합도 실제 후회로 라벨을 받는다(정리~\ref{thm:replay}).
+    이것이 사용자 원안의 "순간 전략들의 합을 통한 $r(I,a)$"이다.
+\end{description}
+
+\subsection{판정 시점}\label{sec:schedule}
+\begin{description}
+  \item[방식 E (epoch).] 구간 $W_k=(t_k,t_{k+1}]$, $L_k=t_{k+1}-t_k$, $t_{k+1}\le\gamma L_k$이다. epoch마다 두 배로 늘리면 $\gamma=2$다($t_k=1000\cdot2^k$). 판정은 epoch 끝마다 한다.
+  \item[방식 G (수렴 조건부).] 마지막 분할 시점 $s$부터를 판정 구간으로 둔다. $g$반복마다 확인해, $\abs W\ge m$이고 추상 게임의 표본 후회 $\tilde C^W/\abs W\le\varepsilon_g$일 때만 판정한다.
+    \[
+    \tilde C^W=\sum_B\psi(\tilde R_B^W)
+    \]
+    사용자 원안의 분할 시점 "전체 $\sum$bucket.regret $<\varepsilon$"에 해당한다.
+\end{description}
+
+\begin{algorithm}[t]
+\caption{순수 ASWISS (방식 E, 재생 라벨)}\label{alg:aswiss}
+\begin{algorithmic}[1]
+\Require 시작 분할 $\cP_0$, 첫 epoch 길이 $t_0$, 저장 개수 $K_k$
+\State 분할 사건 목록 $\cE\gets\emptyset$, $k\gets0$, 모든 bucket의 표 $Q_B\gets0$, 평균 표 $S_B\gets0$
+\For{$t=1,2,\dots$}
+  \For{traverser $i\in\{1,2\}$}
+    \State 외부 샘플링으로 순회한다. 정보집합 $I$에 닿으면 $B\gets$\Call{Route}{$I,k$}로 찾는다.
+    \State $\sigma(I)\propto Q_B^+$로 행동하고, 표본 후회를 $Q_B$에, 평균을 $S_B$에 쌓는다.
+  \EndFor
+  \If{$t$가 epoch $k$에서 뽑아 둔 $K_k$개의 반복 중 하나} 현재 bucket 전략표를 $\cS_k$에 저장 \EndIf
+  \If{$t=t_{k+1}$ (epoch 끝)}
+    \For{각 bucket $B$}
+      \State 멤버의 라벨 $\ell(I)$를 $\cS_k$의 재생으로 구한다(\ref{sec:estimate}절)
+      \If{라벨이 두 종류 이상} $B$를 라벨별로 나누고 자식 표를 0에서 시작한다 \EndIf
+    \EndFor
+    \State 사건 $E_{k+1}$(나뉜 bucket, 자식 라벨, $\cS_k$)을 $\cE$에 더한다. $k\gets k+1$
+  \EndIf
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{이론판과 구현의 차이}\label{sec:impl-gap}
+5절의 정리는 이론판을 다룬다. 실험의 구현(\texttt{pure\_aswiss.cpp})과 다른 점을 표~\ref{tab:gap}에 적는다.
+\begin{table}[h]
+\centering\small
+\caption{이론판과 실험 구현의 차이}\label{tab:gap}
+\begin{tabular}{@{}p{0.2\linewidth}p{0.33\linewidth}p{0.38\linewidth}@{}}
+\toprule
+항목 & 이론판 & 구현 \\
+\midrule
+bucket 학습 & RM+, 자식은 0에서 & RM(음수 후회를 자르지 않음), 자식은 0에서 \\
+갱신 순서 & 두 플레이어 동시 갱신 & 교대 순회 \\
+출력 평균 & 판정 구간의 균등 혼합(정보집합별 실현 계획 평균) & bucket 단위 평균 표(실행 전체) \\
+분할 판정 대상 & bucket의 모든 멤버 & bucket마다 그 epoch에 방문한 정보집합 16개의 저수지 표본 \\
+재생 개수 & $K_k/\log k\to\infty$ & $K_k=\min(64,\,8(k+1))$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+\begin{itemize}
+  \item 구현의 bucket 평균 표는 멤버들의 자기 도달확률 궤적이 비례하지 않으면 정보집합별 평균과 다르다. 그래서 정리의 대상이 아니다.
+  \item 정보집합별 평균을 저장하지 않는 순수 구현에서는 정리의 대상인 평균을 잴 수 없다. 대신 저장한 반복 전략 하나를 판마다 무작위로 고르는 혼합 정책이 같은 평균과 실현 동치다. 이것을 내놓는 것은 \ref{sec:future}절의 과제로 둔다.
+\end{itemize}
+
+\subsection{비용}\label{sec:cost}
+\begin{itemize}
+  \item \textbf{학습 메모리.}
+    \begin{itemize}
+      \item bucket 표와 분할 사건을 둔다.
+      \item 사건마다 bucket 전략표 $K_k$개를 둔다.
+      \item bucket마다 구성원 저수지를 둔다.
+    \end{itemize}
+    정보집합 수에 비례하는 상태는 없다.
+  \item \textbf{계산.}
+    \begin{itemize}
+      \item 학습 순회는 외부 샘플링 MCCFR과 같다. 다만 정보집합마다 \textsc{Route}를 부른다.
+      \item 표 없이 \textsc{Route}를 부르면 그 비용이 분할 단계 $k$에 대해 곱으로 늘어난다. 같은 (정보집합, 단계)의 결과를 기억하는 메모를 무제한으로 두면 결국 정보집합별 표와 같아진다.
+    \end{itemize}
+  \item \textbf{정책의 크기.} 배포하는 정책은 bucket 전략표와 분할 계보다.
+\end{itemize}

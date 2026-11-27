@@ -1,0 +1,174 @@
+\section{증명}\label{app:proofs}
+
+이 부록은 5절과 7.1절의 결과를 증명한다. 기호는 5절을 따른다. 같은 증명과 작은 게임에서의 수치 확인은 다음 파일에 있다.
+\begin{itemize}
+  \item 증명: \texttt{ASWISS\_CONVERGENCE\_KO.md}
+  \item 수치 확인: \texttt{test\_aswiss\_convergence.py}, \texttt{test\_avg\_direction.py}
+\end{itemize}
+
+\subsection{보조정리~\ref{lem:decomp} (NashConv 분해)}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item 제로섬이므로 $\NC(\bar\sigma^W)=\sum_i\max_\beta u_i(\beta,\bar\sigma^W_{-i})$다.
+  \item $\beta_i$를 $\bar\sigma^W_{-i}$에 대한 순수 최선 응답이라 하자. 상대의 실현 계획에 대한 선형성으로 $u_i(\beta_i,\bar\sigma^W_{-i})=\frac1{\abs W}\sum_{t\in W}u_i(\beta_i,\sigma_{t,-i})$다.
+  \item (S1)로 두 플레이어가 같은 $\sigma_t$를 쓰므로 $\sum_iu_i(\sigma_t)=0$을 빼 넣을 수 있다.
+    \[
+    \NC(\bar\sigma^W)=\frac1{\abs W}\sum_{t\in W}\sum_i\big(u_i(\beta_i,\sigma_{t,-i})-u_i(\sigma_t)\big)
+    \]
+  \item 보조정리~\ref{lem:perfdiff}를 각 $t$와 $i$에 쓰고 $t$에 대해 더하면 등식을 얻는다.
+  \item 부등식은 $\pi_i^{\beta_i}(I)\in\{0,1\}$과 $R_I^W(\beta_i(I))\le\psi(R_I^W)$에서 나온다.
+  \item 마지막 등식은 $H$의 정의다.
+\end{itemize}
+\end{proof}
+
+\subsection{보조정리~\ref{lem:label} (라벨 항등식)}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item $x\mapsto x(\ell)$은 선형이고 $\psi(x)=\max_\ell x(\ell)$이다. 그래서 $\psi(R_B^W)=\max_\ell\sum_{I\in B}R_I^W(\ell)$다.
+  \item 이것을 $\sum_I\psi(R_I^W)$에서 빼면 $H_B^W=\min_\ell\sum_I\big(\psi(R_I^W)-R_I^W(\ell)\big)$이다.
+  \item $\psi(x)\ge x(\ell)$이므로 각 항은 0 이상이다.
+  \item 따라서 $H_B^W=0$은 어떤 $\ell$에서 모든 항이 0이라는 것, 즉 공통 최대 라벨이 있다는 것과 같다.
+\end{itemize}
+\end{proof}
+
+\subsection{보조정리~\ref{lem:rmplus-window} (RM+의 구간 상한)}
+\begin{proof}
+$x_u=\tilde r_u(B)$로 둔다.
+\begin{itemize}
+  \item 방문된 멤버마다 $\tilde r_u(I)=\tilde v-\langle\sigma_u(B),\tilde v\rangle\mathbf 1$이므로 $\langle\sigma_u(B),\tilde r_u(I)\rangle=0$이다. 멤버들에 대해 더하면 $\langle\sigma_u(B),x_u\rangle=0$이다.
+  \item $Q_u\ge0$이고 $\sigma_u\propto Q_u$이므로 $\langle Q_u,x_u\rangle=0$이다. 따라서 다음이 성립한다.
+    \[
+    \norm{Q_{u+1}}_2^2\le\norm{Q_u+x_u}_2^2=\norm{Q_u}_2^2+\norm{x_u}_2^2
+    \]
+  \item 귀납법과 (S3)로 $\norm{Q_t}_2^2\le\abs{A_B}D_B^2(t-\tau_B)$다.
+  \item $Q_{u+1}\ge Q_u+x_u$이므로 성분별로 $\sum_{u\in W}x_u\le Q_t-Q_s\le Q_t$다.
+\end{itemize}
+확률을 쓰지 않는 결론이다. 직교성이 같은 $\sigma_u(B)$를 쓰는 멤버들의 합에서도 유지되기 때문이다.
+\end{proof}
+
+\subsection{보조정리~\ref{lem:concentration} (시간 균일 집중)}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item (S2)에 의해 $X_u=\tilde r_u(I,a)-r_u(I,a)$는 $\abs{X_u}\le2\Delta_I$인 마팅게일 차분이다.
+  \item 블록 $[2^j,2^{j+1})$에 Azuma 부등식의 최대 버전을 쓰면 다음을 얻는다.
+    \[
+    \Pr\Big(\max_{t<2^{j+1}}\big\lvert\textstyle\sum_{u\le t}X_u\big\rvert\ge\lambda_j\Big)\le2\exp\!\Big(-\frac{\lambda_j^2}{16\cdot2^j\Delta_I^2}\Big)
+    \]
+  \item $\delta_j=6\delta/(\pi^2(j+1)^2)$, $\lambda_j=4\Delta_I\sqrt{2^j\ln(2N_A/\delta_j)}$로 고르면 이 확률은 $\delta_j/N_A$다.
+  \item $t\in[2^j,2^{j+1})$이면 $\lambda_j\le\varepsilon_I(t)$다.
+  \item $(I,a)$ $N_A$개와 $j$에 대해 합집합 상계를 쓰면 실패 확률은 $\sum_j\delta_j=\delta$ 이하다.
+  \item 구간 합은 두 누적합의 차이이므로 $2\varepsilon_I(t)$로 묶인다. 시간 균일 상계이므로 구간의 끝이 정지시간이어도 된다.
+\end{itemize}
+\end{proof}
+
+\subsection{보조정리~\ref{lem:samelabel} (라벨이 같은 bucket)}
+\begin{proof}
+첫 부등식 $H_B^W\le\sum_{I\in B}e_I(\ell)$은 보조정리~\ref{lem:label}이다. $\eta_I=2\varepsilon_I(t)$로 두면 보조정리~\ref{lem:concentration}로 $\norm{R_I^W-\tilde R_I^W}_\infty\le\eta_I$다.
+\begin{itemize}
+  \item \textbf{$\ell=\none$.} 검정에 실패했거나 방문이 없었으므로 $\psi(\tilde R_I)\le\theta_I$다. $\psi$는 $\norm{\cdot}_\infty$에 대해 1-립시츠이므로 $e_I(\none)=\psi(R_I)\le\theta_I+\eta_I$다.
+  \item \textbf{$\ell=a\in A$.} $a$는 $\tilde R_I$의 argmax이고 $\tilde R_I(a)>\theta_I\ge0$이다.
+    \begin{itemize}
+      \item $\max_bR_I(b)\ge0$이면 $e_I(a)\le(\tilde R_I(a)+\eta_I)-(\tilde R_I(a)-\eta_I)=2\eta_I$다.
+      \item 그렇지 않으면 $e_I(a)=-R_I(a)<\eta_I$다.
+    \end{itemize}
+\end{itemize}
+어느 경우든 $e_I\le\theta_I+2\eta_I=\theta_I+4\varepsilon_I(t)$다.
+\end{proof}
+\noindent 검정의 통계적 타당성(가짜 라벨이 나올 확률)은 이 증명에 쓰이지 않는다. 쓰이는 것은 역치의 크기 조건 \eqref{eq:T}뿐이다. 가짜 라벨은 분할을 늘릴 뿐이고, 분할은 유한하다.
+
+\subsection{보조정리~\ref{lem:finite} (분할 유한성)}
+\begin{proof}
+분할마다 자식은 실제 멤버를 가진 둘 이상의 묶음이다. 방문되지 않은 멤버도 라벨 $\none$을 가진 실제 멤버이므로 $\none$ 자식도 비어 있지 않다.
+그래서 bucket 수는 분할마다 엄격히 늘고, $N$을 넘지 못한다.
+\end{proof}
+
+\subsection{정리~\ref{thm:epoch}과 따름정리~\ref{cor:wholerun}}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item epoch $k$ 동안 분할 $\cP_k$는 고정이다. 그 끝에서 분할이 없었으므로 모든 bucket의 라벨이 하나다.
+  \item 보조정리~\ref{lem:decomp}로 $C$와 $H$로 나눈다.
+  \item \textbf{$C$ 항.} 보조정리~\ref{lem:concentration}과 \ref{lem:rmplus-window}로 다음을 얻는다.
+    \[
+    \psi(R_B)\le\psi(\tilde R_B)+\sum_{I\in B}2\varepsilon_I(t_{k+1}),\qquad\psi(\tilde R_B)\le D_B\sqrt{\abs{A_B}t_{k+1}}
+    \]
+  \item \textbf{$H$ 항.} 보조정리~\ref{lem:samelabel}로 묶는다. 두 항을 더하면 정리의 식이다.
+  \item \textbf{차수.} 정규 검정이면 $\theta_I\le z\Delta_I\sqrt{L_k}$이고, $\gamma=2$이면 $t_{k+1}\le2L_k$다. 그래서 전체가 $O(\sqrt{\log(kN_A/\delta)/L_k})$다.
+  \item \textbf{거의 확실한 수렴.} 사건 $\{\limsup_k\NC>0\}$은 모든 $\delta$에 대해 $\cE_\delta^c$에 포함되므로 확률이 0이다.
+  \item \textbf{따름정리.} $\psi$의 준가법성 $\psi(\sum_kx_k)\le\sum_k\psi(x_k)$로 epoch별로 나눈다. 분할 시기의 epoch는 $\psi(R_I^{(k)})\le\Delta_IL_k$로 묶고, 나머지는 등비합이다.
+\end{itemize}
+\end{proof}
+
+\subsection{정리~\ref{thm:gated}과 정리~\ref{thm:certificate}}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item \textbf{(i)} 분할이 고정된 시점 $s$ 이후 다음이 성립하므로 판정이 끝없이 미뤄지지 않는다.
+    \[
+    \tilde C^{(s,t]}/(t-s)\le\sum_BD_B\sqrt{\abs{A_B}t}/(t-s)\to0\quad(\text{보조정리~\ref{lem:rmplus-window}})
+    \]
+  \item \textbf{(ii)}는 보조정리~\ref{lem:finite}이다.
+  \item \textbf{(iii)}은 정리~\ref{thm:epoch}의 증명과 같다. 보조정리~\ref{lem:concentration}이 시간 균일이라 판정 구간의 끝이 정지시간이어도 된다.
+  \item \textbf{인증.}
+    \begin{itemize}
+      \item 보조정리~\ref{lem:concentration}로 $C^W\le\tilde C^W+2\sum_I\varepsilon_I(t)$다.
+      \item 판정 통과이므로 $\tilde C^W\le\varepsilon_g\abs W$다.
+      \item $H^W$는 보조정리~\ref{lem:samelabel}로 묶고, 보조정리~\ref{lem:decomp}로 합친다.
+      \item 나뉜 bucket은 보조정리~\ref{lem:label}의 최솟값을 그대로 더한다.
+    \end{itemize}
+\end{itemize}
+\end{proof}
+\begin{remark}[인증의 크기]
+mini-stud(정보집합 51,114개, $\sum_I\Delta_I=566{,}366$, $N_A=142{,}428$, $\delta=0.05$)에 넣어 보았다. $t=4.1\times10^7$, $\abs W=5.35\times10^5$에서 표본 오차 항 $6\sum_I\varepsilon_I/\abs W$는 약 $7.7\times10^5$다. 실제 NashConv(약 1)에 비해 매우 느슨하다.
+원인은 모든 정보집합에 대한 합과 최악의 경우의 Azuma 상한이다. 실용적인 인증에는 분산을 쓰는 상한(Freedman형)이나 표본을 나눈 직접 추정이 필요하다.
+\end{remark}
+
+\subsection{보조정리~\ref{lem:slack} (여유 라벨 집합)}
+\begin{proof}
+$\max_{\ell'}\hat x_I(\ell')\le\psi(x_I)+\eta_I$이다. 참 최대 라벨 $\ell^*$에 대해서는 $\hat x_I(\ell^*)\ge\psi(x_I)-\eta_I$다.
+\begin{itemize}
+  \item \textbf{(i)} $\ell$이 참 최대 라벨이면 $\hat x_I(\ell)\ge\psi(x_I)-\eta_I\ge\max\hat x_I-2\eta_I$다.
+  \item \textbf{(ii)} $\ell\in\hat M(I)$이면 $x_I(\ell)\ge\hat x_I(\ell)-\eta_I\ge\max\hat x_I-3\eta_I\ge\psi(x_I)-4\eta_I$다.
+  \item \textbf{(iii)}은 (i)에서, (iv)는 (ii)와 보조정리~\ref{lem:label}에서, (v)는 (ii)에서 나온다.
+\end{itemize}
+\end{proof}
+
+\subsection{보조정리~\ref{lem:replay}과 정리~\ref{thm:replay} (재생 라벨)}
+\begin{proof}\mbox{}
+\begin{itemize}
+  \item \textbf{보조정리~\ref{lem:replay}.}
+    \begin{itemize}
+      \item 학습 궤적 전체를 조건으로 두면 $\tau_{k,j}$들은 독립이고 균등하다. 그래서 $X_j=L_kr^{\sigma_{\tau_{k,j}}}(I,a)$는 평균이 $R_I^{(k)}(a)$이고 $\abs{X_j}\le L_k\Delta_I$인 독립 표본이다.
+      \item Hoeffding 부등식으로 다음을 얻는다.
+        \[
+        \Pr(\abs{\hat R-R}>\eta)\le2\exp\!\big(-K_k\eta^2/(2L_k^2\Delta_I^2)\big)=6\delta/(\pi^2N_A(k+1)^2)
+        \]
+      \item $(I,a)$와 $k$에 대해 합집합 상계를 쓴다.
+      \item 구간 끝을 미리 모르면 저수지 표집으로 비복원 균등 추출을 한다. Hoeffding 부등식은 비복원 추출에도 성립한다~\citep{hoeffding1963probability}.
+    \end{itemize}
+  \item \textbf{정리~\ref{thm:replay}.}
+    \begin{itemize}
+      \item 보조정리~\ref{lem:decomp}로 나누고, $C$ 항은 정리~\ref{thm:epoch}과 같이 묶는다.
+      \item 분할이 없었으므로 모든 bucket이 여유 라벨로 일치했다. 보조정리~\ref{lem:slack}(iv)와 보조정리~\ref{lem:replay}로 $H^{(k)}\le4\sum_I\eta_I^{(k)}$다.
+      \item (i)은 보조정리~\ref{lem:slack}(iii)이다.
+    \end{itemize}
+\end{itemize}
+\end{proof}
+
+\subsection{정리~\ref{thm:avgdir} (평균 전략 방향의 분해)}
+\begin{proof}
+완전 기억이면 $v^\sigma(I,a)=\sum_{z\sqsupseteq Ia}\pi^\sigma_{-p}(z)\,\pi_p^\sigma(Ia\to z)\,u_p(z)$다.
+\begin{enumerate}
+  \item 곱의 평균은 평균의 곱에 공분산을 더한 것이다.
+    \[
+    \frac1T\sum_tv^{\sigma_t}(I,a)=\frac1T\sum_t\sum_zy_tw_tu=\sum_z\bar y\,\bar w\,u+K_T
+    \]
+  \item 상대의 평균은 실현 계획의 평균이고~\citep{vonstengel1996efficient} 우연은 고정이므로 $\pi^{\bar\sigma}_{-p}(z)=\bar y(z)$다.
+  \item 같은 논증을 $Ia$ 아래 부분 트리에 쓰면, $Ia$ 조건부 평균에서 $\pi_p(Ia\to z)=\bar w^{Ia}(z)$다.
+  \item 따라서 1의 첫 항은 $v^{\hat\sigma_{Ia}}(I,a)=v^{\bar\sigma}(I,a)+\Omega_T(I,a)$다.
+  \item $\sum_tr^{\sigma_t}(I,a)=\sum_tv^{\sigma_t}(I,a)-\sum_t\langle\sigma_t(I),v^{\sigma_t}(I)\rangle$에 4를 넣고 $T\,r^{\bar\sigma}(I,a)$를 빼면 식이 된다.
+\end{enumerate}
+\end{proof}
+\begin{itemize}
+  \item $I$ 아래에 $p$의 결정이 없으면 $w\equiv1$이므로 $\Omega=K=0$이다. 이때 두 방향의 행동 순위는 같다.
+  \item 자기 후속 전략이 $t$에 무관하면 역시 $\Omega=K=0$이다.
+  \item $\abs{K_T}$는 상대 실현 계획의 변동과 자기 후속 전략의 변동의 곱으로 묶인다. 다만 CFR 반복이 진동할 수 있으므로 0으로 간다는 보장은 없다.
+\end{itemize}

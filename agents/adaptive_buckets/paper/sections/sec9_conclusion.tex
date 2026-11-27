@@ -1,0 +1,19 @@
+\section{결론}\label{sec:conclusion}
+
+이 논문은 표본만으로 정보 추상화를 세분하는 순수 ASWISS를 제안했다.
+\begin{itemize}
+  \item \textbf{방법.}
+    \begin{itemize}
+      \item 게임 구조만으로 만든 시작 분할에서 외부 샘플링 MCCFR로 bucket 전략을 학습한다.
+      \item 반복 전략들의 누적 반사실적 후회로 라벨을 붙이고, 라벨이 갈린 bucket을 나눈다.
+      \item 정보집합의 bucket은 분할 계보로 정한다.
+    \end{itemize}
+  \item \textbf{이론.}
+    \begin{itemize}
+      \item 숨은 후회가 공통 라벨을 강요하는 최소 비용과 같다는 라벨 항등식을 보였다.
+      \item 이 항등식으로 분할의 유한성과 마지막 분할 이후 원 게임 NashConv의 수렴을 증명했다.
+      \item 저장한 반복 전략 일부로 라벨을 재생해도 같은 꼴의 보장이 있음을 보였다.
+    \end{itemize}
+  \item \textbf{실험.} 작은 게임에서 이 규칙은 같은 반복의 CFR+IRA와 고정 추상화보다 낮은 exploitability에 도달했다.
+  \item \textbf{남은 문제.} 정보집합별 표 없이 계보를 따르는 비용과 마지막 분할 시점의 상한이다. 앞의 것은 관측 분할과 전략 분할을 나누는 파생 기법으로 줄였지만, 그 기법의 보장은 아직 순수판만큼 정리되지 않았다.
+\end{itemize}

@@ -1,0 +1,22 @@
+\section{재현}\label{app:repro}
+모든 경로는 저장소 \texttt{agents/adaptive\_buckets/} 아래다.
+\begin{table}[h]
+\centering\small
+\begin{tabular}{@{}p{0.36\linewidth}p{0.58\linewidth}@{}}
+\toprule
+내용 & 위치 \\
+\midrule
+5절의 증명과 수치 확인 & \texttt{ASWISS\_CONVERGENCE\_KO.md}, \texttt{test\_aswiss\_convergence.py} \\
+정리~\ref{thm:avgdir}의 수치 확인 & \texttt{test\_avg\_direction.py} \\
+순수 ASWISS 학습기 & \texttt{aswiss/pure\_aswiss.cpp} (\texttt{--route-impl lazy|table}, \texttt{--memo}) \\
+추적판과 원안의 전이 실험 & \texttt{aswiss/aswiss.cpp}, 결과 \texttt{aswiss/compare/README\_KO.md} \\
+CFR+IRA 구현과 전체 순회 비교 & \texttt{aswiss/compare/refine.cpp}, \texttt{run\_compare.sh} \\
+같은 시간 비교(MMD, ESCHER 포함) & \texttt{aswiss/compare/run\_walltime.sh} \\
+정확한 평가 & \texttt{aswiss/eval.py} \\
+mini-stud 트리와 시작 분할 & \texttt{aswiss/export.py}, \texttt{environments/mini\_stud/game.py} \\
+관측·전략 이중 구조의 장기 실행 & \texttt{PP\_STUD7\_DESIGN\_KO.md} 22.12–22.13절, \texttt{aswiss/pp\_aswiss.cpp} \\
+1단 행렬 게임 실험 & \texttt{ASWISS\_PROOF\_OUTLINE\_KO.md}, \texttt{aswiss/proof\_experiments/} \\
+세븐 포커 비교 & \texttt{aswiss/stud7/README\_KO.md}의 \texttt{runs\_fair} \\
+\bottomrule
+\end{tabular}
+\end{table}

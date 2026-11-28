@@ -18,6 +18,7 @@
 | 정리 | ASWISS에서 쓰는 자리 | 결론 | 상태 |
 |---|---|---|---|
 | **Brouwer** (Nash의 사상) | 어떤 분할이든 bucket 반사실 후회가 모두 0인 bucket 프로필이 있는가 | **있다.** 불완전 기억과 absent-mindedness가 있어도 된다(명제 1) | [증명] |
+| Blackwell (접근 가능성, RM)로 대신하기 | 명제 1과 정리 3에 Brouwer가 꼭 필요한가 | 명제 1은 대신할 수 없다. 정수 보수 게임에서도 명제 1의 점이 무리수뿐일 수 있다. 정리 3은 비례 도달 가정 아래 평균 전략판이 있다(1.1절) | [증명] |
 | **Lebesgue 수 보조정리** (또는 Lipschitz) | 특징 공간에서 칸의 지름을 얼마나 작게 하면 모든 칸이 라벨 일치(숨은 후회 ≤ ε)가 되는가 | 프로필 전체에 걸쳐 균일한 칸 크기 $\delta(\varepsilon)$가 있다(명제 2) | [증명] |
 | Brouwer + Lebesgue + 라벨 항등식 | 작은 ε-추상화가 존재하는가, 몇 개의 bucket이면 되는가 | $\NC\le2L\delta(\lvert\Sigma_1\rvert+\lvert\Sigma_2\rvert)$인 bucket 프로필이 덮개 수만큼의 bucket으로 존재한다(정리 3) | [증명] (가정이 강함) |
 | Poincaré–Miranda, 정육면체 Sperner 보조정리 | 관측 분할의 문턱값 찾기, 라벨이 만나는 점의 존재 | 여러 특징의 문턱을 동시에 찾는 다차원 이분법, 분할 수의 하한 근거 | [스케치] |
@@ -64,6 +65,78 @@ $$r^{\sigma^\star}(B,a)\le0\qquad\text{모든 bucket }B,\ \text{모든 행동 }a
   원 게임에서의 오차가 정확히 숨은 후회만으로 묶인다.
 - **이전 노트와의 관계.** `ASWISS_CONVERGENCE_KO.md`의 정리 B3는 "경로 분리 가정 아래 ε = 0인 전략이 항상 존재한다"고 적었다. 명제 1은 같은 종류의 존재를 경로 분리 없이 준다. B3 쪽 문장은 이것으로 바꿀 수 있다.
 - **같은 진술이 이미 있는가.** 같은 진술이 문헌에 있는지는 확인하지 않았다.
+
+### 1.1 Blackwell 정리로 대신할 수 있는가 (2026-11-28)
+
+사용자 질문: "Brouwer는 사실 Blackwell 정리로도 되는 결과 아닌가?"
+
+**답: 명제 1은 안 된다. 수렴 정리들은 이미 Blackwell 쪽이다. 정리 3은 가정을 하나 더 두면 Blackwell판이 있다.**
+
+**Blackwell이 주는 것.**
+- Blackwell 접근 가능성 정리의 증명은 분리 초평면(= minimax, LP 쌍대)과 평균 논증뿐이다. 후회 매칭(RM)은 이 정리를 후회 벡터에 쓴 것이다(Hart & Mas-Colell 2000).
+- 결론은 **시간 평균**에 대한 것이다. 반복 $t=1..T$의 후회 평균 $\frac1T\sum_tr^{\sigma^t}(B,a)$가 0 이하로 간다.
+- 그래서 Blackwell(또는 LP)로 존재를 보일 수 있는 대상은 평균이나 결합 분포 꼴이다.
+  - 상관균형의 존재: LP 쌍대로 증명된다(Hart & Schmeidler 1989).
+  - 2인 제로섬 완전 기억 게임의 균형: 수열형에서 보수가 쌍선형이라 평균 전략 쌍이 ε-균형이 된다. 그 극한으로 균형의 존재가 나온다(minimax).
+- 우리 정리 1, 정리 A, 대기 조건판의 ε 인증은 모두 이 경로다. 출력은 반복들의 혼합(구간 균등 혼합, 평균 전략)이다. 명제 1에 기대지 않는다.
+
+**명제 1이 요구하는 것.**
+- 명제 1은 bucket 표 **하나** $\sigma^\star$에서 $r^{\sigma^\star}(B,a)\le0$을 요구한다.
+- 평균으로 이것을 얻으려면 "평균 프로필의 후회 = 후회의 평균"이어야 한다. 즉 $r^\sigma(B,a)$가 $\sigma$에 대해 선형이어야 한다.
+- 불완전 기억 분할에서는 선형이 아니다.
+  - 같은 플레이어의 여러 bucket 확률이 한 경로에서 곱해진다.
+  - absent-mindedness가 있으면 같은 bucket 확률이 한 경로에 여러 번 곱해진다.
+
+**막히는 예: 정수 보수인데 명제 1의 점이 무리수뿐이다 [증명, 수치 확인].**
+- 1인 게임(상대는 보수 0인 허수아비로 두면 2인 제로섬)에서 교차로 세 개 $h_1,h_2,h_3$을 한 bucket으로 묶는다. 원 게임은 완전 기억이고, 묶은 뒤 absent-minded가 된다.
+  - 각 교차로에서 계속(C, 확률 $p$) 또는 나감(E)을 고른다.
+  - 나갈 때의 보수: $h_1$에서 0, $h_2$에서 4, $h_3$에서 0. 셋 다 지나면 1.
+- 상대·우연 도달확률은 모든 노드에서 1이다. 계산하면 다음과 같다.
+  $$r(B,C)=(1-p)\,S(p),\qquad r(B,E)=-p\,S(p),\qquad S(p)=p^2-3p+1.$$
+  - 직교성 $p\,r(B,C)+(1-p)\,r(B,E)=0$도 성립한다.
+  - $p=0$이면 $r(B,C)=1>0$, $p=1$이면 $r(B,E)=1>0$이다. 그래서 명제 1의 점은 $S(p)=0$인 내부 점뿐이다.
+  - 따라서 유일한 점은 $p^\star=(3-\sqrt5)/2\approx0.382$이다. 무리수다.
+- 이 예가 말하는 것.
+  - minimax, LP 쌍대, 분리 초평면 논증은 유리수 같은 임의의 순서체에서 그대로 성립한다. 그래서 그것만으로는 이 점의 존재를 낼 수 없다. 실수의 완비성을 쓰는 단계가 있어야 한다. 여기서는 중간값 정리(1차원 Brouwer)다.
+  - 이 점은 기대 보상의 최대점도 아니다. $u(p)=4p-4p^2+p^3$의 최대점은 $p=2/3$($u=32/27$)이다. $p^\star$에서는 $u=1$이다. 최적화(최대점의 존재와 KKT)로도 명제 1이 나오지 않는다.
+    - 이유: $\partial u/\partial\sigma(B,a)=\sum_{h\in B}\pi_i(h)\pi_{-i}(h)v(h,a)$는 자기 도달확률 $\pi_i(h)$로 가중한다. 반사실 후회는 그 가중이 없다.
+    - 완전 기억이면 정보집합 안에서 $\pi_i(h)$가 같아서 둘이 비례한다. 불완전 기억 bucket에서는 다르다.
+- 일반합으로 넓히면 명제 1에는 $n$인 내쉬 정리가 특수한 경우로 들어 있다.
+  - 정규형 게임을 플레이어마다 정보집합 하나인 전개형으로 쓰고 항등 분할을 쓴다. 그러면 $r^\sigma(I,a)=u_i(a,\sigma_{-i})-u_i(\sigma)$이고, 명제 1이 곧 내쉬 균형이다.
+  - 3인 정수 보수 게임에는 유일한 균형이 무리수 확률뿐인 예가 있다(Bubelis 1979; 보수 {0,1,2}의 예는 arXiv:2507.09422).
+  - 결합되지 않은 동역학(각자 자기 보수만 보고 움직이는 것. 후회 기반 동역학 포함)은 일반적으로 내쉬 균형으로 가지 않는다(Hart & Mas-Colell 2003).
+- 거꾸로 "내쉬 존재 ⇒ Brouwer(Kakutani)"는 McLennan과 Tourky의 모방 게임 논문으로 알려져 있다. 다만 이번에는 그 원문을 확인하지 못했다. 확인한 것은 "Imitation games and computation"(2인 게임을 모방 게임으로 바꾸면 균형이 일대일로 대응한다)뿐이다. [문헌, 미확인]
+
+**정리 3의 Blackwell판 [증명; 비례 도달 가정].**
+- 정리 3을 bucket 표 하나 대신 bucket CFR 반복들의 평균 전략 $\bar\sigma$에 대해 세울 수 있는지 본다.
+- 경로는 다음과 같다.
+  1. 원 게임 $G$는 완전 기억이다. folk theorem과 후회 분해로 $T\cdot\mathrm{NashConv}(\bar\sigma)\le\rho^T+\sum_BH_B^T$다. $\rho^T$는 bucket 누적 후회의 양수부 합이고, $H_B^T$는 누적 후회 벡터의 숨은 후회다.
+  2. $\rho^T=O(\sqrt T)$는 bucket RM(Blackwell)으로 나온다.
+  3. 남는 것은 $H_B^T$다.
+- **문제: 숨은 후회는 시간에 대해 부분가법이 아니다.**
+  - 반례: 멤버 $I_1,I_2$, 행동 하나와 "없음". $t=1$에 후회 $(2,0)$, $t=2$에 $(0,-2)$이다.
+  - 각 시점의 숨은 후회는 0이다. 누적 $(2,-2)$의 숨은 후회는 2다.
+  - 이 무늬는 두 멤버의 조건부 이점이 매 시점 같아도($\hat g_t(I_1)=\hat g_t(I_2)=\pm1$) 도달확률만 $(2,0)$, $(0,2)$로 엇갈리면 생긴다.
+  - 되풀이하면 분해식의 상한이 $T$에 비례해 커진다. 이것은 상한의 반례이고, 실제 NashConv의 반례는 아니다.
+  - 그래서 명제 2(a)를 프로필마다 쓰는 것만으로는 부족하다.
+- **비례 도달 가정.** 같은 칸의 멤버마다 $\pi^{\sigma^t}_{-i}(I)=c_I\,w_t$라 하자(멤버 상수 × 시점 공통 인자).
+  - 그러면 $R^T(I,\cdot)=c_I\sum_tw_t\hat g_t(I,\cdot)$이다. 정규화하면 $w$-가중 평균 $\hat G(I)=\sum_tw_t\hat g_t(I)/\sum_tw_t$이고, 이것도 $L$-Lipschitz다.
+  - 명제 2(a)의 논증을 그대로 쓰면 $H_B^T\le2L\delta\sum_{I\in B}\sum_t\pi^t_{-i}(I)$다.
+  - 정리 3의 4단계로 다음을 얻는다.
+    $$\mathrm{NashConv}_G(\bar\sigma)\le\frac{\rho^T}{T}+2L\delta\big(\lvert\Sigma_1\rvert+\lvert\Sigma_2\rvert\big)\ \xrightarrow{T\to\infty}\ 2L\delta\big(\lvert\Sigma_1\rvert+\lvert\Sigma_2\rvert\big).$$
+  - 이 판은 구성적이다(bucket CFR의 평균 전략). 출력은 반복들의 혼합이고, bucket 표 하나가 아니다.
+- **가정이 맞는 경우.** 같은 공개 이력을 공유하는 멤버끼리, 사적 카드가 독립(카드 제거 효과 없음)이면 정확히 맞는다.
+  - $\pi_{-i}(I)=\pi_c(\text{내 패})\times\sum_o\pi_c(o)\,\pi^t_{\text{상대}}(\text{공개 행동}\mid o)$로 갈라지기 때문이다.
+  - mini-stud와 세븐 포커에서는 카드 제거 때문에 근사로만 맞는다.
+  - 공개 이력이 다른 정보집합을 묶은 bucket에서는 상대 도달 인자가 이력마다 달라서 맞지 않는다.
+
+**정리.**
+
+| 결과 | 도구 | 무엇이 존재하거나 수렴하는가 | 구성적인가 |
+|---|---|---|---|
+| CFR, 정리 1·A, 대기 조건판 | Blackwell(RM) | 반복들의 혼합(평균 전략)의 ε 상한 | 예 |
+| 정리 3의 Blackwell판 | Blackwell + 비례 도달 가정 | 평균 전략의 $2L\delta(\lvert\Sigma_1\rvert+\lvert\Sigma_2\rvert)$ 상한 | 예 |
+| 명제 1, 정리 3 | Brouwer | bucket 표 하나(압축된 단일 정책) | 아니오(존재만) |
 
 ## 2. Lebesgue 수 보조정리: 프로필 전체에 균일한 칸 크기
 
@@ -200,22 +273,29 @@ ASWISS에서의 쓰임은 두 가지다.
 2. 정리 3을 논문 8절 후속 연구 1(초기 추상화)과 2(분할 개선)에 "추상화 크기의 기준"으로 넣는다. mini-stud에서 손패 특징에 대한 이점의 Lipschitz 상수를 실측해 가정이 맞는지 본다.
 3. Poincaré–Miranda 다차원 이분법을 관측 분할의 후보 생성으로 시험한다. 지금은 무작위 문턱을 쓴다.
 4. 분수 Helly판을 표본 판정의 증명(증명 개요의 L4)에 붙일 수 있는지 정리한다.
+5. 정리 3의 Blackwell판(1.1절)에서 비례 도달 가정이 mini-stud에서 얼마나 어긋나는지 잰다. 같은 bucket 멤버들의 $\pi^t_{-i}(I)/\sum_s\pi^s_{-i}(I)$ 시계열을 비교하면 된다.
 
 ## 참고 문헌
 
 - Aumann, R. J., Hart, S., & Perry, M. (1997). The absent-minded driver. *Games and Economic Behavior*, 20(1), 102–116.
+- Bubelis, V. (1979). On equilibria in finite games. *International Journal of Game Theory*, 8(2), 65–79.
 - Chen, X., Deng, X., & Teng, S.-H. (2009). Settling the complexity of computing two-player Nash equilibria. *Journal of the ACM*, 56(3).
 - Daskalakis, C., Goldberg, P. W., & Papadimitriou, C. H. (2009). The complexity of computing a Nash equilibrium. *SIAM Journal on Computing*, 39(1).
 - De Loera, J. A., Peterson, E., & Su, F. E. (2002). A polytopal generalization of Sperner's lemma. *Journal of Combinatorial Theory, Series A*, 100(1), 1–26.
 - Helly, E. (1923). Über Mengen konvexer Körper mit gemeinschaftlichen Punkten. *Jahresbericht der DMV*, 32.
 - Koller, D., & Megiddo, N. (1992). The complexity of two-person zero-sum games in extensive form. *Games and Economic Behavior*, 4(4).
+- Hart, S., & Mas-Colell, A. (2000). A simple adaptive procedure leading to correlated equilibrium. *Econometrica*, 68(5), 1127–1150.
+- Hart, S., & Mas-Colell, A. (2003). Uncoupled dynamics do not lead to Nash equilibrium. *American Economic Review*, 93(5), 1830–1836.
+- Hart, S., & Schmeidler, D. (1989). Existence of correlated equilibria. *Mathematics of Operations Research*, 14(1), 18–25.
 - Kulpa, W. (1997). The Poincaré–Miranda theorem. *The American Mathematical Monthly*, 104(6), 545–550.
 - Lambert, N. S., Marple, A., & Shoham, Y. (2019). On equilibria in games with imperfect recall. *Games and Economic Behavior*, 113, 164–185.
 - Lemke, C. E., & Howson, J. T. (1964). Equilibrium points of bimatrix games. *SIAM Journal on Applied Mathematics*, 12(2).
+- McLennan, A., & Tourky, R. Imitation games and computation. (ANU 연구 포털에서 제목과 초록만 확인)
 - Miranda, C. (1940). Un'osservazione su un teorema di Brouwer. *Bollettino dell'Unione Matematica Italiana*.
 - Nash, J. (1951). Non-cooperative games. *Annals of Mathematics*, 54(2), 286–295.
 - Piccione, M., & Rubinstein, A. (1997). On the interpretation of decision problems with imperfect recall. *Games and Economic Behavior*, 20(1), 3–24.
 - Scarf, H. (1967). The approximation of fixed points of a continuous mapping. *SIAM Journal on Applied Mathematics*, 15(5).
+- (무리수 균형 예) Nash Equilibria with Irradical Probabilities, arXiv:2507.09422. 보수 {0,1,2}인 3인 게임의 유일 균형이 무리수 확률뿐인 예(명제 3.1)와 Bubelis(1979)의 인용.
 - Wichardt, P. C. (2008). Existence of Nash equilibria in finite extensive form games with imperfect recall: A counterexample. *Games and Economic Behavior*, 63(1), 366–369.
 - Lebesgue 수 보조정리: 표준 위상수학 교재(예: Munkres, *Topology*, 2판, 보조정리 27.5).
 - (서지 정보 가운데 권호와 쪽은 원문으로 다시 확인할 것.)
